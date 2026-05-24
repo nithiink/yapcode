@@ -1,0 +1,13 @@
+# Direct dependencies, exact-pinned. Transitive deps are fully pinned (with
+# hashes) in requirements.lock — install from the lock, not this file:
+#   uv pip sync requirements.lock
+# Regenerate the lock after editing this file:
+#   uv pip compile requirements.txt -o requirements.lock --generate-hashes
+# Audit:
+#   uv run --with pip-audit python -m pip_audit -r requirements.lock
+claude-agent-sdk==0.2.87
+fastapi==0.136.1
+uvicorn==0.47.0
+httpx==0.28.1
+pydantic==2.13.4
+python-dotenv==1.2.2
