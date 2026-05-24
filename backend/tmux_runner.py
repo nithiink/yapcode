@@ -269,7 +269,26 @@ class TmuxClaudeRunner(ClaudeRunner):
         """
         options = s.pending.options if s.pending else []
         await self._wait_for_menu(s)
+        pane = await self._capture(s)
         c = (choice or "").strip().lower()
+
+        # Multi-select: options render as "[ ]" checkboxes and need an explicit
+        # Submit. Toggle each option named in the spoken answer (number key
+        # toggles), then move right to the Submit tab and confirm.
+        if "[ ]" in pane or "[✔]" in pane:
+            for i, o in enumerate(options):
+                if i < 9 and o.strip().lower() in c:
+                    await self._tmux("send-keys", "-t", s.pane, str(i + 1))
+                    await asyncio.sleep(0.25)
+            for _ in range(5):  # navigate right to the review/Submit screen
+                p = await self._capture(s)
+                if "Submit answers" in p or "Ready to submit" in p:
+                    break
+                await self._tmux("send-keys", "-t", s.pane, "Right")
+                await asyncio.sleep(0.4)
+            await self._tmux("send-keys", "-t", s.pane, "1")  # "Submit answers"
+            return
+
         idx = next(
             (i for i, o in enumerate(options)
              if o.strip().lower() == c or (c and c in o.strip().lower())),
