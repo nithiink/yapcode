@@ -16,11 +16,18 @@ SAFE_TOOLS: frozenset[str] = frozenset({
 # Always surface to the user as a choice (not a yes/no permission).
 QUESTION_TOOL = "AskUserQuestion"
 
+# MCP tool prefixes that are auto-approved (treated as safe). Claude-in-Chrome
+# browser control is confined to a browser, so navigate/click/fill run without a
+# spoken prompt each time (per product decision). Add more prefixes as needed.
+SAFE_MCP_PREFIXES: tuple[str, ...] = ("mcp__claude-in-chrome__",)
+
 
 def classify(tool_name: str) -> str:
     """Return one of: 'safe', 'question', 'risky'."""
     if tool_name == QUESTION_TOOL:
         return "question"
     if tool_name in SAFE_TOOLS:
+        return "safe"
+    if any(tool_name.startswith(p) for p in SAFE_MCP_PREFIXES):
         return "safe"
     return "risky"

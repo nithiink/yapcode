@@ -21,7 +21,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from session_manager import get_runner
+from session_manager import shutdown_all
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
 load_dotenv()
@@ -57,7 +57,7 @@ TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "600"))
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
-    await get_runner().shutdown()
+    await shutdown_all()
 
 
 app = FastAPI(title="Voice-Claude", lifespan=lifespan)

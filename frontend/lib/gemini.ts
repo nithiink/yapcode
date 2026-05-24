@@ -349,7 +349,10 @@ export class GeminiSession implements VoiceSession {
 
   private async runFunctionCall(fc: { id?: string; name: string; args?: any }) {
     const emit = this.opts.onEvent;
-    emit({ type: "tool_call", name: fc.name, arguments: fc.args });
+    const args = fc.args || {};
+    // The app, not the model, chooses the execution backend.
+    if (fc.name === "start_session" && this.opts.backend) args.backend = this.opts.backend;
+    emit({ type: "tool_call", name: fc.name, arguments: args });
 
     let result: unknown;
     let ok = true;
@@ -357,7 +360,7 @@ export class GeminiSession implements VoiceSession {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: fc.name, arguments: fc.args || {} }),
+        body: JSON.stringify({ name: fc.name, arguments: args }),
       });
       const out = await r.json();
       result = out.result ?? out;
@@ -366,7 +369,7 @@ export class GeminiSession implements VoiceSession {
       ok = false;
       result = { error: e?.message || String(e) };
     }
-    emit({ type: "tool_call", name: fc.name, arguments: fc.args, result, ok });
+    emit({ type: "tool_call", name: fc.name, arguments: args, result, ok });
 
     this.ws?.send(
       JSON.stringify({

@@ -43,12 +43,15 @@ export type RealtimeEvent =
 // (the backend picks azure vs openai from its env default).
 export type VoiceProvider = "openai" | "gemini";
 
+export type ClaudeBackend = "cli" | "sdk";
+
 export type RealtimeOptions = {
   provider?: string; // sent to /session; undefined => backend VOICE_PROVIDER default
   model?: string; // undefined => backend default for the provider
   voice?: string;
   instructions: string;
   costSaver?: boolean;
+  backend?: ClaudeBackend; // injected into start_session tool calls
   onEvent: (e: RealtimeEvent) => void;
   onRemoteStream?: (stream: MediaStream) => void; // drives the orb analyser
 };

@@ -1,19 +1,62 @@
-"""Process-wide Claude session registry + terminal-handoff helpers."""
+"""Process-wide Claude session registry + terminal-handoff helpers.
+
+Two execution backends share the same ClaudeRunner interface:
+  "cli" -> TmuxClaudeRunner (interactive CLI; Max subscription + --chrome)  [default]
+  "sdk" -> SDKClaudeRunner  (Claude Agent SDK)
+Each session handle is a uuid owned by one backend; `runner_for(handle)` routes
+later calls to the owning runner.
+"""
 from __future__ import annotations
 
 import os
 import shlex
 
 from claude_runner import ClaudeRunner, SDKClaudeRunner
+from tmux_runner import TmuxClaudeRunner
 
-_runner: ClaudeRunner | None = None
+_runners: dict[str, ClaudeRunner] = {}
+_owner: dict[str, str] = {}  # handle -> backend
 
 
-def get_runner() -> ClaudeRunner:
-    global _runner
-    if _runner is None:
-        _runner = SDKClaudeRunner()
-    return _runner
+def get_runner(backend: str = "cli") -> ClaudeRunner:
+    backend = (backend or "cli").lower()
+    if backend not in ("cli", "sdk"):
+        backend = "cli"
+    r = _runners.get(backend)
+    if r is None:
+        r = TmuxClaudeRunner() if backend == "cli" else SDKClaudeRunner()
+        _runners[backend] = r
+    return r
+
+
+def register_owner(handle: str, backend: str) -> None:
+    _owner[handle] = (backend or "cli").lower()
+
+
+def runner_for(handle: str) -> ClaudeRunner:
+    backend = _owner.get(handle)
+    if backend is not None:
+        return get_runner(backend)
+    # Fallback: locate the handle among already-instantiated backends.
+    for r in _runners.values():
+        if any(s["handle"] == handle for s in r.list()):
+            return r
+    raise KeyError(f"unknown session: {handle}")
+
+
+def list_all_sessions() -> list[dict]:
+    out: list[dict] = []
+    for backend, r in _runners.items():
+        for s in r.list():
+            out.append({**s, "backend": backend})
+    return out
+
+
+async def shutdown_all() -> None:
+    for r in _runners.values():
+        await r.shutdown()
+    _runners.clear()
+    _owner.clear()
 
 
 def _allowed_roots() -> list[str]:

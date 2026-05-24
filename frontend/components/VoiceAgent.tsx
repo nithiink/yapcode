@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
-import { RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
+import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
 
 type Turn = { role: "user" | "assistant"; text: string; final: boolean };
@@ -41,6 +41,11 @@ const PROVIDER_LABEL: Record<VoiceProvider, string> = {
   gemini: "Gemini",
 };
 
+const BACKEND_LABEL: Record<ClaudeBackend, string> = {
+  cli: "CLI",
+  sdk: "SDK",
+};
+
 const STATE_LABEL: Record<VoiceState, string> = {
   idle: "Offline",
   connecting: "Connecting",
@@ -53,6 +58,7 @@ const STATE_LABEL: Record<VoiceState, string> = {
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("openai");
+  const [backend, setBackend] = useState<ClaudeBackend>("cli");
   const [costSaver, setCostSaver] = useState(true);
   const [modelLabel, setModelLabel] = useState("");
   const [vstate, setVstate] = useState<VoiceState>("idle");
@@ -152,10 +158,15 @@ export default function VoiceAgent() {
     if (p === "openai" || p === "gemini") setProvider(p);
     const c = localStorage.getItem("vc_cost_saver");
     if (c != null) setCostSaver(c === "1");
+    const b = localStorage.getItem("vc_backend");
+    if (b === "cli" || b === "sdk") setBackend(b);
   }, []);
   useEffect(() => {
     localStorage.setItem("vc_provider", provider);
   }, [provider]);
+  useEffect(() => {
+    localStorage.setItem("vc_backend", backend);
+  }, [backend]);
   useEffect(() => {
     localStorage.setItem("vc_cost_saver", costSaver ? "1" : "0");
   }, [costSaver]);
@@ -252,6 +263,7 @@ export default function VoiceAgent() {
       ...params,
       instructions: INSTRUCTIONS,
       costSaver,
+      backend,
       onEvent,
       onRemoteStream: startAnalyser,
     };
@@ -304,7 +316,8 @@ export default function VoiceAgent() {
         </div>
         <div className="topmeta">
           {PROVIDER_LABEL[provider]}
-          {modelLabel ? ` · ${modelLabel}` : ""} · key server-side
+          {modelLabel ? ` · ${modelLabel}` : ""} · Claude {BACKEND_LABEL[backend]}
+          {backend === "cli" ? " (chrome)" : ""}
           {costSaver ? " · saver on" : ""}
           <br />
           Claude: <b className="cost">${totalCost.toFixed(4)}</b>
@@ -333,6 +346,19 @@ export default function VoiceAgent() {
                 onClick={() => setProvider(p)}
               >
                 {PROVIDER_LABEL[p]}
+              </button>
+            ))}
+          </div>
+          <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Claude backend">
+            {(["cli", "sdk"] as ClaudeBackend[]).map((b) => (
+              <button
+                key={b}
+                className={`segbtn ${backend === b ? "on" : ""}`}
+                disabled={connected}
+                onClick={() => setBackend(b)}
+                title={b === "cli" ? "Interactive CLI: Max subscription + Chrome" : "Claude Agent SDK"}
+              >
+                {BACKEND_LABEL[b]}
               </button>
             ))}
           </div>

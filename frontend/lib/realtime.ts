@@ -290,6 +290,8 @@ export class RealtimeSession implements VoiceSession {
     } catch {
       args = {};
     }
+    // The app, not the model, chooses the execution backend.
+    if (name === "start_session" && this.opts.backend) args.backend = this.opts.backend;
     this.opts.onEvent({ type: "tool_call", name, arguments: args });
 
     let result: unknown;

@@ -12,8 +12,11 @@ from typing import Any
 from session_manager import (
     get_runner,
     handoff_command,
+    list_all_sessions,
     list_projects,
+    register_owner,
     resolve_project_path,
+    runner_for,
 )
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -44,6 +47,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional Claude model: 'opus' (default, most capable) or 'sonnet' (cheaper).",
                     "enum": ["opus", "sonnet"],
+                },
+                "backend": {
+                    "type": "string",
+                    "description": "Execution backend (set by the app, not the user): 'cli' (interactive CLI) or 'sdk'.",
+                    "enum": ["cli", "sdk"],
                 },
             },
             "required": [],
@@ -114,46 +122,47 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 
 
 async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    runner = get_runner()
-
     if name == "list_projects":
         return list_projects()
 
     if name == "list_sessions":
-        return {"sessions": runner.list()}
+        return {"sessions": list_all_sessions()}
 
     if name == "start_session":
+        backend = args.get("backend") or "cli"
         path = resolve_project_path(args.get("project_path", ""))
+        runner = get_runner(backend)
         handle = await runner.start(path, args.get("model"))
-        return {"session_id": handle, "project_path": path,
+        register_owner(handle, backend)
+        return {"session_id": handle, "project_path": path, "backend": backend,
                 "message": f"Started a Claude session in {path}."}
 
     if name == "tell_claude":
         # Non-blocking: Claude turns can run for minutes. Kick it off in the
         # background and return immediately so the voice model stays responsive;
         # the frontend polls poll_session and narrates the result when ready.
-        runner.start_advance(args["session_id"], args["message"])
+        runner_for(args["session_id"]).start_advance(args["session_id"], args["message"])
         return {"status": "working", "session_id": args["session_id"]}
 
     if name == "answer_prompt":
-        runner.start_answer(args["session_id"], args["choice"])
+        runner_for(args["session_id"]).start_answer(args["session_id"], args["choice"])
         return {"status": "working", "session_id": args["session_id"]}
 
     if name == "poll_session":
         # App-level poll (not exposed to the voice model — not in TOOL_DEFINITIONS).
-        return runner.poll_status(args["session_id"])
+        return runner_for(args["session_id"]).poll_status(args["session_id"])
 
     if name == "interrupt_session":
-        await runner.interrupt(args["session_id"])
+        await runner_for(args["session_id"]).interrupt(args["session_id"])
         return {"status": "interrupted", "session_id": args["session_id"]}
 
     if name == "read_session":
-        text = await runner.read(args["session_id"])
+        text = await runner_for(args["session_id"]).read(args["session_id"])
         return {"session_id": args["session_id"], "text": text}
 
     if name == "get_handoff":
         sid = args["session_id"]
-        sess = next((s for s in runner.list() if s["handle"] == sid), None)
+        sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
         if not sess:
             raise KeyError(f"unknown session: {sid}")
         cmd = handoff_command(sess["cwd"], sess["session_id"])
