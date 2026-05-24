@@ -57,6 +57,9 @@ export interface VoiceSession {
   activeModel?: string; // actual model/deployment reported by the backend
   start(audioEl: HTMLAudioElement): Promise<void>;
   stop(): void;
+  // Inject an out-of-band update (e.g. a background Claude result) and prompt
+  // the model to speak about it, even mid-conversation.
+  injectUpdate(text: string): void;
 }
 
 // --- cost model -----------------------------------------------------------

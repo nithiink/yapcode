@@ -52,7 +52,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "tell_claude",
-        "description": "Send a message/instruction to a Claude session and run until Claude finishes OR needs a decision. Returns status: 'completed' (with Claude's reply), 'needs_permission' (Claude wants to use a risky tool — read the prompt aloud and call answer_prompt), 'needs_choice' (Claude is asking a question), or 'error'.",
+        "description": "Send a message/instruction to a Claude session. Returns immediately with status 'working' — Claude runs in the background, which can take minutes. Do NOT wait silently: give a brief spoken acknowledgement ('On it, I'll let you know') and stay available to chat. You will be told automatically when Claude finishes, asks a question, or needs permission — do not call this again to check progress.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -65,7 +65,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "answer_prompt",
-        "description": "Answer a pending permission or question prompt from Claude (after tell_claude returned needs_permission or needs_choice). For permissions pass 'allow' or 'deny'. For questions pass the chosen option text. Claude then continues until its next stop or completion.",
+        "description": "Answer a pending permission or question prompt from Claude (after you were told Claude needs permission or is asking a question). For permissions pass 'allow' or 'deny'. For questions pass the chosen option text. Returns 'working' immediately; Claude resumes in the background and you'll be told the result automatically.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -129,12 +129,19 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 "message": f"Started a Claude session in {path}."}
 
     if name == "tell_claude":
-        res = await runner.advance(args["session_id"], args["message"])
-        return res.to_dict()
+        # Non-blocking: Claude turns can run for minutes. Kick it off in the
+        # background and return immediately so the voice model stays responsive;
+        # the frontend polls poll_session and narrates the result when ready.
+        runner.start_advance(args["session_id"], args["message"])
+        return {"status": "working", "session_id": args["session_id"]}
 
     if name == "answer_prompt":
-        res = await runner.answer(args["session_id"], args["choice"])
-        return res.to_dict()
+        runner.start_answer(args["session_id"], args["choice"])
+        return {"status": "working", "session_id": args["session_id"]}
+
+    if name == "poll_session":
+        # App-level poll (not exposed to the voice model — not in TOOL_DEFINITIONS).
+        return runner.poll_status(args["session_id"])
 
     if name == "interrupt_session":
         await runner.interrupt(args["session_id"])

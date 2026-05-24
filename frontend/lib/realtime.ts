@@ -131,6 +131,15 @@ export class RealtimeSession implements VoiceSession {
     this.dc?.send(JSON.stringify(payload));
   }
 
+  injectUpdate(text: string): void {
+    if (!this.dc || this.dc.readyState !== "open") return;
+    this.send({
+      type: "conversation.item.create",
+      item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
+    });
+    this.send({ type: "response.create" });
+  }
+
   private configureSession() {
     const cost = !!this.opts.costSaver;
     // Tighter turn detection in cost mode: longer required silence + higher

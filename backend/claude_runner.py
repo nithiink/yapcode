@@ -80,6 +80,14 @@ class ClaudeRunner(ABC):
     async def advance(self, handle: str, message: str) -> AdvanceResult: ...
     @abstractmethod
     async def answer(self, handle: str, choice: str) -> AdvanceResult: ...
+    # Non-blocking variants: kick off advance/answer in the background so the
+    # voice model can keep talking while Claude works; the caller polls.
+    @abstractmethod
+    def start_advance(self, handle: str, message: str) -> None: ...
+    @abstractmethod
+    def start_answer(self, handle: str, choice: str) -> None: ...
+    @abstractmethod
+    def poll_status(self, handle: str) -> dict[str, Any]: ...
     @abstractmethod
     async def interrupt(self, handle: str) -> None: ...
     @abstractmethod
@@ -115,6 +123,8 @@ class SDKClaudeRunner(ClaudeRunner):
     def __init__(self, default_model: str | None = None):
         self._default_model = default_model or os.getenv("CLAUDE_MODEL", "opus")
         self._sessions: dict[str, _Session] = {}
+        # In-flight background advance/answer tasks, keyed by session handle.
+        self._bg: dict[str, asyncio.Task[AdvanceResult]] = {}
 
     # --- lifecycle --------------------------------------------------------
 
@@ -142,6 +152,10 @@ class SDKClaudeRunner(ClaudeRunner):
         return handle
 
     async def shutdown(self) -> None:
+        for t in self._bg.values():
+            if not t.done():
+                t.cancel()
+        self._bg.clear()
         for s in list(self._sessions.values()):
             try:
                 if s._consumer and not s._consumer.done():
@@ -181,8 +195,39 @@ class SDKClaudeRunner(ClaudeRunner):
             await s._stop.wait()
             return self._collect(s)
 
+    # --- non-blocking driving (background + poll) -------------------------
+
+    def start_advance(self, handle: str, message: str) -> None:
+        self._get(handle)  # validate handle
+        self._bg[handle] = asyncio.create_task(self.advance(handle, message))
+
+    def start_answer(self, handle: str, choice: str) -> None:
+        self._get(handle)
+        self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
+
+    def poll_status(self, handle: str) -> dict[str, Any]:
+        """Report the in-flight background turn for a session.
+
+        Returns {"status":"working"} while Claude runs, the full AdvanceResult
+        once it stops (completed/needs_permission/needs_choice/error), or
+        {"status":"idle"} when nothing is in flight."""
+        task = self._bg.get(handle)
+        sid = self._sessions[handle].session_id if handle in self._sessions else None
+        if task is None:
+            return {"status": "idle", "session_id": sid}
+        if not task.done():
+            return {"status": "working", "session_id": sid}
+        self._bg.pop(handle, None)
+        exc = task.exception()
+        if exc is not None:
+            return {"status": "error", "error": str(exc), "session_id": sid}
+        return task.result().to_dict()
+
     async def interrupt(self, handle: str) -> None:
         s = self._get(handle)
+        bg = self._bg.pop(handle, None)
+        if bg and not bg.done():
+            bg.cancel()
         if s._decision is not None and not s._decision.done():
             s._decision.set_result("deny")
         if s.client:

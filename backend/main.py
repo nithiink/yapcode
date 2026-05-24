@@ -141,18 +141,16 @@ def _mint_gemini_token(model: str) -> str:
 
     client = genai.Client(api_key=key, http_options={"api_version": "v1alpha"})
     now = datetime.datetime.now(datetime.timezone.utc)
+    # Intentionally NO live_connect_constraints: locking a config makes the
+    # constrained endpoint use the token's config and ignore the browser's full
+    # setup message — which is where our systemInstruction and tools live. The
+    # token is still single-use with a short window, so it's safe to let the
+    # client supply the session config.
     token = client.auth_tokens.create(
         config={
             "uses": 1,
             "expire_time": now + datetime.timedelta(minutes=30),
             "new_session_expire_time": now + datetime.timedelta(minutes=2),
-            "live_connect_constraints": {
-                "model": model,
-                "config": {
-                    "session_resumption": {},
-                    "response_modalities": ["AUDIO"],
-                },
-            },
             "http_options": {"api_version": "v1alpha"},
         }
     )

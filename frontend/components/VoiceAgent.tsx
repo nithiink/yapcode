@@ -69,10 +69,82 @@ export default function VoiceAgent() {
   const glowRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 
-  useEffect(() => () => stopAnalyser(), []);
+  useEffect(
+    () => () => {
+      stopAnalyser();
+      stopPolling();
+    },
+    [],
+  );
+
+  const stopPolling = (sessionId?: string) => {
+    if (sessionId) {
+      const t = pollTimers.current.get(sessionId);
+      if (t) clearInterval(t);
+      pollTimers.current.delete(sessionId);
+    } else {
+      pollTimers.current.forEach((t) => clearInterval(t));
+      pollTimers.current.clear();
+    }
+  };
+
+  // A background Claude turn reached a result — surface any prompt in the UI and
+  // tell the voice model to narrate it (works even mid-conversation).
+  const handleClaudeResult = (res: any) => {
+    if (!res || typeof res !== "object") return;
+    const sid = res.session_id;
+    if ((res.status === "needs_permission" || res.status === "needs_choice") && res.prompt) {
+      setPending({
+        sessionId: sid,
+        kind: res.prompt.kind,
+        text: res.prompt.text,
+        options: res.prompt.options || [],
+      });
+      const opts = (res.prompt.options || []).join(", ");
+      const msg =
+        res.prompt.kind === "choice"
+          ? `[Claude update] Claude is asking: ${res.prompt.text}${opts ? ` Options: ${opts}.` : ""} Read this to the user and get their choice.`
+          : `[Claude update] Claude needs permission to ${res.prompt.text}. Ask the user to approve or deny.`;
+      sessionRef.current?.injectUpdate(msg);
+    } else if (res.status === "completed") {
+      setPending(null);
+      const txt = (res.assistant_text || "").trim();
+      sessionRef.current?.injectUpdate(
+        `[Claude update] Claude finished. ${txt ? `It said: ${txt}` : "Done."} Summarize this briefly for the user.`,
+      );
+    } else if (res.status === "error") {
+      setPending(null);
+      sessionRef.current?.injectUpdate(
+        `[Claude update] Claude hit an error: ${res.error || "unknown"}. Tell the user.`,
+      );
+    }
+    refreshSessions();
+  };
+
+  const pollSession = (sessionId: string) => {
+    if (!sessionId || pollTimers.current.has(sessionId)) return;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch("/api/tools/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "poll_session", arguments: { session_id: sessionId } }),
+        });
+        const data = await r.json();
+        const res = data?.result;
+        if (!res || res.status === "working") return; // keep polling
+        stopPolling(sessionId);
+        if (res.status !== "idle") handleClaudeResult(res);
+      } catch {
+        /* transient; keep polling */
+      }
+    }, 1500);
+    pollTimers.current.set(sessionId, timer);
+  };
 
   // Restore toggle prefs.
   useEffect(() => {
@@ -158,18 +230,15 @@ export default function VoiceAgent() {
     } else if (e.type === "tool_call" && e.result !== undefined) {
       setTools((prev) => [...prev, { name: e.name, ok: e.ok }].slice(-20));
       const res: any = e.result;
-      if (res && typeof res === "object") {
-        if ((res.status === "needs_permission" || res.status === "needs_choice") && res.prompt) {
-          setPending({
-            sessionId: res.session_id,
-            kind: res.prompt.kind,
-            text: res.prompt.text,
-            options: res.prompt.options || [],
-          });
-        } else if (res.status === "completed" || res.status === "error") {
-          setPending(null);
-        }
+      // tell_claude/answer_prompt now return "working" — poll for the real result.
+      if (
+        (e.name === "tell_claude" || e.name === "answer_prompt") &&
+        res?.status === "working" &&
+        res.session_id
+      ) {
+        pollSession(res.session_id);
       }
+      if (e.name === "interrupt_session") stopPolling(res?.session_id);
       if (["start_session", "tell_claude", "answer_prompt", "interrupt_session"].includes(e.name)) {
         refreshSessions();
       }
@@ -204,6 +273,7 @@ export default function VoiceAgent() {
     sessionRef.current?.stop();
     sessionRef.current = null;
     stopAnalyser();
+    stopPolling();
     setConnected(false);
     setVstate("idle");
     setPending(null);
@@ -222,6 +292,7 @@ export default function VoiceAgent() {
         arguments: { session_id: p.sessionId, choice },
       }),
     });
+    pollSession(p.sessionId); // Claude resumes in the background; narrate the result
     refreshSessions();
   };
 

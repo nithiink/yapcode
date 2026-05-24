@@ -72,16 +72,43 @@ function b64decode(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-// OpenAI-style tool defs -> Gemini functionDeclarations.
+// Gemini's setup is parsed as protobuf-JSON, where Schema.type is an uppercase
+// enum (OBJECT/STRING/...). Our backend emits lowercase JSON-Schema, so convert
+// recursively and drop keywords Gemini's Schema subset doesn't accept.
+const GEMINI_TYPE: Record<string, string> = {
+  object: "OBJECT", string: "STRING", number: "NUMBER",
+  integer: "INTEGER", boolean: "BOOLEAN", array: "ARRAY",
+};
+
+function convertSchema(s: any): any {
+  if (!s || typeof s !== "object") return s;
+  const out: any = {};
+  if (s.type) out.type = GEMINI_TYPE[String(s.type).toLowerCase()] || String(s.type).toUpperCase();
+  if (s.description) out.description = s.description;
+  if (Array.isArray(s.enum)) out.enum = s.enum;
+  if (s.properties && typeof s.properties === "object") {
+    out.properties = {};
+    for (const k of Object.keys(s.properties)) out.properties[k] = convertSchema(s.properties[k]);
+  }
+  if (Array.isArray(s.required) && s.required.length) out.required = s.required;
+  if (s.items) out.items = convertSchema(s.items);
+  return out;
+}
+
+// OpenAI-style tool defs -> Gemini functionDeclarations. No-arg tools omit
+// `parameters` entirely — Gemini rejects an OBJECT schema with empty properties.
 function toGeminiTools(tools: ToolDef[]): unknown[] {
   if (!tools.length) return [];
   return [
     {
-      functionDeclarations: tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters,
-      })),
+      functionDeclarations: tools.map((t) => {
+        const decl: Record<string, unknown> = { name: t.name, description: t.description };
+        const params = t.parameters as any;
+        if (params?.properties && Object.keys(params.properties).length > 0) {
+          decl.parameters = convertSchema(params);
+        }
+        return decl;
+      }),
     },
   ];
 }
@@ -190,6 +217,9 @@ export class GeminiSession implements VoiceSession {
     this.worklet.connect(sink).connect(this.inCtx.destination);
 
     this.outCtx = new AudioContext({ sampleRate: OUTPUT_RATE });
+    // Browsers may start the context suspended until a user gesture; connect()
+    // runs from the click handler, so resume is allowed here.
+    await this.outCtx.resume().catch(() => undefined);
     this.playDest = this.outCtx.createMediaStreamDestination();
     // Tap playback into a MediaStream so the orb analyser reacts to the voice.
     this.opts.onRemoteStream?.(this.playDest.stream);
@@ -202,6 +232,19 @@ export class GeminiSession implements VoiceSession {
       JSON.stringify({
         realtimeInput: {
           audio: { data: b64encode(data.pcm), mimeType: `audio/pcm;rate=${INPUT_RATE}` },
+        },
+      }),
+    );
+  }
+
+  injectUpdate(text: string): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    // A complete user turn nudges the model to respond about the update.
+    this.ws.send(
+      JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [{ text }] }],
+          turnComplete: true,
         },
       }),
     );
@@ -224,6 +267,8 @@ export class GeminiSession implements VoiceSession {
       outputAudioTranscription: {},
       sessionResumption: {},
     };
+    const fnCount = (toGeminiTools(this.tools)[0] as any)?.functionDeclarations?.length || 0;
+    console.log(`[gemini] setup model=${setup.model} tools=${fnCount} costSaver=${cost}`);
     this.ws?.send(JSON.stringify({ setup }));
     this.opts.onEvent({ type: "status", status: "Setting up..." });
   }
@@ -289,7 +334,17 @@ export class GeminiSession implements VoiceSession {
       for (const fc of msg.toolCall.functionCalls) await this.runFunctionCall(fc);
     }
 
+    if (msg.toolCallCancellation) {
+      console.log("[gemini] toolCallCancellation", msg.toolCallCancellation.ids);
+    }
+
     if (msg.usageMetadata) this.accumulateUsage(msg.usageMetadata);
+
+    // Surface anything unexpected (error frames, goAway, etc.) for debugging.
+    if (!msg.setupComplete && !msg.serverContent && !msg.toolCall && !msg.usageMetadata) {
+      console.log("[gemini] message:", Object.keys(msg), msg);
+      if (msg.error) emit({ type: "error", message: msg.error.message || JSON.stringify(msg.error) });
+    }
   }
 
   private async runFunctionCall(fc: { id?: string; name: string; args?: any }) {
@@ -332,7 +387,8 @@ export class GeminiSession implements VoiceSession {
     buf.copyToChannel(f32, 0);
     const node = this.outCtx.createBufferSource();
     node.buffer = buf;
-    node.connect(this.playDest);
+    node.connect(this.outCtx.destination); // speakers
+    node.connect(this.playDest); // orb analyser tap
     const now = this.outCtx.currentTime;
     const startAt = Math.max(now, this.playCursor);
     node.start(startAt);
