@@ -96,6 +96,19 @@ body {
 .switch.on .knob::after { transform: translateX(14px); }
 .switch:disabled { cursor: default; }
 
+.bk { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+.txtoggle { margin-left: auto; background: transparent; border: 1px solid var(--border); color: var(--muted); font: inherit; font-size: 11px; padding: 2px 9px; border-radius: 999px; cursor: pointer; }
+.txtoggle:hover { color: var(--text); border-color: var(--dim); }
+.transcript { margin: 8px 0; padding: 8px; background: #0a0d14; border: 1px solid var(--border); border-radius: 8px; max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.tx { font-size: 12px; line-height: 1.45; }
+.tx .who { display: inline-block; font-family: var(--mono); font-size: 10px; color: var(--muted); margin-right: 6px; }
+.tx.user { color: var(--text); }
+.tx.assistant { color: #c9d4e6; }
+.tx.tool { font-family: var(--mono); font-size: 11px; color: var(--warn); }
+.tx.tool .tag { color: var(--text); }
+.tx.result { font-family: var(--mono); font-size: 11px; color: var(--dim); padding-left: 10px; white-space: pre-wrap; }
+.tx.result.err { color: var(--danger); }
+
 .controls { display: flex; gap: 12px; align-items: center; }
 .talk {
   border: none; cursor: pointer; font: inherit; font-weight: 650;

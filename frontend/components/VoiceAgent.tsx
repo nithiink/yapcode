@@ -15,8 +15,14 @@ type Sess = {
   model: string;
   status: string;
   cost_usd?: number;
+  backend?: string;
 };
 type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
+type TxEvent =
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool"; name: string; summary: string; risky: boolean }
+  | { kind: "tool_result"; ok: boolean; text: string };
 
 // Per-provider connection params. For OpenAI, cost-saver is applied via session
 // config (brevity/cap/pruning) rather than a different model; for Gemini it also
@@ -68,6 +74,8 @@ export default function VoiceAgent() {
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [pending, setPending] = useState<Pending>(null);
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
+  const [openSession, setOpenSession] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TxEvent[]>([]);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -76,6 +84,7 @@ export default function VoiceAgent() {
   const rafRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 
@@ -83,9 +92,40 @@ export default function VoiceAgent() {
     () => () => {
       stopAnalyser();
       stopPolling();
+      if (txPollRef.current) clearInterval(txPollRef.current);
     },
     [],
   );
+
+  const fetchTranscript = async (handle: string) => {
+    try {
+      const r = await fetch("/api/tools/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "read_transcript", arguments: { session_id: handle } }),
+      });
+      const d = await r.json();
+      setTranscript(d?.result?.events || []);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const toggleTranscript = (handle: string) => {
+    if (txPollRef.current) {
+      clearInterval(txPollRef.current);
+      txPollRef.current = null;
+    }
+    if (openSession === handle) {
+      setOpenSession(null);
+      setTranscript([]);
+      return;
+    }
+    setOpenSession(handle);
+    setTranscript([]);
+    fetchTranscript(handle);
+    txPollRef.current = setInterval(() => fetchTranscript(handle), 2500);
+  };
 
   const stopPolling = (sessionId?: string) => {
     if (sessionId) {
@@ -286,6 +326,10 @@ export default function VoiceAgent() {
     sessionRef.current = null;
     stopAnalyser();
     stopPolling();
+    if (txPollRef.current) {
+      clearInterval(txPollRef.current);
+      txPollRef.current = null;
+    }
     setConnected(false);
     setVstate("idle");
     setPending(null);
@@ -454,15 +498,45 @@ export default function VoiceAgent() {
             {sessions.length === 0 && <div className="empty">No active sessions.</div>}
             {sessions.map((s) => {
               const cmd = s.session_id ? `cd ${s.cwd} && claude --resume ${s.session_id}` : null;
+              const open = openSession === s.handle;
               return (
                 <div key={s.handle} className="sess">
                   <div className="head">
                     <span className="name">{s.cwd.split("/").pop()}</span>
+                    {s.backend && <span className="bk">{s.backend.toUpperCase()}</span>}
                     <span className={`badge ${s.status}`}>{s.status}</span>
+                    <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
+                      {open ? "Hide" : "Transcript"}
+                    </button>
                   </div>
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
                   </div>
+                  {open && (
+                    <div className="transcript">
+                      {transcript.length === 0 && <div className="empty">No transcript yet.</div>}
+                      {transcript.map((e, i) => {
+                        if (e.kind === "tool")
+                          return (
+                            <div key={i} className="tx tool">
+                              <span className="tag">{e.risky ? "🔒" : "🔧"} {e.name}</span> {e.summary}
+                            </div>
+                          );
+                        if (e.kind === "tool_result")
+                          return (
+                            <div key={i} className={`tx result ${e.ok ? "" : "err"}`}>
+                              ↳ {e.ok ? "✓" : "✗"} {e.text}
+                            </div>
+                          );
+                        return (
+                          <div key={i} className={`tx ${e.kind}`}>
+                            <span className="who">{e.kind === "user" ? "You→Claude" : "Claude"}</span>
+                            {e.text}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {cmd && (
                     <div className="handoff">
                       <code>{cmd}</code>

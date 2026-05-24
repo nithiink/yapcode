@@ -152,6 +152,11 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         # App-level poll (not exposed to the voice model — not in TOOL_DEFINITIONS).
         return runner_for(args["session_id"]).poll_status(args["session_id"])
 
+    if name == "read_transcript":
+        # App-level: full session timeline from the on-disk jsonl (both backends).
+        from transcript import read_timeline
+        return read_timeline(args["session_id"])
+
     if name == "interrupt_session":
         await runner_for(args["session_id"]).interrupt(args["session_id"])
         return {"status": "interrupted", "session_id": args["session_id"]}
