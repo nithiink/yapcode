@@ -131,6 +131,7 @@ body {
 .talk.stop { background: #1a2130; box-shadow: none; border: 1px solid var(--border); }
 .ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 10px 16px; border-radius: 999px; cursor: pointer; font: inherit; }
 .ghost:hover { color: var(--text); border-color: var(--dim); }
+.ghost.mute.muted { color: var(--danger); border-color: var(--danger); }
 .status { font-size: 13px; color: var(--muted); min-height: 18px; text-align: center; }
 
 /* ---- permission card ---- */

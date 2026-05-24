@@ -69,6 +69,7 @@ export default function VoiceAgent() {
   const [costSaver, setCostSaver] = useState(true);
   const [modelLabel, setModelLabel] = useState("");
   const [vstate, setVstate] = useState<VoiceState>("idle");
+  const [muted, setMuted] = useState(false);
   const [status, setStatus] = useState("Tap connect and start talking.");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [tools, setTools] = useState<ToolLine[]>([]);
@@ -356,6 +357,7 @@ export default function VoiceAgent() {
       await s.start(audioRef.current!);
       setModelLabel(s.activeModel || params.model || PROVIDER_LABEL[provider]);
       setConnected(true);
+      setMuted(false);
       refreshSessions();
     } catch (err: any) {
       setStatus(`Failed: ${err?.message || err}`);
@@ -374,7 +376,14 @@ export default function VoiceAgent() {
     }
     setConnected(false);
     setVstate("idle");
+    setMuted(false);
     setPending(null);
+  };
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    sessionRef.current?.setMuted(next);
   };
 
   // Manual fallback for answering a pending prompt by click (voice also works).
@@ -420,7 +429,7 @@ export default function VoiceAgent() {
           <div ref={glowRef} className="orb-glow" />
           <div ref={orbRef} className={`orb ${vstate}`} />
         </div>
-        <div className="state-label">{STATE_LABEL[vstate]}</div>
+        <div className="state-label">{muted ? "Muted" : STATE_LABEL[vstate]}</div>
 
         <div className="toggles">
           <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
@@ -468,6 +477,11 @@ export default function VoiceAgent() {
           ) : (
             <button className="talk stop" onClick={disconnect}>
               Disconnect
+            </button>
+          )}
+          {connected && (
+            <button className={`ghost mute ${muted ? "muted" : ""}`} onClick={toggleMute}>
+              {muted ? "🔇 Unmute" : "🎙 Mute"}
             </button>
           )}
           <button className="ghost" onClick={refreshSessions}>

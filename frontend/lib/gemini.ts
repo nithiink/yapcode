@@ -128,6 +128,7 @@ export class GeminiSession implements VoiceSession {
 
   private tools: ToolDef[] = [];
   private setupDone = false;
+  private muted = false;
   private assistantText = "";
   private userText = "";
   private usage: VoiceUsage = emptyUsage();
@@ -225,8 +226,13 @@ export class GeminiSession implements VoiceSession {
     this.opts.onRemoteStream?.(this.playDest.stream);
   }
 
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    this.micStream?.getAudioTracks().forEach((t) => (t.enabled = !muted));
+  }
+
   private onMicChunk(data: { pcm: ArrayBuffer; rms: number }) {
-    if (!this.setupDone || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (this.muted || !this.setupDone || this.ws?.readyState !== WebSocket.OPEN) return;
     this.opts.onEvent({ type: "state", state: data.rms > 0.02 ? "hearing" : "listening" });
     this.ws.send(
       JSON.stringify({

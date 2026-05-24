@@ -63,6 +63,8 @@ export interface VoiceSession {
   // Inject an out-of-band update (e.g. a background Claude result) and prompt
   // the model to speak about it, even mid-conversation.
   injectUpdate(text: string): void;
+  // Mute/unmute the microphone (the agent stops hearing the user).
+  setMuted(muted: boolean): void;
 }
 
 // --- cost model -----------------------------------------------------------

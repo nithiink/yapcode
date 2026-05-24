@@ -131,6 +131,10 @@ export class RealtimeSession implements VoiceSession {
     this.dc?.send(JSON.stringify(payload));
   }
 
+  setMuted(muted: boolean): void {
+    this.localStream?.getAudioTracks().forEach((t) => (t.enabled = !muted));
+  }
+
   injectUpdate(text: string): void {
     if (!this.dc || this.dc.readyState !== "open") return;
     this.send({
