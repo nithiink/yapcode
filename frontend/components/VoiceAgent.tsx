@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RealtimeSession, RealtimeEvent, VoiceState } from "@/lib/realtime";
+import { RealtimeSession, RealtimeEvent, VoiceState, VoiceUsage } from "@/lib/realtime";
 import { INSTRUCTIONS } from "@/lib/instructions";
 
 type Turn = { role: "user" | "assistant"; text: string; final: boolean };
@@ -37,6 +37,7 @@ export default function VoiceAgent() {
   const [tools, setTools] = useState<ToolLine[]>([]);
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [pending, setPending] = useState<Pending>(null);
+  const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
 
   const sessionRef = useRef<RealtimeSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -103,6 +104,7 @@ export default function VoiceAgent() {
   const onEvent = (e: RealtimeEvent) => {
     if (e.type === "status") setStatus(e.status);
     else if (e.type === "state") setVstate(e.state);
+    else if (e.type === "usage") setVoiceUsage(e.usage);
     else if (e.type === "error") setStatus(`Error: ${e.message}`);
     else if (e.type === "transcript") {
       setTurns((prev) => {
@@ -191,7 +193,12 @@ export default function VoiceAgent() {
         <div className="topmeta">
           {modelLabel} · key server-side
           <br />
-          Claude cost: <b className="cost">${totalCost.toFixed(4)}</b>
+          Claude: <b className="cost">${totalCost.toFixed(4)}</b>
+          {" · "}Voice: <b className="cost">${(voiceUsage?.costUsd || 0).toFixed(4)}</b>
+          {voiceUsage && (
+            <> · cache {(voiceUsage.cacheHitRate * 100).toFixed(0)}%</>
+          )}
+          {" · "}Total: <b className="cost">${(totalCost + (voiceUsage?.costUsd || 0)).toFixed(4)}</b>
         </div>
       </div>
 

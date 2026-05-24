@@ -23,11 +23,23 @@ export type VoiceState =
   | "thinking"
   | "speaking";
 
+export type VoiceUsage = {
+  audioInTokens: number;
+  audioCachedTokens: number;
+  textInTokens: number;
+  textCachedTokens: number;
+  audioOutTokens: number;
+  textOutTokens: number;
+  costUsd: number; // cumulative voice cost for the connection
+  cacheHitRate: number; // cached audio-in / total audio-in, 0..1
+};
+
 export type RealtimeEvent =
   | { type: "status"; status: string }
   | { type: "state"; state: VoiceState }
   | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { type: "tool_call"; name: string; arguments?: unknown; result?: unknown; ok?: boolean }
+  | { type: "usage"; usage: VoiceUsage }
   | { type: "error"; message: string };
 
 export type RealtimeOptions = {
@@ -40,6 +52,29 @@ export type RealtimeOptions = {
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
+// USD per 1M tokens. Azure ~= OpenAI for these. Picked by substring match on
+// the active model/deployment name; falls back to the cheap "mini" tier.
+type Rates = {
+  textIn: number;
+  textCached: number;
+  audioIn: number;
+  audioCached: number;
+  textOut: number;
+  audioOut: number;
+};
+const MINI_RATES: Rates = {
+  textIn: 0.6, textCached: 0.06, audioIn: 10, audioCached: 0.3, textOut: 2.4, audioOut: 20,
+};
+const RATE_TABLE: Array<{ match: RegExp; rates: Rates }> = [
+  { match: /mini/i, rates: MINI_RATES },
+  { match: /4o-realtime/i, rates: { textIn: 5, textCached: 2.5, audioIn: 40, audioCached: 2.5, textOut: 20, audioOut: 80 } },
+  { match: /realtime/i, rates: { textIn: 4, textCached: 0.4, audioIn: 32, audioCached: 0.4, textOut: 16, audioOut: 64 } },
+];
+function ratesFor(model?: string): Rates {
+  if (model) for (const { match, rates } of RATE_TABLE) if (match.test(model)) return rates;
+  return MINI_RATES;
+}
+
 export class RealtimeSession {
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
@@ -50,6 +85,11 @@ export class RealtimeSession {
   activeModel?: string; // actual model/deployment reported by the backend
   private assistantText = new Map<string, string>();
   private userText = new Map<string, string>();
+  private usage: VoiceUsage = {
+    audioInTokens: 0, audioCachedTokens: 0, textInTokens: 0,
+    textCachedTokens: 0, audioOutTokens: 0, textOutTokens: 0,
+    costUsd: 0, cacheHitRate: 0,
+  };
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -225,6 +265,7 @@ export class RealtimeSession {
       }
       // function calls: GA emits them inside response.done output[]
       case "response.done": {
+        this.accumulateUsage(evt.response?.usage);
         const out = evt.response?.output || [];
         let hadCall = false;
         for (const item of out) {
@@ -244,6 +285,50 @@ export class RealtimeSession {
       default:
         break;
     }
+  }
+
+  // Realtime usage shape (GA):
+  //   usage.input_token_details.{audio_tokens,text_tokens,cached_tokens,
+  //     cached_tokens_details:{audio_tokens,text_tokens}}
+  //   usage.output_token_details.{audio_tokens,text_tokens}
+  private accumulateUsage(u: any) {
+    if (!u) return;
+    const ind = u.input_token_details || {};
+    const outd = u.output_token_details || {};
+    const cd = ind.cached_tokens_details || {};
+    const audioIn = ind.audio_tokens || 0;
+    const textIn = ind.text_tokens || 0;
+    const audioCached = cd.audio_tokens ?? ind.cached_tokens ?? 0;
+    const textCached = cd.text_tokens || 0;
+    const audioOut = outd.audio_tokens || 0;
+    const textOut = outd.text_tokens || 0;
+
+    const acc = this.usage;
+    acc.audioInTokens += audioIn;
+    acc.textInTokens += textIn;
+    acc.audioCachedTokens += audioCached;
+    acc.textCachedTokens += textCached;
+    acc.audioOutTokens += audioOut;
+    acc.textOutTokens += textOut;
+
+    const r = ratesFor(this.activeModel || this.opts.model);
+    const m = 1_000_000;
+    acc.costUsd =
+      (acc.audioCachedTokens * r.audioCached +
+        (acc.audioInTokens - acc.audioCachedTokens) * r.audioIn +
+        acc.textCachedTokens * r.textCached +
+        (acc.textInTokens - acc.textCachedTokens) * r.textIn +
+        acc.audioOutTokens * r.audioOut +
+        acc.textOutTokens * r.textOut) /
+      m;
+    acc.cacheHitRate = acc.audioInTokens > 0 ? acc.audioCachedTokens / acc.audioInTokens : 0;
+
+    console.log(
+      `[voice usage] +turn audioIn=${audioIn}(cached ${audioCached}) audioOut=${audioOut} | ` +
+        `cum audioIn=${acc.audioInTokens} audioOut=${acc.audioOutTokens} ` +
+        `cache=${(acc.cacheHitRate * 100).toFixed(0)}% cost=$${acc.costUsd.toFixed(4)}`,
+    );
+    this.opts.onEvent({ type: "usage", usage: { ...acc } });
   }
 
   private async runFunctionCall(item: any) {
