@@ -77,6 +77,7 @@ export default function VoiceAgent() {
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
   const [openSession, setOpenSession] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TxEvent[]>([]);
+  const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
 
   const sessionRef = useRef<VoiceSession | null>(null);
@@ -121,12 +122,47 @@ export default function VoiceAgent() {
     if (openSession === handle) {
       setOpenSession(null);
       setTranscript([]);
+      setFullscreen(false);
       return;
     }
     setOpenSession(handle);
     setTranscript([]);
     fetchTranscript(handle);
     txPollRef.current = setInterval(() => fetchTranscript(handle), 2500);
+  };
+
+  // Esc closes the fullscreen transcript.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
+
+  const renderTimeline = (events: TxEvent[]) => {
+    if (events.length === 0) return <div className="empty">No transcript yet.</div>;
+    return events.map((e, i) => {
+      if (e.kind === "tool")
+        return (
+          <div key={i} className="tx tool">
+            <span className="tag">{e.risky ? "🔒" : "🔧"} {e.name}</span> {e.summary}
+          </div>
+        );
+      if (e.kind === "tool_result")
+        return (
+          <div key={i} className={`tx result ${e.ok ? "" : "err"}`}>
+            ↳ {e.ok ? "✓" : "✗"} {e.text}
+          </div>
+        );
+      return (
+        <div key={i} className={`tx ${e.kind}`}>
+          <span className="who">{e.kind === "user" ? "You→Claude" : "Claude"}</span>
+          {e.text}
+        </div>
+      );
+    });
   };
 
   const stopPolling = (sessionId?: string) => {
@@ -518,36 +554,17 @@ export default function VoiceAgent() {
                     <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
                       {open ? "Hide" : "Transcript"}
                     </button>
+                    {open && (
+                      <button className="txtoggle" title="Fullscreen" onClick={() => setFullscreen(true)}>
+                        ⛶
+                      </button>
+                    )}
                   </div>
                   {liveSession === s.handle && <LiveTerminal handle={s.handle} />}
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
                   </div>
-                  {open && (
-                    <div className="transcript">
-                      {transcript.length === 0 && <div className="empty">No transcript yet.</div>}
-                      {transcript.map((e, i) => {
-                        if (e.kind === "tool")
-                          return (
-                            <div key={i} className="tx tool">
-                              <span className="tag">{e.risky ? "🔒" : "🔧"} {e.name}</span> {e.summary}
-                            </div>
-                          );
-                        if (e.kind === "tool_result")
-                          return (
-                            <div key={i} className={`tx result ${e.ok ? "" : "err"}`}>
-                              ↳ {e.ok ? "✓" : "✗"} {e.text}
-                            </div>
-                          );
-                        return (
-                          <div key={i} className={`tx ${e.kind}`}>
-                            <span className="who">{e.kind === "user" ? "You→Claude" : "Claude"}</span>
-                            {e.text}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {open && <div className="transcript">{renderTimeline(transcript)}</div>}
                   {cmd && (
                     <div className="handoff">
                       <code>{cmd}</code>
@@ -560,6 +577,20 @@ export default function VoiceAgent() {
           </div>
         </div>
       </div>
+
+      {fullscreen && openSession && (
+        <div className="tx-overlay" onClick={() => setFullscreen(false)}>
+          <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="tx-modal-head">
+              <span>Claude session transcript</span>
+              <button className="txtoggle" onClick={() => setFullscreen(false)}>
+                Close ✕
+              </button>
+            </div>
+            <div className="tx-modal-body">{renderTimeline(transcript)}</div>
+          </div>
+        </div>
+      )}
 
       <audio ref={audioRef} hidden />
     </div>
