@@ -217,11 +217,35 @@ class TmuxClaudeRunner(ClaudeRunner):
             return self._collect(s)
 
     async def _send_message(self, s: _TmuxSession, message: str) -> None:
-        # Single literal line then Enter. Internal newlines are flattened to avoid
-        # premature submission in the TUI (voice input is one utterance anyway).
+        # Single literal line, a pause, then Enter. Internal newlines are
+        # flattened (voice input is one utterance). The pause matters: the TUI
+        # has paste detection, so an Enter sent in the same burst as the text is
+        # treated as a newline rather than a submit. Sending it separately, after
+        # the input settles, makes Enter submit. Verify via capture-pane and
+        # retry once if the text is still sitting unsent.
         text = " ".join(message.splitlines())
         await self._tmux("send-keys", "-t", s.pane, "-l", "--", text)
+        await asyncio.sleep(0.4)
         await self._tmux("send-keys", "-t", s.pane, "Enter")
+        await self._ensure_submitted(s, text)
+
+    async def _ensure_submitted(self, s: _TmuxSession, text: str) -> None:
+        """If the text is still sitting in the input box (Enter newlined instead
+        of submitting), press Enter again. Only inspect the bottom-most `❯` line
+        — the live input box — since submitted messages are echoed in history
+        with the same prefix."""
+        probe = text.strip()[:24]
+        if not probe:
+            return
+        await asyncio.sleep(0.4)
+        pane = await self._capture(s)
+        input_line = ""
+        for line in pane.splitlines():
+            ls = line.lstrip()
+            if ls.startswith("❯"):
+                input_line = ls  # keep the last one = the active input box
+        if probe in input_line:
+            await self._tmux("send-keys", "-t", s.pane, "Enter")
 
     def _write_decision(self, s: _TmuxSession, choice: str) -> None:
         c = (choice or "").strip().lower()
@@ -266,7 +290,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             await self._tmux("send-keys", "-t", s.pane, str(type_idx))
             await asyncio.sleep(0.4)
             await self._tmux("send-keys", "-t", s.pane, "-l", "--", choice.strip())
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.4)
             await self._tmux("send-keys", "-t", s.pane, "Enter")
         else:
             await self._tmux("send-keys", "-t", s.pane, "Enter")
