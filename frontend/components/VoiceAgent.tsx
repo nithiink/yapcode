@@ -79,6 +79,7 @@ export default function VoiceAgent() {
   const [transcript, setTranscript] = useState<TxEvent[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
+  const [liveFullscreen, setLiveFullscreen] = useState(false);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -131,15 +132,18 @@ export default function VoiceAgent() {
     txPollRef.current = setInterval(() => fetchTranscript(handle), 2500);
   };
 
-  // Esc closes the fullscreen transcript.
+  // Esc closes whichever fullscreen overlay is open.
   useEffect(() => {
-    if (!fullscreen) return;
+    if (!fullscreen && !liveFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
+      if (e.key === "Escape") {
+        setFullscreen(false);
+        setLiveFullscreen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
+  }, [fullscreen, liveFullscreen]);
 
   const renderTimeline = (events: TxEvent[]) => {
     if (events.length === 0) return <div className="empty">No transcript yet.</div>;
@@ -546,9 +550,21 @@ export default function VoiceAgent() {
                     {s.backend === "cli" && (
                       <button
                         className="txtoggle"
-                        onClick={() => setLiveSession(liveSession === s.handle ? null : s.handle)}
+                        onClick={() => {
+                          if (liveSession === s.handle) {
+                            setLiveSession(null);
+                            setLiveFullscreen(false);
+                          } else {
+                            setLiveSession(s.handle);
+                          }
+                        }}
                       >
                         {liveSession === s.handle ? "Close" : "Live"}
+                      </button>
+                    )}
+                    {liveSession === s.handle && (
+                      <button className="txtoggle" title="Fullscreen" onClick={() => setLiveFullscreen(true)}>
+                        ⛶
                       </button>
                     )}
                     <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
@@ -560,7 +576,11 @@ export default function VoiceAgent() {
                       </button>
                     )}
                   </div>
-                  {liveSession === s.handle && <LiveTerminal handle={s.handle} />}
+                  {liveSession === s.handle && !liveFullscreen && (
+                    <div className="liveterm-box">
+                      <LiveTerminal handle={s.handle} />
+                    </div>
+                  )}
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
                   </div>
@@ -588,6 +608,22 @@ export default function VoiceAgent() {
               </button>
             </div>
             <div className="tx-modal-body">{renderTimeline(transcript)}</div>
+          </div>
+        </div>
+      )}
+
+      {liveFullscreen && liveSession && (
+        <div className="tx-overlay" onClick={() => setLiveFullscreen(false)}>
+          <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="tx-modal-head">
+              <span>Live Claude CLI</span>
+              <button className="txtoggle" onClick={() => setLiveFullscreen(false)}>
+                Close ✕
+              </button>
+            </div>
+            <div className="tx-modal-body term">
+              <LiveTerminal handle={liveSession} />
+            </div>
           </div>
         </div>
       )}
