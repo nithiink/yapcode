@@ -234,18 +234,53 @@ class TmuxClaudeRunner(ClaudeRunner):
         os.replace(tmp, path)
 
     async def _answer_question(self, s: _TmuxSession, choice: str) -> None:
-        """Drive the AskUserQuestion selection menu via send-keys (best-effort)."""
+        """Drive the AskUserQuestion selection menu.
+
+        The menu numbers each option (1..N) and a number key selects it
+        immediately — far more robust than counting arrow keys. After the listed
+        options it shows a "Type something." entry (N+1) for a free-form answer
+        and "Chat about this" (N+2). We match the spoken choice to a listed
+        option and press its digit; if nothing matches, we use "Type something"
+        and type the answer.
+        """
         options = s.pending.options if s.pending else []
-        idx = 0
+        await self._wait_for_menu(s)
         c = (choice or "").strip().lower()
-        for i, o in enumerate(options):
-            if o.strip().lower() == c or c in o.strip().lower():
-                idx = i
-                break
-        for _ in range(idx):
-            await self._tmux("send-keys", "-t", s.pane, "Down")
+        idx = next(
+            (i for i, o in enumerate(options)
+             if o.strip().lower() == c or (c and c in o.strip().lower())),
+            -1,
+        )
+        if 0 <= idx < 9:
+            await self._tmux("send-keys", "-t", s.pane, str(idx + 1))
+            return
+        if idx >= 9:  # rare long list: arrow-navigate then Enter
+            for _ in range(idx):
+                await self._tmux("send-keys", "-t", s.pane, "Down")
+                await asyncio.sleep(0.05)
+            await self._tmux("send-keys", "-t", s.pane, "Enter")
+            return
+        # No listed option matched — give a free-form answer via "Type something".
+        type_idx = len(options) + 1
+        if 1 <= type_idx <= 9 and choice.strip():
+            await self._tmux("send-keys", "-t", s.pane, str(type_idx))
+            await asyncio.sleep(0.4)
+            await self._tmux("send-keys", "-t", s.pane, "-l", "--", choice.strip())
             await asyncio.sleep(0.1)
-        await self._tmux("send-keys", "-t", s.pane, "Enter")
+            await self._tmux("send-keys", "-t", s.pane, "Enter")
+        else:
+            await self._tmux("send-keys", "-t", s.pane, "Enter")
+
+    async def _wait_for_menu(self, s: _TmuxSession, timeout: float = 4.0) -> None:
+        """Wait until the selection menu is actually rendered before sending keys
+        (avoids a race where the answer lands in the prompt box instead)."""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            pane = await self._capture(s)
+            if "to navigate" in pane or "Enter to select" in pane:
+                return
+            await asyncio.sleep(0.15)
 
     async def interrupt(self, handle: str) -> None:
         s = self._get(handle)
