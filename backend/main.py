@@ -7,21 +7,28 @@ browser only ever receives a short-lived ephemeral token.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
+import fcntl
 import hashlib
+import json
 import logging
 import os
+import pty
+import signal
+import struct
+import termios
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from session_manager import shutdown_all
+from session_manager import cli_pane_for, shutdown_all
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
 load_dotenv()
@@ -201,6 +208,80 @@ async def create_session(req: SessionRequest) -> dict[str, Any]:
     data["model"] = model
     data["transport"] = "webrtc"
     return data
+
+
+def _set_winsize(fd: int, rows: int, cols: int) -> None:
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    except OSError:
+        pass
+
+
+@app.websocket("/sessions/{handle}/terminal")
+async def session_terminal(ws: WebSocket, handle: str) -> None:
+    """Stream the live interactive Claude TUI (CLI backend) to a browser terminal.
+
+    Bridges a PTY running `tmux attach-session` to the WebSocket: pane output ->
+    ws bytes; ws text -> keystrokes; a {"__resize":{cols,rows}} message resizes.
+    Closing the socket detaches the tmux client without killing the session."""
+    await ws.accept()
+    pane = cli_pane_for(handle)
+    if not pane:
+        await ws.send_text("\r\n[no live terminal — this is not a running CLI session]\r\n")
+        await ws.close()
+        return
+
+    pid, fd = pty.fork()
+    if pid == 0:  # child: become the tmux client
+        os.environ["TERM"] = "xterm-256color"
+        try:
+            os.execvp("tmux", ["tmux", "attach-session", "-t", pane])
+        except Exception:
+            os._exit(1)
+
+    loop = asyncio.get_event_loop()
+    _set_winsize(fd, 30, 100)
+
+    def on_readable() -> None:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            data = b""
+        if not data:
+            loop.remove_reader(fd)
+            return
+        asyncio.create_task(ws.send_bytes(data))
+
+    loop.add_reader(fd, on_readable)
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text is not None:
+                if text.startswith('{"__resize"'):
+                    try:
+                        r = json.loads(text)["__resize"]
+                        _set_winsize(fd, int(r["rows"]), int(r["cols"]))
+                    except Exception:
+                        pass
+                else:
+                    os.write(fd, text.encode())
+            elif msg.get("bytes") is not None:
+                os.write(fd, msg["bytes"])
+    except WebSocketDisconnect:
+        pass
+    finally:
+        loop.remove_reader(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
 
 
 @app.post("/tools/execute")

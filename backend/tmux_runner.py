@@ -262,6 +262,11 @@ class TmuxClaudeRunner(ClaudeRunner):
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
 
+    def pane_for(self, handle: str) -> str | None:
+        """tmux pane target for a live-terminal attach, or None if unknown."""
+        s = self._sessions.get(handle)
+        return s.pane if s else None
+
     def list(self) -> list[dict]:
         return [
             {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,

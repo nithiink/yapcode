@@ -52,6 +52,13 @@ def list_all_sessions() -> list[dict]:
     return out
 
 
+def cli_pane_for(handle: str) -> str | None:
+    """tmux pane to attach a live browser terminal to (CLI backend only)."""
+    r = _runners.get("cli")
+    pane_for = getattr(r, "pane_for", None)
+    return pane_for(handle) if pane_for else None
+
+
 async def shutdown_all() -> None:
     for r in _runners.values():
         await r.shutdown()

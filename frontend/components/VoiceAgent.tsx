@@ -5,6 +5,7 @@ import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
+import LiveTerminal from "./LiveTerminal";
 
 type Turn = { role: "user" | "assistant"; text: string; final: boolean };
 type ToolLine = { name: string; ok?: boolean };
@@ -76,6 +77,7 @@ export default function VoiceAgent() {
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
   const [openSession, setOpenSession] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TxEvent[]>([]);
+  const [liveSession, setLiveSession] = useState<string | null>(null);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -505,10 +507,19 @@ export default function VoiceAgent() {
                     <span className="name">{s.cwd.split("/").pop()}</span>
                     {s.backend && <span className="bk">{s.backend.toUpperCase()}</span>}
                     <span className={`badge ${s.status}`}>{s.status}</span>
+                    {s.backend === "cli" && (
+                      <button
+                        className="txtoggle"
+                        onClick={() => setLiveSession(liveSession === s.handle ? null : s.handle)}
+                      >
+                        {liveSession === s.handle ? "Close" : "Live"}
+                      </button>
+                    )}
                     <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
                       {open ? "Hide" : "Transcript"}
                     </button>
                   </div>
+                  {liveSession === s.handle && <LiveTerminal handle={s.handle} />}
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
                   </div>

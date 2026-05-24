@@ -1,3 +1,4 @@
+import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 import type { Metadata } from "next";
 
