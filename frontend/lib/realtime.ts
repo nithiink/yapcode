@@ -1,95 +1,45 @@
-// Browser <-> OpenAI Realtime (GA) over WebRTC.
+// Browser <-> OpenAI / Azure Realtime (GA) over WebRTC.
 //
 // Flow:
 //  1. POST /api/session -> backend mints an ephemeral token (data.value, "ek_...").
 //  2. Open RTCPeerConnection, attach mic, create a data channel.
-//  3. POST the SDP offer to https://api.openai.com/v1/realtime/calls with the ek_ token.
+//  3. POST the SDP offer to the backend-provided webrtc_url with the ek_ token.
 //  4. Audio flows over the peer connection; events over the data channel.
 //  5. On a function_call event, POST it to /api/tools/execute, then return a
 //     function_call_output item and ask the model to continue.
 
-export type ToolDef = {
-  type: "function";
-  name: string;
-  description?: string;
-  parameters?: Record<string, unknown>;
-};
-
-export type VoiceState =
-  | "idle"
-  | "connecting"
-  | "listening"
-  | "hearing"
-  | "thinking"
-  | "speaking";
-
-export type VoiceUsage = {
-  audioInTokens: number;
-  audioCachedTokens: number;
-  textInTokens: number;
-  textCachedTokens: number;
-  audioOutTokens: number;
-  textOutTokens: number;
-  costUsd: number; // cumulative voice cost for the connection
-  cacheHitRate: number; // cached audio-in / total audio-in, 0..1
-};
-
-export type RealtimeEvent =
-  | { type: "status"; status: string }
-  | { type: "state"; state: VoiceState }
-  | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
-  | { type: "tool_call"; name: string; arguments?: unknown; result?: unknown; ok?: boolean }
-  | { type: "usage"; usage: VoiceUsage }
-  | { type: "error"; message: string };
-
-export type RealtimeOptions = {
-  model: string;
-  voice: string;
-  instructions: string;
-  onEvent: (e: RealtimeEvent) => void;
-  onRemoteStream?: (stream: MediaStream) => void;
-};
+import {
+  COST_SAVER_BREVITY,
+  RealtimeEvent,
+  RealtimeOptions,
+  ToolDef,
+  VoiceSession,
+  VoiceUsage,
+  emptyUsage,
+  recomputeCost,
+} from "./voice";
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
-// USD per 1M tokens. Azure ~= OpenAI for these. Picked by substring match on
-// the active model/deployment name; falls back to the cheap "mini" tier.
-type Rates = {
-  textIn: number;
-  textCached: number;
-  audioIn: number;
-  audioCached: number;
-  textOut: number;
-  audioOut: number;
-};
-const MINI_RATES: Rates = {
-  textIn: 0.6, textCached: 0.06, audioIn: 10, audioCached: 0.3, textOut: 2.4, audioOut: 20,
-};
-const RATE_TABLE: Array<{ match: RegExp; rates: Rates }> = [
-  { match: /mini/i, rates: MINI_RATES },
-  { match: /4o-realtime/i, rates: { textIn: 5, textCached: 2.5, audioIn: 40, audioCached: 2.5, textOut: 20, audioOut: 80 } },
-  { match: /realtime/i, rates: { textIn: 4, textCached: 0.4, audioIn: 32, audioCached: 0.4, textOut: 16, audioOut: 64 } },
-];
-function ratesFor(model?: string): Rates {
-  if (model) for (const { match, rates } of RATE_TABLE) if (match.test(model)) return rates;
-  return MINI_RATES;
-}
+// Cost-saver knobs. The dominant realtime cost is audio tokens, and the whole
+// conversation is re-sent every turn — so we cap response length, tighten VAD
+// to avoid spurious responses, and prune old turns to bound the re-billing.
+const COST_SAVER_MAX_OUTPUT_TOKENS = 200;
+const COST_SAVER_KEEP_ITEMS = 6; // ~3 turns of context retained
 
-export class RealtimeSession {
+export class RealtimeSession implements VoiceSession {
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
   private localStream?: MediaStream;
   private audioEl?: HTMLAudioElement;
   private tools: ToolDef[] = [];
   private opts: RealtimeOptions;
-  activeModel?: string; // actual model/deployment reported by the backend
+  activeModel?: string;
   private assistantText = new Map<string, string>();
   private userText = new Map<string, string>();
-  private usage: VoiceUsage = {
-    audioInTokens: 0, audioCachedTokens: 0, textInTokens: 0,
-    textCachedTokens: 0, audioOutTokens: 0, textOutTokens: 0,
-    costUsd: 0, cacheHitRate: 0,
-  };
+  private usage: VoiceUsage = emptyUsage();
+  // Ordered conversation item ids, for cost-saver context pruning.
+  private itemIds: string[] = [];
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -105,6 +55,7 @@ export class RealtimeSession {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          provider: this.opts.provider,
           model: this.opts.model,
           voice: this.opts.voice,
         }),
@@ -118,9 +69,8 @@ export class RealtimeSession {
     const ephemeral: string =
       session.value || session.client_secret?.value || session.client_secret;
     if (!ephemeral) throw new Error("No ephemeral token in /session response");
-    // Backend tells us where to POST the SDP offer (Azure resource or OpenAI).
     const webrtcUrl: string =
-      session.webrtc_url || `${CALLS_URL}?model=${encodeURIComponent(this.opts.model)}`;
+      session.webrtc_url || `${CALLS_URL}?model=${encodeURIComponent(this.opts.model || "")}`;
     if (session.model) this.activeModel = session.model;
 
     if (toolsRes.ok) this.tools = (await toolsRes.json()).tools || [];
@@ -182,26 +132,40 @@ export class RealtimeSession {
   }
 
   private configureSession() {
-    // GA session.update: nested `session.type:"realtime"`, audio config nested.
-    this.send({
-      type: "session.update",
-      session: {
-        type: "realtime",
-        instructions: this.opts.instructions,
-        tools: this.tools,
-        tool_choice: "auto",
-        audio: {
-          // Input transcription intentionally disabled to avoid the separate
-          // per-minute transcription charge — the model understands speech
-          // directly. (Re-add `transcription: { model: ... }` to show the
-          // user's words in the UI.) turn_detection is required for turn-taking.
-          input: {
-            turn_detection: { type: "server_vad" },
-          },
-          output: { voice: this.opts.voice },
-        },
+    const cost = !!this.opts.costSaver;
+    // Tighter turn detection in cost mode: longer required silence + higher
+    // threshold => fewer spurious responses (each response costs audio tokens).
+    const turnDetection = cost
+      ? { type: "server_vad", threshold: 0.6, silence_duration_ms: 700 }
+      : { type: "server_vad" };
+
+    const instructions = this.opts.instructions + (cost ? COST_SAVER_BREVITY : "");
+
+    const session: Record<string, unknown> = {
+      type: "realtime",
+      instructions,
+      tools: this.tools,
+      tool_choice: "auto",
+      audio: {
+        // Input transcription stays off to avoid the separate per-minute
+        // transcription charge — the model understands speech directly.
+        input: { turn_detection: turnDetection },
+        output: { voice: this.opts.voice },
       },
-    });
+    };
+    if (cost) session.max_output_tokens = COST_SAVER_MAX_OUTPUT_TOKENS;
+
+    this.send({ type: "session.update", session });
+  }
+
+  // Cost-saver: keep only the most recent items so the per-turn re-sent audio
+  // context (and its token bill) stays bounded instead of growing every turn.
+  private pruneContext() {
+    if (!this.opts.costSaver) return;
+    while (this.itemIds.length > COST_SAVER_KEEP_ITEMS) {
+      const id = this.itemIds.shift();
+      if (id) this.send({ type: "conversation.item.delete", item_id: id });
+    }
   }
 
   private async handleEvent(raw: string) {
@@ -214,6 +178,10 @@ export class RealtimeSession {
     const emit = this.opts.onEvent;
 
     switch (evt.type) {
+      case "conversation.item.created":
+        if (evt.item?.id) this.itemIds.push(evt.item.id);
+        break;
+
       // --- voice-state signals (drive the orb) ---
       case "input_audio_buffer.speech_started":
         emit({ type: "state", state: "hearing" });
@@ -274,7 +242,7 @@ export class RealtimeSession {
             await this.runFunctionCall(item);
           }
         }
-        // If a tool ran we just asked it to continue; otherwise we're idle again.
+        this.pruneContext();
         emit({ type: "state", state: hadCall ? "thinking" : "listening" });
         break;
       }
@@ -287,47 +255,20 @@ export class RealtimeSession {
     }
   }
 
-  // Realtime usage shape (GA):
-  //   usage.input_token_details.{audio_tokens,text_tokens,cached_tokens,
-  //     cached_tokens_details:{audio_tokens,text_tokens}}
-  //   usage.output_token_details.{audio_tokens,text_tokens}
   private accumulateUsage(u: any) {
     if (!u) return;
     const ind = u.input_token_details || {};
     const outd = u.output_token_details || {};
     const cd = ind.cached_tokens_details || {};
-    const audioIn = ind.audio_tokens || 0;
-    const textIn = ind.text_tokens || 0;
-    const audioCached = cd.audio_tokens ?? ind.cached_tokens ?? 0;
-    const textCached = cd.text_tokens || 0;
-    const audioOut = outd.audio_tokens || 0;
-    const textOut = outd.text_tokens || 0;
-
     const acc = this.usage;
-    acc.audioInTokens += audioIn;
-    acc.textInTokens += textIn;
-    acc.audioCachedTokens += audioCached;
-    acc.textCachedTokens += textCached;
-    acc.audioOutTokens += audioOut;
-    acc.textOutTokens += textOut;
+    acc.audioInTokens += ind.audio_tokens || 0;
+    acc.textInTokens += ind.text_tokens || 0;
+    acc.audioCachedTokens += cd.audio_tokens ?? ind.cached_tokens ?? 0;
+    acc.textCachedTokens += cd.text_tokens || 0;
+    acc.audioOutTokens += outd.audio_tokens || 0;
+    acc.textOutTokens += outd.text_tokens || 0;
 
-    const r = ratesFor(this.activeModel || this.opts.model);
-    const m = 1_000_000;
-    acc.costUsd =
-      (acc.audioCachedTokens * r.audioCached +
-        (acc.audioInTokens - acc.audioCachedTokens) * r.audioIn +
-        acc.textCachedTokens * r.textCached +
-        (acc.textInTokens - acc.textCachedTokens) * r.textIn +
-        acc.audioOutTokens * r.audioOut +
-        acc.textOutTokens * r.textOut) /
-      m;
-    acc.cacheHitRate = acc.audioInTokens > 0 ? acc.audioCachedTokens / acc.audioInTokens : 0;
-
-    console.log(
-      `[voice usage] +turn audioIn=${audioIn}(cached ${audioCached}) audioOut=${audioOut} | ` +
-        `cum audioIn=${acc.audioInTokens} audioOut=${acc.audioOutTokens} ` +
-        `cache=${(acc.cacheHitRate * 100).toFixed(0)}% cost=$${acc.costUsd.toFixed(4)}`,
-    );
+    recomputeCost(acc, this.activeModel || this.opts.model);
     this.opts.onEvent({ type: "usage", usage: { ...acc } });
   }
 

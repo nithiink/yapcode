@@ -1,10 +1,13 @@
 """Voice-Claude backend.
 
-Mints OpenAI Realtime (GA) ephemeral tokens and dispatches the voice model's
-function calls to Claude Code sessions via the Agent SDK.
+Mints realtime voice tokens (OpenAI / Azure OpenAI over WebRTC, or Google
+Gemini Live over WebSocket) and dispatches the voice model's function calls to
+Claude Code sessions via the Agent SDK. Provider keys stay server-side; the
+browser only ever receives a short-lived ephemeral token.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import logging
 import os
@@ -14,6 +17,7 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -24,7 +28,8 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("voice-claude")
 
-VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "azure").lower()  # "azure" | "openai"
+# Default provider when the request doesn't specify one. "azure" | "openai" | "gemini"
+VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "azure").lower()
 REALTIME_VOICE = os.getenv("REALTIME_VOICE", "marin")
 
 # OpenAI direct
@@ -35,6 +40,15 @@ OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 # Azure OpenAI (GA realtime)
 AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
 AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")  # realtime model deployment name
+
+# Google Gemini Live (WebSocket). Native-audio preview is the cheapest viable model.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
+GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Kore")
+# v1alpha constrained endpoint: the browser appends ?access_token=<ephemeral token>.
+GEMINI_WS_URL = (
+    "wss://generativelanguage.googleapis.com/ws/"
+    "google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
+)
 
 # Claude turns can run for minutes; tool dispatch must not time out early.
 TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "600"))
@@ -58,6 +72,7 @@ app.add_middleware(
 class SessionRequest(BaseModel):
     model: str | None = None
     voice: str | None = None
+    provider: str | None = None  # "azure" | "openai" | "gemini"; falls back to VOICE_PROVIDER
 
 
 class ToolCallRequest(BaseModel):
@@ -75,14 +90,15 @@ async def list_tools() -> dict[str, Any]:
     return {"tools": TOOL_DEFINITIONS}
 
 
-def _mint_config(req: SessionRequest) -> tuple[str, dict[str, str], dict[str, Any], str, str]:
-    """Returns (mint_url, headers, payload, webrtc_url, model) for the provider.
-
-    Keys/endpoints stay server-side; the browser only gets the ek_ token and the
-    WebRTC URL to POST its SDP offer to.
+def _mint_config(
+    provider: str, req: SessionRequest
+) -> tuple[str, dict[str, str], dict[str, Any], str, str]:
+    """Returns (mint_url, headers, payload, webrtc_url, model) for an OpenAI-shaped
+    provider (azure | openai). Keys/endpoints stay server-side; the browser only
+    gets the ek_ token and the WebRTC URL to POST its SDP offer to.
     """
     voice = req.voice or REALTIME_VOICE
-    if VOICE_PROVIDER == "azure":
+    if provider == "azure":
         if not AZURE_ENDPOINT or not AZURE_DEPLOYMENT:
             raise HTTPException(status_code=500, detail="AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_DEPLOYMENT not set")
         key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
@@ -111,12 +127,67 @@ def _mint_config(req: SessionRequest) -> tuple[str, dict[str, str], dict[str, An
     return OPENAI_CLIENT_SECRETS_URL, headers, payload, OPENAI_CALLS_URL, model
 
 
+def _mint_gemini_token(model: str) -> str:
+    """Mint a single-use Gemini Live ephemeral token via the google-genai SDK.
+
+    The token is pinned to this model and the AUDIO modality and expires quickly,
+    so it's safe to hand to the browser; the real GEMINI_API_KEY never leaves the
+    server. Synchronous SDK call — run it in a threadpool from the async route.
+    """
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set on the server")
+    from google import genai  # imported lazily so the rest of the app loads without it
+
+    client = genai.Client(api_key=key, http_options={"api_version": "v1alpha"})
+    now = datetime.datetime.now(datetime.timezone.utc)
+    token = client.auth_tokens.create(
+        config={
+            "uses": 1,
+            "expire_time": now + datetime.timedelta(minutes=30),
+            "new_session_expire_time": now + datetime.timedelta(minutes=2),
+            "live_connect_constraints": {
+                "model": model,
+                "config": {
+                    "session_resumption": {},
+                    "response_modalities": ["AUDIO"],
+                },
+            },
+            "http_options": {"api_version": "v1alpha"},
+        }
+    )
+    return token.name
+
+
 @app.post("/session")
 async def create_session(req: SessionRequest) -> dict[str, Any]:
-    """Mint a GA Realtime ephemeral token (Azure or OpenAI). The provider key is
-    read from the server environment and never reaches the browser; the browser
-    receives only the short-lived ek_ token plus the WebRTC URL to connect to."""
-    mint_url, headers, payload, webrtc_url, model = _mint_config(req)
+    """Mint a realtime ephemeral token for the chosen provider. The provider key
+    is read from the server environment and never reaches the browser; the browser
+    receives only the short-lived token plus the URL to connect to.
+
+    Response always includes: value (token), provider, model, transport. For
+    WebRTC providers it adds webrtc_url; for Gemini it adds ws_url."""
+    provider = (req.provider or VOICE_PROVIDER).lower()
+
+    if provider == "gemini":
+        model = req.model or GEMINI_MODEL
+        try:
+            token = await run_in_threadpool(_mint_gemini_token, model)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.exception("gemini token mint failed")
+            raise HTTPException(status_code=502, detail=f"gemini mint failed: {exc}") from exc
+        return {
+            "value": token,
+            "provider": "gemini",
+            "model": model,
+            "transport": "websocket",
+            "ws_url": GEMINI_WS_URL,
+            "voice": req.voice or GEMINI_VOICE,
+        }
+
+    mint_url, headers, payload, webrtc_url, model = _mint_config(provider, req)
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             resp = await client.post(mint_url, headers=headers, json=payload)
@@ -124,12 +195,13 @@ async def create_session(req: SessionRequest) -> dict[str, Any]:
             log.exception("client_secrets mint failed")
             raise HTTPException(status_code=502, detail=f"mint request failed: {exc}") from exc
     if resp.status_code >= 400:
-        log.warning("%s mint error %s: %s", VOICE_PROVIDER, resp.status_code, resp.text)
+        log.warning("%s mint error %s: %s", provider, resp.status_code, resp.text)
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     data = resp.json()
     data["webrtc_url"] = webrtc_url
-    data["provider"] = VOICE_PROVIDER
+    data["provider"] = provider
     data["model"] = model
+    data["transport"] = "webrtc"
     return data
 
 

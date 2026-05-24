@@ -79,6 +79,23 @@ body {
 
 .state-label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
 
+.toggles { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.togglehint { font-family: var(--mono); font-size: 11px; color: var(--dim); text-align: center; margin-top: -4px; }
+
+.seg { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-soft); }
+.seg.locked { opacity: 0.6; }
+.segbtn { background: transparent; border: none; color: var(--muted); padding: 6px 16px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; transition: background 0.15s, color 0.15s; }
+.segbtn.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.segbtn:disabled { cursor: default; }
+
+.switch { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-soft); border: 1px solid var(--border); color: var(--muted); padding: 6px 14px 6px 8px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; }
+.switch .knob { width: 30px; height: 16px; border-radius: 999px; background: var(--dim); position: relative; transition: background 0.15s; }
+.switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.switch.on { color: var(--text); border-color: var(--good); }
+.switch.on .knob { background: var(--good); }
+.switch.on .knob::after { transform: translateX(14px); }
+.switch:disabled { cursor: default; }
+
 .controls { display: flex; gap: 12px; align-items: center; }
 .talk {
   border: none; cursor: pointer; font: inherit; font-weight: 650;

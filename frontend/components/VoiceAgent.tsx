@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RealtimeSession, RealtimeEvent, VoiceState, VoiceUsage } from "@/lib/realtime";
+import { RealtimeSession } from "@/lib/realtime";
+import { GeminiSession } from "@/lib/gemini";
+import { RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
 
 type Turn = { role: "user" | "assistant"; text: string; final: boolean };
@@ -16,8 +18,28 @@ type Sess = {
 };
 type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
 
-const MODEL = "gpt-realtime-mini";
-const VOICE = "marin";
+// Per-provider connection params. For OpenAI, cost-saver is applied via session
+// config (brevity/cap/pruning) rather than a different model; for Gemini it also
+// drops to the cheaper native-audio model.
+function connectionParams(provider: VoiceProvider, costSaver: boolean): Partial<RealtimeOptions> {
+  if (provider === "gemini") {
+    return {
+      provider: "gemini",
+      model: costSaver
+        ? "gemini-2.5-flash-native-audio-preview-12-2025"
+        : "gemini-3.1-flash-live-preview",
+      voice: "Kore",
+    };
+  }
+  // Use OpenAI direct explicitly (configured today). To route this toggle through
+  // Azure instead, change provider to "azure" once the Azure resource is set up.
+  return { provider: "openai", model: "gpt-realtime-mini", voice: "marin" };
+}
+
+const PROVIDER_LABEL: Record<VoiceProvider, string> = {
+  openai: "OpenAI",
+  gemini: "Gemini",
+};
 
 const STATE_LABEL: Record<VoiceState, string> = {
   idle: "Offline",
@@ -30,7 +52,9 @@ const STATE_LABEL: Record<VoiceState, string> = {
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
-  const [modelLabel, setModelLabel] = useState(MODEL);
+  const [provider, setProvider] = useState<VoiceProvider>("openai");
+  const [costSaver, setCostSaver] = useState(true);
+  const [modelLabel, setModelLabel] = useState("");
   const [vstate, setVstate] = useState<VoiceState>("idle");
   const [status, setStatus] = useState("Tap connect and start talking.");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -39,7 +63,7 @@ export default function VoiceAgent() {
   const [pending, setPending] = useState<Pending>(null);
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
 
-  const sessionRef = useRef<RealtimeSession | null>(null);
+  const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const orbRef = useRef<HTMLDivElement | null>(null);
   const glowRef = useRef<HTMLDivElement | null>(null);
@@ -49,6 +73,20 @@ export default function VoiceAgent() {
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 
   useEffect(() => () => stopAnalyser(), []);
+
+  // Restore toggle prefs.
+  useEffect(() => {
+    const p = localStorage.getItem("vc_provider");
+    if (p === "openai" || p === "gemini") setProvider(p);
+    const c = localStorage.getItem("vc_cost_saver");
+    if (c != null) setCostSaver(c === "1");
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("vc_provider", provider);
+  }, [provider]);
+  useEffect(() => {
+    localStorage.setItem("vc_cost_saver", costSaver ? "1" : "0");
+  }, [costSaver]);
 
   const refreshSessions = async () => {
     try {
@@ -140,17 +178,20 @@ export default function VoiceAgent() {
 
   const connect = async () => {
     setVstate("connecting");
-    const s = new RealtimeSession({
-      model: MODEL,
-      voice: VOICE,
+    const params = connectionParams(provider, costSaver);
+    const opts: RealtimeOptions = {
+      ...params,
       instructions: INSTRUCTIONS,
+      costSaver,
       onEvent,
       onRemoteStream: startAnalyser,
-    });
+    };
+    const s: VoiceSession =
+      provider === "gemini" ? new GeminiSession(opts) : new RealtimeSession(opts);
     sessionRef.current = s;
     try {
       await s.start(audioRef.current!);
-      setModelLabel(s.activeModel || MODEL);
+      setModelLabel(s.activeModel || params.model || PROVIDER_LABEL[provider]);
       setConnected(true);
       refreshSessions();
     } catch (err: any) {
@@ -191,7 +232,9 @@ export default function VoiceAgent() {
           <span className="dot" /> Voice-Claude
         </div>
         <div className="topmeta">
-          {modelLabel} · key server-side
+          {PROVIDER_LABEL[provider]}
+          {modelLabel ? ` · ${modelLabel}` : ""} · key server-side
+          {costSaver ? " · saver on" : ""}
           <br />
           Claude: <b className="cost">${totalCost.toFixed(4)}</b>
           {" · "}Voice: <b className="cost">${(voiceUsage?.costUsd || 0).toFixed(4)}</b>
@@ -208,6 +251,31 @@ export default function VoiceAgent() {
           <div ref={orbRef} className={`orb ${vstate}`} />
         </div>
         <div className="state-label">{STATE_LABEL[vstate]}</div>
+
+        <div className="toggles">
+          <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
+            {(["openai", "gemini"] as VoiceProvider[]).map((p) => (
+              <button
+                key={p}
+                className={`segbtn ${provider === p ? "on" : ""}`}
+                disabled={connected}
+                onClick={() => setProvider(p)}
+              >
+                {PROVIDER_LABEL[p]}
+              </button>
+            ))}
+          </div>
+          <button
+            className={`switch ${costSaver ? "on" : ""}`}
+            disabled={connected}
+            aria-pressed={costSaver}
+            onClick={() => setCostSaver((v) => !v)}
+          >
+            <span className="knob" />
+            Cost saver {costSaver ? "on" : "off"}
+          </button>
+        </div>
+        {connected && <div className="togglehint">Disconnect to change provider or cost saver.</div>}
 
         <div className="controls">
           {!connected ? (
