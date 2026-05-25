@@ -59,6 +59,18 @@ def cli_pane_for(handle: str) -> str | None:
     return pane_for(handle) if pane_for else None
 
 
+async def peek_session(handle: str, lines: int = 40) -> dict:
+    """Snapshot the live screen of a session. CLI backend returns the raw tmux
+    pane; SDK has no TUI, so it falls back to the accumulated assistant text."""
+    r = runner_for(handle)
+    peek = getattr(r, "peek", None)
+    if peek is not None:
+        return {"session_id": handle, "screen": await peek(handle, lines)}
+    text = await r.read(handle)
+    return {"session_id": handle, "screen": text or "(no output yet)",
+            "note": "SDK backend has no live screen; showing accumulated text."}
+
+
 async def shutdown_all() -> None:
     for r in _runners.values():
         await r.shutdown()

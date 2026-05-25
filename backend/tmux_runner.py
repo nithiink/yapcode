@@ -345,6 +345,28 @@ class TmuxClaudeRunner(ClaudeRunner):
         s = self._sessions.get(handle)
         return s.pane if s else None
 
+    async def peek(self, handle: str, lines: int = 40) -> str:
+        """A snapshot of what's currently rendered on the session's TUI screen.
+
+        This is the raw visible pane (menus, spinners, the trust dialog, partial
+        output) — ground truth the structured jsonl feed doesn't capture. It's a
+        screen snapshot, not a transcript: wrapped at the pane width and limited
+        to what's on screen, so older output has scrolled off. Use it to see the
+        live state (e.g. a menu the model is unsure about), not as the main feed.
+        """
+        s = self._get(handle)
+        if not await self._alive(s):
+            return "(session is not running)"
+        pane = await self._capture(s)
+        rows = [r.rstrip() for r in pane.splitlines()]
+        while rows and not rows[0].strip():
+            rows.pop(0)
+        while rows and not rows[-1].strip():
+            rows.pop()
+        if lines and len(rows) > lines:
+            rows = rows[-lines:]
+        return "\n".join(rows)
+
     def list(self) -> list[dict]:
         return [
             {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,

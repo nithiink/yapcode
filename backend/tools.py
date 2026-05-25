@@ -14,6 +14,7 @@ from session_manager import (
     handoff_command,
     list_all_sessions,
     list_projects,
+    peek_session,
     register_owner,
     resolve_project_path,
     runner_for,
@@ -110,6 +111,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "peek_screen",
+        "description": "Look at what's currently on the Claude session's terminal screen right now — the live view, including menus, prompts, spinners, and in-progress output. Use this when you're unsure what state the session is in, the user asks 'what's on the screen?' or 'what is it doing?', or a prompt/answer didn't go through as expected. This is a visual snapshot (older output may have scrolled off); for the full conversation use read_session instead.",
+        "parameters": {
+            "type": "object",
+            "properties": {"session_id": {"type": "string"}},
+            "required": ["session_id"],
+        },
+    },
+    {
+        "type": "function",
         "name": "get_handoff",
         "description": "Get the exact terminal command to take over a Claude session by keyboard (cd into its project and resume it). Speak it or note it when the user wants to continue in their terminal.",
         "parameters": {
@@ -160,6 +171,9 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "interrupt_session":
         await runner_for(args["session_id"]).interrupt(args["session_id"])
         return {"status": "interrupted", "session_id": args["session_id"]}
+
+    if name == "peek_screen":
+        return await peek_session(args["session_id"])
 
     if name == "read_session":
         text = await runner_for(args["session_id"]).read(args["session_id"])

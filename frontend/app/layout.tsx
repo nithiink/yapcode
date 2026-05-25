@@ -8,9 +8,13 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // suppressHydrationWarning: browser extensions inject attributes onto
+  // <html>/<body> (e.g. __gcrremoteframetoken) that aren't in the server HTML,
+  // which otherwise triggers a dev hydration-mismatch overlay. This only
+  // suppresses attribute diffs on these two elements, not their children.
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }
