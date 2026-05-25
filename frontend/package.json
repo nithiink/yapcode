@@ -5,6 +5,7 @@
   "comment": "Exact-pinned versions, audited clean (npm audit: 0 vulnerabilities). package-lock.json pins + hashes the full transitive tree; install with `npm ci`.",
   "scripts": {
     "dev": "next dev -p 3000",
+    "dev:network": "next dev --experimental-https --experimental-https-key ./.certs/dev-key.pem --experimental-https-cert ./.certs/dev-cert.pem -H 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start -p 3000"
   },
