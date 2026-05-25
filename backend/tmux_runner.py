@@ -337,6 +337,20 @@ class TmuxClaudeRunner(ClaudeRunner):
         s.status = "completed"
         s._stop.set()
 
+    async def close(self, handle: str) -> None:
+        s = self._get(handle)
+        bg = self._bg.pop(handle, None)
+        if bg and not bg.done():
+            bg.cancel()
+        if s.pending and s.pending.kind == "permission":
+            self._write_decision(s, "deny")  # unblock any parked PreToolUse hook
+        s._closed = True
+        if s._tail and not s._tail.done():
+            s._tail.cancel()
+        await self._tmux("kill-session", "-t", s.pane)
+        shutil.rmtree(s.ctrl, ignore_errors=True)
+        self._sessions.pop(handle, None)
+
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
 

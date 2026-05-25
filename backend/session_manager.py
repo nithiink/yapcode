@@ -59,6 +59,14 @@ def cli_pane_for(handle: str) -> str | None:
     return pane_for(handle) if pane_for else None
 
 
+async def close_session(handle: str) -> None:
+    """End a single session (kill its CLI/tmux pane or disconnect its SDK client)
+    and forget it. Leaves other sessions running."""
+    r = runner_for(handle)
+    await r.close(handle)
+    _owner.pop(handle, None)
+
+
 async def peek_session(handle: str, lines: int = 40) -> dict:
     """Snapshot the live screen of a session. CLI backend returns the raw tmux
     pane; SDK has no TUI, so it falls back to the accumulated assistant text."""

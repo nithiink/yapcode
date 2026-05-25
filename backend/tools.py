@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from session_manager import (
+    close_session,
     get_runner,
     handoff_command,
     list_all_sessions,
@@ -101,6 +102,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "close_session",
+        "description": "Permanently end and close a Claude session — kills its terminal/process and frees it. Use when the user says they're done with a session, says 'close it' / 'end the session' / 'shut it down', or wants to clean up. This is different from interrupt_session (which only stops the current task but keeps the session open). The session_id becomes unusable afterward.",
+        "parameters": {
+            "type": "object",
+            "properties": {"session_id": {"type": "string"}},
+            "required": ["session_id"],
+        },
+    },
+    {
+        "type": "function",
         "name": "read_session",
         "description": "Re-read the latest accumulated text from a Claude session (e.g. if the user asks 'what did it say again?').",
         "parameters": {
@@ -171,6 +182,10 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "interrupt_session":
         await runner_for(args["session_id"]).interrupt(args["session_id"])
         return {"status": "interrupted", "session_id": args["session_id"]}
+
+    if name == "close_session":
+        await close_session(args["session_id"])
+        return {"status": "closed", "session_id": args["session_id"]}
 
     if name == "peek_screen":
         return await peek_session(args["session_id"])

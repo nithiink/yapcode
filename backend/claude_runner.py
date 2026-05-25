@@ -91,6 +91,8 @@ class ClaudeRunner(ABC):
     @abstractmethod
     async def interrupt(self, handle: str) -> None: ...
     @abstractmethod
+    async def close(self, handle: str) -> None: ...
+    @abstractmethod
     async def read(self, handle: str) -> str: ...
     @abstractmethod
     def list(self) -> list[dict[str, Any]]: ...
@@ -237,6 +239,22 @@ class SDKClaudeRunner(ClaudeRunner):
                 pass
         s.status = "completed"
         s._stop.set()
+
+    async def close(self, handle: str) -> None:
+        s = self._get(handle)
+        bg = self._bg.pop(handle, None)
+        if bg and not bg.done():
+            bg.cancel()
+        if s._decision is not None and not s._decision.done():
+            s._decision.set_result("deny")
+        try:
+            if s._consumer and not s._consumer.done():
+                s._consumer.cancel()
+            if s.client:
+                await s.client.disconnect()
+        except Exception:
+            pass
+        self._sessions.pop(handle, None)
 
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
