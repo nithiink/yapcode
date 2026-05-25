@@ -73,9 +73,21 @@ class AdvanceResult:
         return d
 
 
+# Permission modes the UI/voice can switch between (subset of the CLI's full set).
+# Order matters for the CLI: it's the Shift+Tab cycle order verified live
+# (default -> acceptEdits -> plan -> auto -> default).
+MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
+VALID_MODES = set(MODE_CYCLE)
+
+
+def normalize_mode(mode: str | None) -> str:
+    m = (mode or "default").strip()
+    return m if m in VALID_MODES else "default"
+
+
 class ClaudeRunner(ABC):
     @abstractmethod
-    async def start(self, cwd: str, model: str | None = None) -> str: ...
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str: ...
     @abstractmethod
     async def advance(self, handle: str, message: str) -> AdvanceResult: ...
     @abstractmethod
@@ -93,6 +105,8 @@ class ClaudeRunner(ABC):
     @abstractmethod
     async def close(self, handle: str) -> None: ...
     @abstractmethod
+    async def set_mode(self, handle: str, mode: str) -> str: ...
+    @abstractmethod
     async def read(self, handle: str) -> str: ...
     @abstractmethod
     def list(self) -> list[dict[str, Any]]: ...
@@ -105,6 +119,7 @@ class _Session:
         self.handle = handle
         self.cwd = cwd
         self.model = model
+        self.mode = "default"
         self.client: sdk.ClaudeSDKClient | None = None
         self.session_id: str | None = None        # real on-disk id (for handoff)
         self.status: Status = "running"
@@ -130,12 +145,13 @@ class SDKClaudeRunner(ClaudeRunner):
 
     # --- lifecycle --------------------------------------------------------
 
-    async def start(self, cwd: str, model: str | None = None) -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
         cwd = os.path.abspath(os.path.expanduser(cwd))
         if not os.path.isdir(cwd):
             raise ValueError(f"not a directory: {cwd}")
         handle = str(uuid4())
         s = _Session(handle, cwd, model or self._default_model)
+        s.mode = normalize_mode(mode)
 
         async def _cb(tool_name: str, tool_input: dict[str, Any], context: Any):
             return await self._can_use_tool(s, tool_name, tool_input, context)
@@ -143,7 +159,7 @@ class SDKClaudeRunner(ClaudeRunner):
         opts = sdk.ClaudeAgentOptions(
             model=s.model,
             cwd=cwd,
-            permission_mode="default",   # risky tools route to can_use_tool
+            permission_mode=s.mode,      # risky tools route to can_use_tool in default/plan
             can_use_tool=_cb,
             session_id=handle,           # ask SDK to use our id (verify; we also capture)
         )
@@ -256,6 +272,14 @@ class SDKClaudeRunner(ClaudeRunner):
             pass
         self._sessions.pop(handle, None)
 
+    async def set_mode(self, handle: str, mode: str) -> str:
+        s = self._get(handle)
+        mode = normalize_mode(mode)
+        if s.client:
+            await s.client.set_permission_mode(mode)
+        s.mode = mode
+        return mode
+
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
 
@@ -266,6 +290,7 @@ class SDKClaudeRunner(ClaudeRunner):
                 "session_id": s.session_id,
                 "cwd": s.cwd,
                 "model": s.model,
+                "mode": s.mode,
                 "status": s.status,
                 "cost_usd": round(s.cost_usd, 4),
             }

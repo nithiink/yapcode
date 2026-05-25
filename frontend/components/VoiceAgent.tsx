@@ -17,7 +17,16 @@ type Sess = {
   status: string;
   cost_usd?: number;
   backend?: string;
+  mode?: string;
 };
+
+const MODES: { id: string; label: string; title: string }[] = [
+  { id: "default", label: "Normal", title: "Asks before risky actions; approve/deny by voice" },
+  { id: "plan", label: "Plan", title: "Only plans — makes no edits or commands" },
+  { id: "acceptEdits", label: "Accept Edits", title: "File edits auto-apply; other risky actions still asked" },
+  { id: "auto", label: "Auto", title: "Runs everything without asking" },
+];
+const MODE_LABEL: Record<string, string> = Object.fromEntries(MODES.map((m) => [m.id, m.label]));
 type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
 type TxEvent =
   | { kind: "user"; text: string }
@@ -332,8 +341,12 @@ export default function VoiceAgent() {
       ) {
         pollSession(res.session_id);
       }
-      if (e.name === "interrupt_session") stopPolling(res?.session_id);
-      if (["start_session", "tell_claude", "answer_prompt", "interrupt_session"].includes(e.name)) {
+      if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
+      if (
+        ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session"].includes(
+          e.name,
+        )
+      ) {
         refreshSessions();
       }
     }
@@ -384,6 +397,24 @@ export default function VoiceAgent() {
     const next = !muted;
     setMuted(next);
     sessionRef.current?.setMuted(next);
+  };
+
+  // Switch a session's permission mode by click (voice "switch to plan mode" also works).
+  const [modeBusy, setModeBusy] = useState<string | null>(null);
+  const switchMode = async (handle: string, mode: string) => {
+    setModeBusy(handle);
+    // Optimistic: reflect the target immediately, then reconcile from the backend.
+    setSessions((prev) => prev.map((s) => (s.handle === handle ? { ...s, mode } : s)));
+    try {
+      await fetch("/api/tools/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "set_mode", arguments: { session_id: handle, mode } }),
+      });
+    } finally {
+      await refreshSessions();
+      setModeBusy(null);
+    }
   };
 
   // Manual fallback for answering a pending prompt by click (voice also works).
@@ -560,6 +591,9 @@ export default function VoiceAgent() {
                   <div className="head">
                     <span className="name">{s.cwd.split("/").pop()}</span>
                     {s.backend && <span className="bk">{s.backend.toUpperCase()}</span>}
+                    <span className={`modechip ${s.mode || "default"}`}>
+                      {MODE_LABEL[s.mode || "default"] || "Normal"}
+                    </span>
                     <span className={`badge ${s.status}`}>{s.status}</span>
                     {s.backend === "cli" && (
                       <button
@@ -597,6 +631,20 @@ export default function VoiceAgent() {
                   )}
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
+                  </div>
+                  <div className="modebar" role="group" aria-label="Permission mode">
+                    <span className="modelbl">Mode</span>
+                    {MODES.map((m) => (
+                      <button
+                        key={m.id}
+                        className={`modepill ${(s.mode || "default") === m.id ? "on" : ""}`}
+                        title={m.title}
+                        disabled={modeBusy === s.handle}
+                        onClick={() => switchMode(s.handle, m.id)}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
                   </div>
                   {open && <div className="transcript">{renderTimeline(transcript)}</div>}
                   {cmd && (

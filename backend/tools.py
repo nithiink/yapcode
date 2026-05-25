@@ -19,6 +19,7 @@ from session_manager import (
     register_owner,
     resolve_project_path,
     runner_for,
+    set_session_mode,
 )
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -54,6 +55,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Execution backend (set by the app, not the user): 'cli' (interactive CLI) or 'sdk'.",
                     "enum": ["cli", "sdk"],
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Initial permission mode. 'default' (asks before risky actions — recommended), 'plan' (only plans, makes no changes), 'acceptEdits' (auto-applies file edits), or 'auto' (runs everything without asking).",
+                    "enum": ["default", "plan", "acceptEdits", "auto"],
                 },
             },
             "required": [],
@@ -98,6 +104,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "session_id": {"type": "string"},
             },
             "required": ["session_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "set_mode",
+        "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "mode": {"type": "string", "enum": ["default", "plan", "acceptEdits", "auto"]},
+            },
+            "required": ["session_id", "mode"],
         },
     },
     {
@@ -153,11 +172,16 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "start_session":
         backend = args.get("backend") or "cli"
         path = resolve_project_path(args.get("project_path", ""))
+        mode = args.get("mode") or "default"
         runner = get_runner(backend)
-        handle = await runner.start(path, args.get("model"))
+        handle = await runner.start(path, args.get("model"), mode)
         register_owner(handle, backend)
         return {"session_id": handle, "project_path": path, "backend": backend,
-                "message": f"Started a Claude session in {path}."}
+                "mode": mode, "message": f"Started a Claude session in {path}."}
+
+    if name == "set_mode":
+        mode = await set_session_mode(args["session_id"], args["mode"])
+        return {"session_id": args["session_id"], "mode": mode}
 
     if name == "tell_claude":
         # Non-blocking: Claude turns can run for minutes. Kick it off in the

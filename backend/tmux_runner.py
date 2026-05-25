@@ -33,11 +33,13 @@ from uuid import uuid4
 from claude_runner import (
     AdvanceResult,
     ClaudeRunner,
+    MODE_CYCLE,
     Prompt,
     Status,
     _ALLOW_WORDS,
     _parse_question,
     _summarize_tool,
+    normalize_mode,
 )
 from permissions import classify
 
@@ -53,6 +55,7 @@ class _TmuxSession:
         self.handle = handle               # == --session-id, also handoff id
         self.cwd = cwd                      # realpath
         self.model = model
+        self.mode = "default"               # permission mode (Shift+Tab cycle)
         self.pane = f"vc_{handle[:8]}"
         self.ctrl = os.path.join(CTRL_ROOT, handle)
         self.transcript_path: str | None = None
@@ -99,7 +102,7 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     # --- lifecycle --------------------------------------------------------
 
-    async def start(self, cwd: str, model: str | None = None) -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
         if shutil.which("tmux") is None:
             raise ValueError("tmux is not installed (brew install tmux) — required for the CLI backend")
         if shutil.which("claude") is None:
@@ -110,6 +113,7 @@ class TmuxClaudeRunner(ClaudeRunner):
 
         handle = str(uuid4())
         s = _TmuxSession(handle, cwd, model or self._default_model)
+        s.mode = normalize_mode(mode)
         os.makedirs(os.path.join(s.ctrl, "decisions"), exist_ok=True)
         self._write_settings(s)
         self._write_meta(s)
@@ -118,6 +122,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         inner = (
             f"VC_CTRL={shlex.quote(s.ctrl)} "
             f"claude --session-id {handle} --model {shlex.quote(s.model)} "
+            f"--permission-mode {shlex.quote(s.mode)} "
             f"{chrome}--settings {shlex.quote(os.path.join(s.ctrl, 'settings.json'))}"
         )
         rc, out = await self._tmux(
@@ -351,6 +356,36 @@ class TmuxClaudeRunner(ClaudeRunner):
         shutil.rmtree(s.ctrl, ignore_errors=True)
         self._sessions.pop(handle, None)
 
+    def _detect_mode(self, pane: str) -> str:
+        """Read the current permission mode off the TUI footer."""
+        low = pane.lower()
+        if "auto mode on" in low:
+            return "auto"
+        if "plan mode on" in low:
+            return "plan"
+        if "accept edits on" in low:
+            return "acceptEdits"
+        return "default"
+
+    async def set_mode(self, handle: str, mode: str) -> str:
+        """Switch the live session's permission mode by cycling Shift+Tab the
+        right number of times. The cycle order is fixed (MODE_CYCLE, verified
+        live), so from the detected current mode we compute the exact presses to
+        reach the target — no blind guessing."""
+        s = self._get(handle)
+        target = normalize_mode(mode)
+        async with s._turn_lock:  # don't toggle mid-turn
+            if not await self._alive(s):
+                raise ValueError("session is not running")
+            current = self._detect_mode(await self._capture(s))
+            presses = (MODE_CYCLE.index(target) - MODE_CYCLE.index(current)) % len(MODE_CYCLE)
+            for _ in range(presses):
+                await self._tmux("send-keys", "-t", s.pane, "BTab")
+                await asyncio.sleep(0.25)
+            await asyncio.sleep(0.2)
+            s.mode = self._detect_mode(await self._capture(s))
+        return s.mode
+
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
 
@@ -384,7 +419,7 @@ class TmuxClaudeRunner(ClaudeRunner):
     def list(self) -> list[dict]:
         return [
             {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
-             "model": s.model, "status": s.status, "cost_usd": 0.0}
+             "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0}
             for s in self._sessions.values()
         ]
 

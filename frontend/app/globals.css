@@ -177,6 +177,18 @@ body {
 .badge.running { color: var(--accent); }
 .badge.error { color: var(--danger); }
 .sess .path { font-family: var(--mono); font-size: 11px; color: var(--dim); margin: 6px 0; word-break: break-all; }
+
+.modechip { font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: #141b28; color: var(--muted); }
+.modechip.plan { color: var(--accent); border-color: var(--accent); }
+.modechip.acceptEdits { color: var(--good); border-color: var(--good); }
+.modechip.auto { color: var(--danger); border-color: var(--danger); }
+
+.modebar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 4px 0 2px; }
+.modelbl { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.modepill { font: inherit; font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+.modepill:hover:not(:disabled) { color: var(--text); border-color: var(--dim); }
+.modepill.on { background: #1c2533; color: var(--text); border-color: var(--dim); font-weight: 600; }
+.modepill:disabled { opacity: 0.5; cursor: default; }
 .handoff { display: flex; gap: 6px; align-items: center; }
 .handoff code { flex: 1; font-family: var(--mono); font-size: 11px; background: #0a0e15; padding: 6px 8px; border-radius: 7px; color: var(--muted); word-break: break-all; }
 .handoff button { font: inherit; font-size: 11px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border); background: #131a27; color: var(--muted); cursor: pointer; }

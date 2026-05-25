@@ -59,6 +59,12 @@ def cli_pane_for(handle: str) -> str | None:
     return pane_for(handle) if pane_for else None
 
 
+async def set_session_mode(handle: str, mode: str) -> str:
+    """Switch a session's permission mode (plan/auto/acceptEdits/default).
+    Returns the mode actually in effect afterward."""
+    return await runner_for(handle).set_mode(handle, mode)
+
+
 async def close_session(handle: str) -> None:
     """End a single session (kill its CLI/tmux pane or disconnect its SDK client)
     and forget it. Leaves other sessions running."""
