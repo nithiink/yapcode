@@ -30,8 +30,11 @@ export default function LiveTerminal({ handle }: { handle: string }) {
       /* ignore */
     }
 
+    // Match the page's scheme: an https page (dev:network) must use wss, or the
+    // browser blocks it as mixed content. Plain http (localhost) uses ws.
     const host = window.location.hostname || "localhost";
-    const ws = new WebSocket(`ws://${host}:8000/sessions/${handle}/terminal`);
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${host}:8000/sessions/${handle}/terminal`);
     ws.binaryType = "arraybuffer";
 
     const sendResize = () => {
