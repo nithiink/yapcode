@@ -10,6 +10,15 @@ import { FitAddon } from "@xterm/addon-fit";
 // keeps running). Backend runs on :8000 (the Next app is on :3000).
 export default function LiveTerminal({ handle }: { handle: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Scroll the Claude TUI by sending it the keys it documents under tmux
+  // (PgUp/PgDn, Ctrl+End to jump to bottom). This is the only way to scroll on
+  // mobile, where there's no wheel and touch can't reach the full-screen TUI.
+  const send = (seq: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(seq);
+  };
 
   useEffect(() => {
     const el = ref.current;
@@ -36,6 +45,7 @@ export default function LiveTerminal({ handle }: { handle: string }) {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${host}:8000/sessions/${handle}/terminal`);
     ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
 
     const sendResize = () => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -73,9 +83,19 @@ export default function LiveTerminal({ handle }: { handle: string }) {
       ro.disconnect();
       dataSub.dispose();
       ws.close();
+      wsRef.current = null;
       term.dispose();
     };
   }, [handle]);
 
-  return <div className="liveterm" ref={ref} />;
+  return (
+    <div className="liveterm-wrap">
+      <div className="liveterm" ref={ref} />
+      <div className="term-scrollbtns">
+        <button onClick={() => send("\x1b[5~")} title="Scroll up" aria-label="Scroll up">▲</button>
+        <button onClick={() => send("\x1b[6~")} title="Scroll down" aria-label="Scroll down">▼</button>
+        <button onClick={() => send("\x1b[1;5F")} title="Jump to bottom" aria-label="Jump to bottom">⤓</button>
+      </div>
+    </div>
+  );
 }
