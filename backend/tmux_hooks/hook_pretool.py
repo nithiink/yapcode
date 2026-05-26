@@ -18,8 +18,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from permissions import classify  # noqa: E402
-from _common import append_event, decision_path, read_input  # noqa: E402
+from permissions import classify, is_edit_tool  # noqa: E402
+from _common import append_event, decision_path, read_input, read_mode  # noqa: E402
 
 POLL_SECONDS = 590.0  # stay under the 600s hook timeout
 POLL_INTERVAL = 0.1
@@ -56,11 +56,23 @@ def main() -> None:
         return
 
     if kind == "question":
+        # A question to the user, not a permission — always surfaced, even in
+        # auto/acceptEdits (those modes skip permission prompts, not questions).
         append_event({"event": "needs_choice", **base})
         emit("allow")  # let the question menu render; runner drives it
         return
 
-    # risky: park until the runner writes a decision
+    # risky: honor the session's permission mode so we don't ask for things the
+    # mode already auto-approves (this hook runs independently of the CLI's own
+    # mode handling, so without this it would prompt by voice even in auto).
+    mode = read_mode()
+    if mode == "auto" or (mode == "acceptEdits" and is_edit_tool(tool_name)):
+        append_event({"event": "tool", **base})
+        emit("allow")
+        return
+
+    # default / plan (or acceptEdits for non-edit tools): park until the runner
+    # writes a decision (voice yes/no).
     append_event({"event": "needs_permission", **base})
     path = decision_path(tool_use_id)
     deadline = time.time() + POLL_SECONDS

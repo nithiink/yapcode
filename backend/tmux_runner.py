@@ -117,6 +117,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         os.makedirs(os.path.join(s.ctrl, "decisions"), exist_ok=True)
         self._write_settings(s)
         self._write_meta(s)
+        self._write_mode(s)
 
         chrome = "--chrome " if ENABLE_CHROME else ""
         inner = (
@@ -156,7 +157,17 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     def _write_meta(self, s: _TmuxSession) -> None:
         with open(os.path.join(s.ctrl, "meta.json"), "w") as f:
-            json.dump({"handle": s.handle, "cwd": s.cwd, "model": s.model, "pane": s.pane}, f)
+            json.dump({"handle": s.handle, "cwd": s.cwd, "model": s.model,
+                       "pane": s.pane, "mode": s.mode}, f)
+
+    def _write_mode(self, s: _TmuxSession) -> None:
+        """Persist the permission mode where the PreToolUse hook can read it, so
+        auto/acceptEdits skip the voice permission prompt."""
+        tmp = os.path.join(s.ctrl, "mode.tmp")
+        path = os.path.join(s.ctrl, "mode")
+        with open(tmp, "w") as f:
+            f.write(s.mode)
+        os.replace(tmp, path)
 
     async def _await_ready(self, s: _TmuxSession, timeout: float = 10.0) -> None:
         """Accept the one-time per-folder trust dialog and wait for the input box."""
@@ -384,6 +395,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                 await asyncio.sleep(0.25)
             await asyncio.sleep(0.2)
             s.mode = self._detect_mode(await self._capture(s))
+            self._write_mode(s)  # keep the hook's view of the mode in sync
         return s.mode
 
     async def read(self, handle: str) -> str:

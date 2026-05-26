@@ -16,6 +16,13 @@ SAFE_TOOLS: frozenset[str] = frozenset({
 # Always surface to the user as a choice (not a yes/no permission).
 QUESTION_TOOL = "AskUserQuestion"
 
+# File-editing tools — auto-approved in the "acceptEdits" permission mode.
+EDIT_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+
+def is_edit_tool(tool_name: str) -> bool:
+    return tool_name in EDIT_TOOLS
+
 # MCP tool prefixes that are auto-approved (treated as safe). Claude-in-Chrome
 # browser control is confined to a browser, so navigate/click/fill run without a
 # spoken prompt each time (per product decision). Add more prefixes as needed.

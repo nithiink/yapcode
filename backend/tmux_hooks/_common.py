@@ -39,3 +39,15 @@ def append_event(event: dict) -> None:
 
 def decision_path(tool_use_id: str) -> str:
     return os.path.join(CTRL, "decisions", f"{tool_use_id or 'none'}.json")
+
+
+def read_mode() -> str:
+    """The session's current permission mode, written by the runner. Defaults to
+    'default' if missing/unreadable."""
+    if not CTRL:
+        return "default"
+    try:
+        with open(os.path.join(CTRL, "mode")) as f:
+            return f.read().strip() or "default"
+    except Exception:
+        return "default"
