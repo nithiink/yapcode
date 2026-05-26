@@ -79,9 +79,41 @@ export default function LiveTerminal({ handle }: { handle: string }) {
     });
     ro.observe(el);
 
+    // Touch-gesture scrolling: the TUI's alternate screen has no local
+    // scrollback for xterm to pan, so we translate vertical swipes into wheel
+    // events sent to the app (the same way a desktop wheel scrolls it).
+    let lastY = 0;
+    let accum = 0;
+    const STEP = 20; // px of swipe per wheel notch
+    const wheel = (up: boolean) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const col = Math.max(1, Math.floor(term.cols / 2));
+      const row = Math.max(1, Math.floor(term.rows / 2));
+      ws.send(`\x1b[<${up ? 64 : 65};${col};${row}M`);
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      lastY = e.touches[0].clientY;
+      accum = 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0].clientY;
+      accum += y - lastY;
+      lastY = y;
+      while (Math.abs(accum) >= STEP) {
+        const up = accum > 0; // finger drags down -> reveal earlier -> wheel up
+        wheel(up);
+        accum += up ? -STEP : STEP;
+      }
+      e.preventDefault();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+
     return () => {
       ro.disconnect();
       dataSub.dispose();
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
       ws.close();
       wsRef.current = null;
       term.dispose();
