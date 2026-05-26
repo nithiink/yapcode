@@ -11,6 +11,7 @@ from typing import Any
 
 from session_manager import (
     close_session,
+    default_name_for,
     get_runner,
     handoff_command,
     list_all_sessions,
@@ -18,8 +19,10 @@ from session_manager import (
     peek_session,
     register_owner,
     resolve_project_path,
+    resolve_session,
     runner_for,
     set_session_mode,
+    set_session_name,
 )
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -32,19 +35,23 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "list_sessions",
-        "description": "List the Claude Code sessions currently running on this machine, with their project directory and status.",
+        "description": "List the Claude Code sessions currently running on this machine, with their human-readable name, project directory, and status. Use the names here to refer to sessions in other calls.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
         "type": "function",
         "name": "start_session",
-        "description": "Start a new interactive Claude Code session in a project directory. Returns a session_id used for all later calls. The project_path may be a folder name (e.g. 'Development' or a project name) — it's resolved against the allowed roots. If the user is vague about location, omit it to use the default root, or call list_projects first.",
+        "description": "Start a new interactive Claude Code session in a project directory. Returns the session's name and id — you can refer to it by either in later calls. The project_path may be a folder name (e.g. 'Development' or a project name) — it's resolved against the allowed roots. If the user is vague about location, omit it to use the default root, or call list_projects first.",
         "parameters": {
             "type": "object",
             "properties": {
                 "project_path": {
                     "type": "string",
                     "description": "Project directory: an absolute path, a '~' path, or a folder/project name to resolve against allowed roots. Omit or leave empty to use the default project root.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional human-readable name for the session (e.g. 'jarvis', 'billing fix') so it's easy to refer to later. If the user names it, pass that. If omitted, a friendly name is auto-generated from the folder. Must be unique among active sessions.",
                 },
                 "model": {
                     "type": "string",
@@ -63,6 +70,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "rename_session",
+        "description": "Give a Claude session a new human-readable name (or rename one) so it's easy to identify and refer to. Use when the user says things like 'call this one jarvis', 'rename the billing session', or 'name it X'. The name must be unique among active sessions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "The session to rename — its current name or id."},
+                "name": {"type": "string", "description": "The new human-readable name."},
+            },
+            "required": ["session_id", "name"],
         },
     },
     {
@@ -176,54 +196,73 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         runner = get_runner(backend)
         handle = await runner.start(path, args.get("model"), mode)
         register_owner(handle, backend)
-        return {"session_id": handle, "project_path": path, "backend": backend,
-                "mode": mode, "message": f"Started a Claude session in {path}."}
+        try:
+            sess_name = set_session_name(handle, args.get("name") or default_name_for(path))
+        except ValueError:
+            # A user-supplied name clashed — fall back to a guaranteed-unique default.
+            sess_name = set_session_name(handle, default_name_for(path))
+        return {"session_id": handle, "name": sess_name, "project_path": path,
+                "backend": backend, "mode": mode,
+                "message": f"Started Claude session '{sess_name}' in {path}."}
+
+    if name == "rename_session":
+        sid = resolve_session(args["session_id"])
+        new_name = set_session_name(sid, args["name"])
+        return {"session_id": sid, "name": new_name,
+                "message": f"Renamed the session to '{new_name}'."}
 
     if name == "set_mode":
-        mode = await set_session_mode(args["session_id"], args["mode"])
-        return {"session_id": args["session_id"], "mode": mode}
+        sid = resolve_session(args["session_id"])
+        mode = await set_session_mode(sid, args["mode"])
+        return {"session_id": sid, "mode": mode}
 
     if name == "tell_claude":
         # Non-blocking: Claude turns can run for minutes. Kick it off in the
         # background and return immediately so the voice model stays responsive;
         # the frontend polls poll_session and narrates the result when ready.
-        runner_for(args["session_id"]).start_advance(args["session_id"], args["message"])
-        return {"status": "working", "session_id": args["session_id"]}
+        sid = resolve_session(args["session_id"])
+        runner_for(sid).start_advance(sid, args["message"])
+        return {"status": "working", "session_id": sid}
 
     if name == "answer_prompt":
-        runner_for(args["session_id"]).start_answer(args["session_id"], args["choice"])
-        return {"status": "working", "session_id": args["session_id"]}
+        sid = resolve_session(args["session_id"])
+        runner_for(sid).start_answer(sid, args["choice"])
+        return {"status": "working", "session_id": sid}
 
     if name == "poll_session":
         # App-level poll (not exposed to the voice model — not in TOOL_DEFINITIONS).
-        return runner_for(args["session_id"]).poll_status(args["session_id"])
+        sid = resolve_session(args["session_id"])
+        return runner_for(sid).poll_status(sid)
 
     if name == "read_transcript":
         # App-level: full session timeline from the on-disk jsonl (both backends).
         from transcript import read_timeline
-        return read_timeline(args["session_id"])
+        return read_timeline(resolve_session(args["session_id"]))
 
     if name == "interrupt_session":
-        await runner_for(args["session_id"]).interrupt(args["session_id"])
-        return {"status": "interrupted", "session_id": args["session_id"]}
+        sid = resolve_session(args["session_id"])
+        await runner_for(sid).interrupt(sid)
+        return {"status": "interrupted", "session_id": sid}
 
     if name == "close_session":
-        await close_session(args["session_id"])
-        return {"status": "closed", "session_id": args["session_id"]}
+        sid = resolve_session(args["session_id"])
+        await close_session(sid)
+        return {"status": "closed", "session_id": sid}
 
     if name == "peek_screen":
-        return await peek_session(args["session_id"])
+        return await peek_session(resolve_session(args["session_id"]))
 
     if name == "read_session":
-        text = await runner_for(args["session_id"]).read(args["session_id"])
-        return {"session_id": args["session_id"], "text": text}
+        sid = resolve_session(args["session_id"])
+        text = await runner_for(sid).read(sid)
+        return {"session_id": sid, "text": text}
 
     if name == "get_handoff":
-        sid = args["session_id"]
+        sid = resolve_session(args["session_id"])
         sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
         if not sess:
             raise KeyError(f"unknown session: {sid}")
         cmd = handoff_command(sess["cwd"], sess["session_id"])
-        return {"session_id": sid, "cwd": sess["cwd"], "command": cmd}
+        return {"session_id": sid, "name": sess.get("name"), "cwd": sess["cwd"], "command": cmd}
 
     raise KeyError(f"unknown tool: {name}")

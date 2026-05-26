@@ -16,6 +16,7 @@ from tmux_runner import TmuxClaudeRunner
 
 _runners: dict[str, ClaudeRunner] = {}
 _owner: dict[str, str] = {}  # handle -> backend
+_names: dict[str, str] = {}  # handle -> human-readable display name
 
 
 def get_runner(backend: str = "cli") -> ClaudeRunner:
@@ -44,12 +45,69 @@ def runner_for(handle: str) -> ClaudeRunner:
     raise KeyError(f"unknown session: {handle}")
 
 
-def list_all_sessions() -> list[dict]:
+def _raw_sessions() -> list[dict]:
+    """Backend-tagged session dicts straight from each runner (no name added)."""
     out: list[dict] = []
     for backend, r in _runners.items():
         for s in r.list():
             out.append({**s, "backend": backend})
     return out
+
+
+def list_all_sessions() -> list[dict]:
+    return [{**s, "name": _names.get(s["handle"])} for s in _raw_sessions()]
+
+
+# --- human-readable session names -------------------------------------------
+
+def default_name_for(cwd: str) -> str:
+    """A friendly default name for a new session: the folder basename, de-duped
+    against names already in use (e.g. 'Development', 'Development 2')."""
+    base = os.path.basename(os.path.normpath(cwd)) or "session"
+    taken = {n.lower() for n in _names.values()}
+    if base.lower() not in taken:
+        return base
+    i = 2
+    while f"{base} {i}".lower() in taken:
+        i += 1
+    return f"{base} {i}"
+
+
+def set_session_name(handle: str, name: str) -> str:
+    """Assign a display name to a session. Names must be unique (case-insensitive)
+    among live sessions; raises ValueError listing current names on a clash."""
+    handle = resolve_session(handle)
+    name = " ".join((name or "").split())  # collapse whitespace
+    if not name:
+        raise ValueError("name cannot be empty")
+    for h, existing in _names.items():
+        if h != handle and existing.lower() == name.lower():
+            raise ValueError(
+                f"the name '{name}' is already used by another session; pick a different one"
+            )
+    _names[handle] = name
+    return name
+
+
+def resolve_session(ref: str) -> str:
+    """Resolve a session reference — a display name, a full handle, or an 8-char
+    handle prefix — to the canonical handle. Exact handle wins, then a
+    case-insensitive name match, then a unique handle prefix."""
+    ref = (ref or "").strip()
+    handles = {s["handle"] for s in _raw_sessions()}
+    if ref in handles:
+        return ref
+    low = ref.lower()
+    for h, name in _names.items():
+        if h in handles and name.lower() == low:
+            return h
+    prefix_hits = [h for h in handles if h.startswith(ref)]
+    if len(prefix_hits) == 1:
+        return prefix_hits[0]
+    names = sorted(_names[h] for h in handles if h in _names)
+    raise KeyError(
+        f"no session matches '{ref}'. Active session names: {names or '(none named yet)'}."
+    )
 
 
 def cli_pane_for(handle: str) -> str | None:
@@ -71,6 +129,7 @@ async def close_session(handle: str) -> None:
     r = runner_for(handle)
     await r.close(handle)
     _owner.pop(handle, None)
+    _names.pop(handle, None)
 
 
 async def peek_session(handle: str, lines: int = 40) -> dict:
@@ -90,6 +149,7 @@ async def shutdown_all() -> None:
         await r.shutdown()
     _runners.clear()
     _owner.clear()
+    _names.clear()
 
 
 def _allowed_roots() -> list[str]:

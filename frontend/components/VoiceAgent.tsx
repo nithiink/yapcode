@@ -18,6 +18,7 @@ type Sess = {
   cost_usd?: number;
   backend?: string;
   mode?: string;
+  name?: string | null;
 };
 
 const MODES: { id: string; label: string; title: string }[] = [
@@ -417,6 +418,33 @@ export default function VoiceAgent() {
     }
   };
 
+  // Inline session rename (voice "call this one X" also works).
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const startRename = (handle: string, current: string) => {
+    setEditing(handle);
+    setDraftName(current);
+  };
+  const commitRename = async (handle: string) => {
+    const name = draftName.trim();
+    setEditing(null);
+    const prev = sessions.find((s) => s.handle === handle)?.name || "";
+    if (!name || name === prev) return;
+    setSessions((p) => p.map((s) => (s.handle === handle ? { ...s, name } : s)));
+    try {
+      await fetch("/api/tools/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "rename_session",
+          arguments: { session_id: handle, name },
+        }),
+      });
+    } finally {
+      refreshSessions(); // reconcile (e.g. name clash rejected on the server)
+    }
+  };
+
   // Manual fallback for answering a pending prompt by click (voice also works).
   const answerPrompt = async (choice: string) => {
     if (!pending) return;
@@ -609,7 +637,27 @@ export default function VoiceAgent() {
               return (
                 <div key={s.handle} className="sess">
                   <div className="head">
-                    <span className="name">{s.cwd.split("/").pop()}</span>
+                    {editing === s.handle ? (
+                      <input
+                        className="nameedit"
+                        autoFocus
+                        value={draftName}
+                        onChange={(e) => setDraftName(e.target.value)}
+                        onBlur={() => commitRename(s.handle)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename(s.handle);
+                          else if (e.key === "Escape") setEditing(null);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        className="name namebtn"
+                        title="Rename session"
+                        onClick={() => startRename(s.handle, s.name || (s.cwd.split("/").pop() ?? ""))}
+                      >
+                        {s.name || s.cwd.split("/").pop()} <span className="penicon">✎</span>
+                      </button>
+                    )}
                     {s.backend && <span className="bk">{s.backend.toUpperCase()}</span>}
                     <span className={`modechip ${s.mode || "default"}`}>
                       {MODE_LABEL[s.mode || "default"] || "Normal"}
