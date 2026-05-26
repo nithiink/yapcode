@@ -25,6 +25,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -332,9 +333,9 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_permission"
         elif kind == "needs_choice":
-            text, options = _parse_question(ev.get("tool_input", {}))
+            text, options, multi = _parse_question(ev.get("tool_input", {}))
             s.pending = Prompt(kind="choice", text=text, options=options,
-                               tool_name=ev.get("tool_name", ""))
+                               tool_name=ev.get("tool_name", ""), multi_select=multi)
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_choice"
 
@@ -414,33 +415,25 @@ class TmuxClaudeRunner(ClaudeRunner):
     async def _answer_question(self, s: _TmuxSession, choice: str) -> None:
         """Drive the AskUserQuestion selection menu.
 
-        The menu numbers each option (1..N) and a number key selects it
-        immediately — far more robust than counting arrow keys. After the listed
-        options it shows a "Type something." entry (N+1) for a free-form answer
-        and "Chat about this" (N+2). We match the spoken choice to a listed
-        option and press its digit; if nothing matches, we use "Type something"
-        and type the answer.
+        The current TUI requires moving the highlight with the arrow keys and
+        pressing Enter to confirm (its footer states "Enter to select · ↑/↓ to
+        navigate"). Pressing the option's *digit* alone does NOT register the
+        choice — that left the prompt stuck on screen. So we move the highlight
+        to the target row and press Enter. Single- vs. multi-select is taken from
+        the question payload (authoritative), not scraped from the screen, since
+        a question's header also renders with a ☐ glyph.
+
+        The rows are the N options, then a "Type something." entry (free-form
+        answer) and "Chat about this". If the spoken choice matches no option we
+        select "Type something" and type it.
         """
         options = s.pending.options if s.pending else []
+        multi = bool(s.pending and getattr(s.pending, "multi_select", False))
         await self._wait_for_menu(s)
-        pane = await self._capture(s)
         c = (choice or "").strip().lower()
 
-        # Multi-select: options render as "[ ]" checkboxes and need an explicit
-        # Submit. Toggle each option named in the spoken answer (number key
-        # toggles), then move right to the Submit tab and confirm.
-        if "[ ]" in pane or "[✔]" in pane:
-            for i, o in enumerate(options):
-                if i < 9 and o.strip().lower() in c:
-                    await self._tmux("send-keys", "-t", s.pane, str(i + 1))
-                    await asyncio.sleep(0.25)
-            for _ in range(5):  # navigate right to the review/Submit screen
-                p = await self._capture(s)
-                if "Submit answers" in p or "Ready to submit" in p:
-                    break
-                await self._tmux("send-keys", "-t", s.pane, "Right")
-                await asyncio.sleep(0.4)
-            await self._tmux("send-keys", "-t", s.pane, "1")  # "Submit answers"
+        if multi:
+            await self._answer_multi(s, options, c)
             return
 
         idx = next(
@@ -448,25 +441,58 @@ class TmuxClaudeRunner(ClaudeRunner):
              if o.strip().lower() == c or (c and c in o.strip().lower())),
             -1,
         )
-        if 0 <= idx < 9:
-            await self._tmux("send-keys", "-t", s.pane, str(idx + 1))
+        if idx >= 0:
+            await self._select_row(s, idx)
             return
-        if idx >= 9:  # rare long list: arrow-navigate then Enter
-            for _ in range(idx):
-                await self._tmux("send-keys", "-t", s.pane, "Down")
-                await asyncio.sleep(0.05)
-            await self._tmux("send-keys", "-t", s.pane, "Enter")
-            return
-        # No listed option matched — give a free-form answer via "Type something".
-        type_idx = len(options) + 1
-        if 1 <= type_idx <= 9 and choice.strip():
-            await self._tmux("send-keys", "-t", s.pane, str(type_idx))
+        # No listed option matched — give a free-form answer via "Type something"
+        # (the row immediately after the real options).
+        if choice.strip():
+            await self._select_row(s, len(options))
             await asyncio.sleep(0.4)
             await self._tmux("send-keys", "-t", s.pane, "-l", "--", choice.strip())
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.3)
             await self._tmux("send-keys", "-t", s.pane, "Enter")
         else:
             await self._tmux("send-keys", "-t", s.pane, "Enter")
+
+    def _menu_cursor(self, pane: str) -> int:
+        """0-based index of the currently highlighted numbered row (the line
+        carrying the ❯ marker), or 0 if none is found (the menu's initial state)."""
+        for line in pane.splitlines():
+            m = re.match(r"^(❯\s*)?(\d+)[.)]", line.lstrip())
+            if m and m.group(1):
+                return int(m.group(2)) - 1
+        return 0
+
+    async def _select_row(self, s: _TmuxSession, target: int) -> None:
+        """Move the menu highlight to numbered row `target` (0-based) and press
+        Enter. Navigates relative to the current cursor so it works no matter
+        where the highlight starts."""
+        cur = self._menu_cursor(await self._capture(s))
+        delta = target - cur
+        key = "Down" if delta > 0 else "Up"
+        for _ in range(abs(delta)):
+            await self._tmux("send-keys", "-t", s.pane, key)
+            await asyncio.sleep(0.12)
+        await asyncio.sleep(0.15)
+        await self._tmux("send-keys", "-t", s.pane, "Enter")
+
+    async def _answer_multi(self, s: _TmuxSession, options: list[str], c: str) -> None:
+        """Multi-select: toggle each named option with Space (navigating by
+        arrows), then activate the Submit row with Enter. NOTE: single-select is
+        the common path and is fully verified; this multi-select flow still needs
+        a live check against a real multi-select menu."""
+        for i, o in enumerate(options):
+            if o.strip().lower() in c:
+                cur = self._menu_cursor(await self._capture(s))
+                key = "Down" if i > cur else "Up"
+                for _ in range(abs(i - cur)):
+                    await self._tmux("send-keys", "-t", s.pane, key)
+                    await asyncio.sleep(0.12)
+                await self._tmux("send-keys", "-t", s.pane, "Space")
+                await asyncio.sleep(0.2)
+        # Move down to the Submit row (just past the options) and confirm.
+        await self._select_row(s, len(options))
 
     async def _wait_for_menu(self, s: _TmuxSession, timeout: float = 4.0) -> None:
         """Wait until the selection menu is actually rendered before sending keys
@@ -644,9 +670,9 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.status = "needs_permission"
             s._stop.set()
         elif kind == "needs_choice":
-            text, options = _parse_question(ev.get("tool_input", {}))
+            text, options, multi = _parse_question(ev.get("tool_input", {}))
             s.pending = Prompt(kind="choice", text=text, options=options,
-                               tool_name=ev.get("tool_name", ""))
+                               tool_name=ev.get("tool_name", ""), multi_select=multi)
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_choice"
             s._stop.set()

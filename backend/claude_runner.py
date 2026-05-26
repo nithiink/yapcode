@@ -41,6 +41,7 @@ class Prompt:
     text: str                 # spoken summary of what Claude wants
     options: list[str]
     tool_name: str
+    multi_select: bool = False  # AskUserQuestion: select many vs. one
     request_id: str = field(default_factory=lambda: str(uuid4()))
 
 
@@ -68,6 +69,7 @@ class AdvanceResult:
                 "text": self.prompt.text,
                 "options": self.prompt.options,
                 "tool_name": self.prompt.tool_name,
+                "multi_select": self.prompt.multi_select,
                 "request_id": self.prompt.request_id,
             }
         return d
@@ -382,8 +384,9 @@ class SDKClaudeRunner(ClaudeRunner):
     def _build_prompt(self, kind: str, tool_name: str,
                       tool_input: dict[str, Any]) -> Prompt:
         if kind == "question":
-            text, options = _parse_question(tool_input)
-            return Prompt(kind="choice", text=text, options=options, tool_name=tool_name)
+            text, options, multi = _parse_question(tool_input)
+            return Prompt(kind="choice", text=text, options=options,
+                          tool_name=tool_name, multi_select=multi)
         return Prompt(
             kind="permission",
             text=_summarize_tool(tool_name, tool_input),
@@ -415,13 +418,14 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
     return f"use the {tool_name} tool"
 
 
-def _parse_question(ti: dict[str, Any]) -> tuple[str, list[str]]:
-    """Pull a question + option labels out of an AskUserQuestion input."""
+def _parse_question(ti: dict[str, Any]) -> tuple[str, list[str], bool]:
+    """Pull a question, option labels, and the multi-select flag out of an
+    AskUserQuestion input."""
     questions = ti.get("questions") or []
     if questions:
         q = questions[0]
         text = q.get("question") or q.get("header") or "Claude has a question"
         options = [o.get("label", str(o)) if isinstance(o, dict) else str(o)
                    for o in (q.get("options") or [])]
-        return text, options
-    return ("Claude has a question", [])
+        return text, options, bool(q.get("multiSelect"))
+    return ("Claude has a question", [], False)
