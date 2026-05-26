@@ -604,6 +604,7 @@ export default function VoiceAgent() {
             {sessions.length === 0 && <div className="empty">No active sessions.</div>}
             {sessions.map((s) => {
               const cmd = s.session_id ? `cd ${s.cwd} && claude --resume ${s.session_id}` : null;
+              const tmuxCmd = s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
               const open = openSession === s.handle;
               return (
                 <div key={s.handle} className="sess">
@@ -666,8 +667,16 @@ export default function VoiceAgent() {
                     ))}
                   </div>
                   {open && <div className="transcript">{renderTimeline(transcript)}</div>}
+                  {tmuxCmd && (
+                    <div className="handoff">
+                      <span className="hlabel">attach</span>
+                      <code>{tmuxCmd}</code>
+                      <button onClick={() => navigator.clipboard.writeText(tmuxCmd)}>Copy</button>
+                    </div>
+                  )}
                   {cmd && (
                     <div className="handoff">
+                      <span className="hlabel">resume</span>
                       <code>{cmd}</code>
                       <button onClick={() => navigator.clipboard.writeText(cmd)}>Copy</button>
                     </div>
