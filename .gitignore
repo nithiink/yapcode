@@ -15,5 +15,9 @@ frontend/out/
 frontend/tsconfig.tsbuildinfo
 frontend/.certs/
 
+# Interactive CLI session control dirs (runtime storage rehydration reads).
+# Default location is inside the project; override with VC_SESSION_STORE.
+.voice-claude/
+
 # Misc
 .DS_Store

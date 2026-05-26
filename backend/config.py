@@ -26,6 +26,19 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Repo root = parent of this backend/ directory.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where interactive CLI session control dirs live (meta.json, events.jsonl,
+# mode, settings.json, decisions/) — the on-disk storage rehydration reads.
+# Defaults to a folder inside the project so it's easy to find, inspect, and
+# edit (gitignored). Override with VC_SESSION_STORE to point anywhere, e.g.
+# back to ~/.voice-claude/tmux.
+SESSION_STORE_DIR: str = os.path.abspath(os.path.expanduser(
+    os.getenv("VC_SESSION_STORE") or os.path.join(_REPO_ROOT, ".voice-claude", "tmux")
+))
+
+
 # On backend shutdown, whether to KILL interactive CLI sessions (the old
 # destroy-on-exit behavior) or DETACH and leave them running so the next startup
 # can rehydrate them.

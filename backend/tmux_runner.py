@@ -46,7 +46,7 @@ from permissions import classify
 
 log = logging.getLogger("voice-claude.tmux")
 
-CTRL_ROOT = os.path.expanduser("~/.voice-claude/tmux")
+CTRL_ROOT = config.SESSION_STORE_DIR  # set via VC_SESSION_STORE; defaults inside the project
 HOOK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmux_hooks")
 ENABLE_CHROME = os.getenv("CLAUDE_CLI_CHROME", "1") != "0"
 
