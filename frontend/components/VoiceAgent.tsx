@@ -436,33 +436,66 @@ export default function VoiceAgent() {
 
   return (
     <div className="app">
-      <div className="topbar">
+      <header className="topbar">
         <div className={`brand ${connected ? "live" : ""}`}>
-          <span className="dot" /> Voice-Claude
+          <span className="dot" />
+          <span className="logo">Voice<span className="sep">·</span>Claude</span>
         </div>
         <div className="topmeta">
-          {PROVIDER_LABEL[provider]}
-          {modelLabel ? ` · ${modelLabel}` : ""} · Claude {BACKEND_LABEL[backend]}
-          {backend === "cli" ? " (chrome)" : ""}
-          {costSaver ? " · saver on" : ""}
+          {connected ? STATE_LABEL[vstate] : "Offline"} · {PROVIDER_LABEL[provider]}
+          {modelLabel ? ` · ${modelLabel}` : ""} · {BACKEND_LABEL[backend]}
+          {backend === "cli" ? " · chrome" : ""}
           <br />
-          Claude: <b className="cost">${totalCost.toFixed(4)}</b>
-          {" · "}Voice: <b className="cost">${(voiceUsage?.costUsd || 0).toFixed(4)}</b>
-          {voiceUsage && (
-            <> · cache {(voiceUsage.cacheHitRate * 100).toFixed(0)}%</>
-          )}
-          {" · "}Total: <b className="cost">${(totalCost + (voiceUsage?.costUsd || 0)).toFixed(4)}</b>
+          Claude <b className="cost">${totalCost.toFixed(4)}</b>
+          {" · "}Voice <b className="cost">${(voiceUsage?.costUsd || 0).toFixed(4)}</b>
+          {" · "}Total <b className="cost">${(totalCost + (voiceUsage?.costUsd || 0)).toFixed(4)}</b>
         </div>
-      </div>
+      </header>
 
-      <div className="stage">
-        <div className="orb-wrap">
-          <div ref={glowRef} className="orb-glow" />
-          <div ref={orbRef} className={`orb ${vstate}`} />
+      <section className="hero">
+        <div className="lede">
+          <div className="kick">Hands-free engineering</div>
+          <h1>
+            Speak.<br />
+            <span className="c">Claude</span>
+            <br />
+            builds.
+          </h1>
+          <p className="lede-p">
+            A voice on top of Claude Code. Talk; it opens sessions, edits files, runs commands, and
+            reports back — while you keep talking.
+          </p>
+          <div className="actions">
+            {!connected ? (
+              <button className="talk" onClick={connect}>
+                Connect &amp; talk
+              </button>
+            ) : (
+              <button className="talk stop" onClick={disconnect}>
+                Disconnect
+              </button>
+            )}
+            {connected && (
+              <button className={`ghost mute ${muted ? "muted" : ""}`} onClick={toggleMute}>
+                {muted ? "🔇 Unmute" : "🎙 Mute"}
+              </button>
+            )}
+            <button className="textbtn" onClick={refreshSessions}>
+              Refresh
+            </button>
+          </div>
+          <div className="state-row">{status}</div>
         </div>
-        <div className="state-label">{muted ? "Muted" : STATE_LABEL[vstate]}</div>
+        <div className="orbwrap">
+          <div className="orbinner">
+            <div ref={glowRef} className="orb-glow" />
+            <div ref={orbRef} className={`orb ${vstate} ${muted ? "muted" : ""}`} />
+          </div>
+          <div className="orbcap">{muted ? "Muted" : STATE_LABEL[vstate]}</div>
+        </div>
+      </section>
 
-        <div className="toggles">
+      <div className="controls-row">
           <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
             {(["openai", "gemini"] as VoiceProvider[]).map((p) => (
               <button
@@ -498,69 +531,52 @@ export default function VoiceAgent() {
             Cost saver {costSaver ? "on" : "off"}
           </button>
         </div>
-        {connected && <div className="togglehint">Disconnect to change provider or cost saver.</div>}
+      {connected && (
+        <div className="togglehint">Disconnect to change provider, backend, or cost saver.</div>
+      )}
 
-        <div className="controls">
-          {!connected ? (
-            <button className="talk" onClick={connect}>
-              Connect
-            </button>
-          ) : (
-            <button className="talk stop" onClick={disconnect}>
-              Disconnect
-            </button>
-          )}
-          {connected && (
-            <button className={`ghost mute ${muted ? "muted" : ""}`} onClick={toggleMute}>
-              {muted ? "🔇 Unmute" : "🎙 Mute"}
-            </button>
-          )}
-          <button className="ghost" onClick={refreshSessions}>
-            Refresh
-          </button>
-        </div>
-        <div className="status">{status}</div>
-
-        {pending && (
-          <div className={`permcard ${pending.kind === "choice" ? "choice" : ""}`}>
-            <div className="lead">
-              {pending.kind === "choice" ? "Claude is asking" : "Permission needed"}
-            </div>
-            <div className="ask">
-              {pending.kind === "choice" ? (
-                pending.text
-              ) : (
-                <>
-                  Claude wants to <code>{pending.text}</code>
-                </>
-              )}
-            </div>
-            <div className="permbtns">
-              {pending.kind === "choice" ? (
-                pending.options.map((o) => (
-                  <button key={o} className="opt" onClick={() => answerPrompt(o)}>
-                    {o}
-                  </button>
-                ))
-              ) : (
-                <>
-                  <button className="allow" onClick={() => answerPrompt("allow")}>
-                    Approve
-                  </button>
-                  <button className="deny" onClick={() => answerPrompt("deny")}>
-                    Deny
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="permhint">You can also just say it out loud.</div>
+      {pending && (
+        <div className={`permcard ${pending.kind === "choice" ? "choice" : ""}`}>
+          <div className="lead">
+            {pending.kind === "choice" ? "Claude is asking" : "Permission needed"}
           </div>
-        )}
-      </div>
+          <div className="ask">
+            {pending.kind === "choice" ? (
+              pending.text
+            ) : (
+              <>
+                Claude wants to <code>{pending.text}</code>
+              </>
+            )}
+          </div>
+          <div className="permbtns">
+            {pending.kind === "choice" ? (
+              pending.options.map((o) => (
+                <button key={o} className="opt" onClick={() => answerPrompt(o)}>
+                  {o}
+                </button>
+              ))
+            ) : (
+              <>
+                <button className="allow" onClick={() => answerPrompt("allow")}>
+                  Approve
+                </button>
+                <button className="deny" onClick={() => answerPrompt("deny")}>
+                  Deny
+                </button>
+              </>
+            )}
+          </div>
+          <div className="permhint">You can also just say it out loud.</div>
+        </div>
+      )}
 
       <div className="panels">
         <div className="panel">
-          <h2>Conversation</h2>
+          <h2>
+            Conversation <span className="ct">live</span>
+          </h2>
+          <div className="rule" />
           <div className="scroll">
             {turns.length === 0 && tools.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
@@ -580,7 +596,10 @@ export default function VoiceAgent() {
         </div>
 
         <div className="panel">
-          <h2>Claude sessions</h2>
+          <h2>
+            Claude sessions <span className="ct">{sessions.length || "—"} active</span>
+          </h2>
+          <div className="rule" />
           <div className="scroll">
             {sessions.length === 0 && <div className="empty">No active sessions.</div>}
             {sessions.map((s) => {

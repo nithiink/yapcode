@@ -1,6 +1,10 @@
 import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 import type { Metadata } from "next";
+import { Anton, Archivo } from "next/font/google";
+
+const display = Anton({ weight: "400", subsets: ["latin"], variable: "--font-display" });
+const body = Archivo({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
   title: "Voice-Claude",
@@ -13,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // which otherwise triggers a dev hydration-mismatch overlay. This only
   // suppresses attribute diffs on these two elements, not their children.
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${display.variable} ${body.variable}`}>
       <body suppressHydrationWarning>{children}</body>
     </html>
   );
