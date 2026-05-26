@@ -39,7 +39,7 @@ from claude_runner import (
     Prompt,
     Status,
     _ALLOW_WORDS,
-    _parse_question,
+    _parse_questions,
     _summarize_tool,
     normalize_mode,
 )
@@ -71,6 +71,11 @@ class _TmuxSession:
         self.tools_used: list[str] = []
         self.pending: Prompt | None = None
         self.pending_tool_use_id: str | None = None
+        # An AskUserQuestion can carry several questions answered in sequence on
+        # one form; track the full list and which one we're on so the menu is
+        # driven through every question, not just the first.
+        self.questions: list[dict] = []
+        self.q_index: int = 0
         self._stop = asyncio.Event()
         self._turn_lock = asyncio.Lock()
         self._evpos = 0                     # bytes of events.jsonl consumed
@@ -286,7 +291,8 @@ class TmuxClaudeRunner(ClaudeRunner):
 
         # Authoritative mode from the live TUI footer (meta may be stale); resync
         # the mode file so the PreToolUse hook agrees.
-        s.mode = self._detect_mode(await self._capture(s))
+        pane = await self._capture(s)
+        s.mode = self._detect_mode(pane)
         self._write_mode(s)
 
         # Stream only NEW assistant text from here; full history stays available
@@ -296,13 +302,14 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.jsonl_pos = os.path.getsize(tpath)
 
         # Re-arm the event tail past existing events, but first recover an
-        # in-flight prompt that was open when the old backend died.
+        # in-flight prompt that was open when the old backend died (using the
+        # live pane to land on the right sub-question of a multi-question form).
         evpath = os.path.join(ctrl, "events.jsonl")
-        self._restore_pending(s, evpath)
+        self._restore_pending(s, evpath, pane)
         s._evpos = os.path.getsize(evpath) if os.path.exists(evpath) else 0
         return s
 
-    def _restore_pending(self, s: _TmuxSession, evpath: str) -> None:
+    def _restore_pending(self, s: _TmuxSession, evpath: str, pane: str = "") -> None:
         """If the last event is an unanswered prompt, restore it so the user can
         still approve/deny it — the PreToolUse hook stays parked polling the
         decision file for ~590s, so a recently-orphaned prompt is still live."""
@@ -333,11 +340,22 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_permission"
         elif kind == "needs_choice":
-            text, options, multi = _parse_question(ev.get("tool_input", {}))
-            s.pending = Prompt(kind="choice", text=text, options=options,
-                               tool_name=ev.get("tool_name", ""), multi_select=multi)
+            s.questions = _parse_questions(ev.get("tool_input", {}))
+            s.q_index = self._detect_question_index(s, pane)
+            s.pending = self._prompt_for_question(s, s.q_index, ev.get("tool_name", ""))
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_choice"
+
+    def _detect_question_index(self, s: _TmuxSession, pane: str) -> int:
+        """For a multi-question form, find which question the live screen is on
+        by matching the visible question text. Defaults to 0."""
+        if not pane or len(s.questions) <= 1:
+            return 0
+        for i, q in enumerate(s.questions):
+            qt = (q.get("question") or "").strip()
+            if qt and qt[:40] in pane:
+                return i
+        return 0
 
     # --- driving ----------------------------------------------------------
 
@@ -365,11 +383,36 @@ class TmuxClaudeRunner(ClaudeRunner):
             if kind == "permission":
                 self._write_decision(s, choice)
             else:  # choice / AskUserQuestion menu
-                await self._answer_question(s, choice)
+                more = await self._answer_question(s, choice)
+                if more:
+                    # A multi-question form just advanced to the next question.
+                    # Selecting an option auto-advances the form (no hook event
+                    # fires between sub-questions), so surface the next question
+                    # right away instead of waiting for the turn to complete.
+                    s.q_index += 1
+                    s.pending = self._prompt_for_question(s, s.q_index, s.pending.tool_name)
+                    s.status = "needs_choice"
+                    return self._collect(s)
             s.pending = None
             s.pending_tool_use_id = None
             await s._stop.wait()
             return self._collect(s)
+
+    def _prompt_for_question(self, s: _TmuxSession, i: int,
+                             tool_name: str = "AskUserQuestion") -> Prompt:
+        """Build the pending Prompt for question `i` of the active form. When the
+        form has several questions, the spoken text is prefixed with progress
+        ('Question 2 of 4: …') so the voice model can narrate where we are."""
+        qs = s.questions
+        if not qs or i >= len(qs):
+            return Prompt(kind="choice", text="Claude has a question",
+                          options=[], tool_name=tool_name)
+        q = qs[i]
+        text = q["question"]
+        if len(qs) > 1:
+            text = f"Question {i + 1} of {len(qs)}: {text}"
+        return Prompt(kind="choice", text=text, options=q["options"],
+                      tool_name=tool_name, multi_select=q["multi"])
 
     async def _send_message(self, s: _TmuxSession, message: str) -> None:
         # Single literal line, a pause, then Enter. Internal newlines are
@@ -412,8 +455,8 @@ class TmuxClaudeRunner(ClaudeRunner):
                        "reason": "" if allow else f"user said: {choice}"}, f)
         os.replace(tmp, path)
 
-    async def _answer_question(self, s: _TmuxSession, choice: str) -> None:
-        """Drive the AskUserQuestion selection menu.
+    async def _answer_question(self, s: _TmuxSession, choice: str) -> bool:
+        """Drive one question of the AskUserQuestion menu.
 
         The current TUI requires moving the highlight with the arrow keys and
         pressing Enter to confirm (its footer states "Enter to select · ↑/↓ to
@@ -426,15 +469,19 @@ class TmuxClaudeRunner(ClaudeRunner):
         The rows are the N options, then a "Type something." entry (free-form
         answer) and "Chat about this". If the spoken choice matches no option we
         select "Type something" and type it.
+
+        Returns True if this form has more questions after the one just answered
+        (selecting auto-advances to the next), False if it was the last/only one.
         """
         options = s.pending.options if s.pending else []
         multi = bool(s.pending and getattr(s.pending, "multi_select", False))
+        more = bool(s.questions) and s.q_index < len(s.questions) - 1
         await self._wait_for_menu(s)
         c = (choice or "").strip().lower()
 
         if multi:
             await self._answer_multi(s, options, c)
-            return
+            return more
 
         idx = next(
             (i for i, o in enumerate(options)
@@ -443,7 +490,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         )
         if idx >= 0:
             await self._select_row(s, idx)
-            return
+            return more
         # No listed option matched — give a free-form answer via "Type something"
         # (the row immediately after the real options).
         if choice.strip():
@@ -454,6 +501,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             await self._tmux("send-keys", "-t", s.pane, "Enter")
         else:
             await self._tmux("send-keys", "-t", s.pane, "Enter")
+        return more
 
     def _menu_cursor(self, pane: str) -> int:
         """0-based index of the currently highlighted numbered row (the line
@@ -670,9 +718,9 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.status = "needs_permission"
             s._stop.set()
         elif kind == "needs_choice":
-            text, options, multi = _parse_question(ev.get("tool_input", {}))
-            s.pending = Prompt(kind="choice", text=text, options=options,
-                               tool_name=ev.get("tool_name", ""), multi_select=multi)
+            s.questions = _parse_questions(ev.get("tool_input", {}))
+            s.q_index = 0
+            s.pending = self._prompt_for_question(s, 0, ev.get("tool_name", ""))
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_choice"
             s._stop.set()

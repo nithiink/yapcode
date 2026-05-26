@@ -418,14 +418,26 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
     return f"use the {tool_name} tool"
 
 
+def _parse_questions(ti: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize every question in an AskUserQuestion input. The tool can ask up
+    to 4 questions in one call, rendered as a sequential form, so callers that
+    drive the live menu need all of them, not just the first."""
+    out: list[dict[str, Any]] = []
+    for q in (ti.get("questions") or []):
+        out.append({
+            "header": q.get("header"),
+            "question": q.get("question") or q.get("header") or "Claude has a question",
+            "options": [o.get("label", str(o)) if isinstance(o, dict) else str(o)
+                        for o in (q.get("options") or [])],
+            "multi": bool(q.get("multiSelect")),
+        })
+    return out
+
+
 def _parse_question(ti: dict[str, Any]) -> tuple[str, list[str], bool]:
-    """Pull a question, option labels, and the multi-select flag out of an
-    AskUserQuestion input."""
-    questions = ti.get("questions") or []
-    if questions:
-        q = questions[0]
-        text = q.get("question") or q.get("header") or "Claude has a question"
-        options = [o.get("label", str(o)) if isinstance(o, dict) else str(o)
-                   for o in (q.get("options") or [])]
-        return text, options, bool(q.get("multiSelect"))
+    """The first question only (text, option labels, multi-select flag). Kept for
+    the SDK path, which answers one question per tool result."""
+    qs = _parse_questions(ti)
+    if qs:
+        return qs[0]["question"], qs[0]["options"], qs[0]["multi"]
     return ("Claude has a question", [], False)
