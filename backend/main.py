@@ -28,7 +28,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from session_manager import cli_pane_for, shutdown_all
+from session_manager import cli_pane_for, rehydrate_cli_sessions, shutdown_all
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
 load_dotenv()
@@ -63,6 +63,13 @@ TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "600"))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    try:
+        restored = await rehydrate_cli_sessions()
+        if restored:
+            log.info("rehydrated %d CLI session(s): %s", len(restored),
+                     [s.get("name") or s["handle"][:8] for s in restored])
+    except Exception:
+        log.exception("CLI session rehydration failed (continuing without it)")
     yield
     await shutdown_all()
 

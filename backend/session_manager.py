@@ -86,6 +86,14 @@ def set_session_name(handle: str, name: str) -> str:
                 f"the name '{name}' is already used by another session; pick a different one"
             )
     _names[handle] = name
+    # Let the owning backend persist the name (CLI writes it to meta.json so it
+    # survives a restart); SDK has no persistence and simply lacks the method.
+    persist = getattr(runner_for(handle), "persist_name", None)
+    if persist is not None:
+        try:
+            persist(handle, name)
+        except Exception:
+            pass
     return name
 
 
@@ -142,6 +150,31 @@ async def peek_session(handle: str, lines: int = 40) -> dict:
     text = await r.read(handle)
     return {"session_id": handle, "screen": text or "(no output yet)",
             "note": "SDK backend has no live screen; showing accumulated text."}
+
+
+async def rehydrate_cli_sessions() -> list[dict]:
+    """On startup, re-adopt interactive CLI sessions that survived a previous
+    backend (their tmux panes keep running independently). Repopulates ownership
+    and names. Best-effort: failures are logged by the caller, never fatal.
+    Only the CLI backend can rehydrate — SDK subprocesses die with the backend."""
+    runner = get_runner("cli")
+    rehydrate = getattr(runner, "rehydrate", None)
+    if rehydrate is None:
+        return []
+    restored = await rehydrate()
+    for s in restored:
+        handle = s["handle"]
+        register_owner(handle, "cli")
+        name = s.get("name")
+        if name:
+            # Defensive de-dupe in case two restored metas carried the same name.
+            taken = {n.lower() for h, n in _names.items() if h != handle}
+            base, candidate, i = name, name, 2
+            while candidate.lower() in taken:
+                candidate = f"{base} {i}"
+                i += 1
+            _names[handle] = candidate
+    return restored
 
 
 async def shutdown_all() -> None:

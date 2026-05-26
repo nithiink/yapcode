@@ -30,6 +30,7 @@ import shutil
 import sys
 from uuid import uuid4
 
+import config
 from claude_runner import (
     AdvanceResult,
     ClaudeRunner,
@@ -55,6 +56,7 @@ class _TmuxSession:
         self.handle = handle               # == --session-id, also handoff id
         self.cwd = cwd                      # realpath
         self.model = model
+        self.name: str | None = None        # human-readable name (persisted in meta)
         self.mode = "default"               # permission mode (Shift+Tab cycle)
         self.pane = f"vc_{handle[:8]}"
         self.ctrl = os.path.join(CTRL_ROOT, handle)
@@ -158,7 +160,16 @@ class TmuxClaudeRunner(ClaudeRunner):
     def _write_meta(self, s: _TmuxSession) -> None:
         with open(os.path.join(s.ctrl, "meta.json"), "w") as f:
             json.dump({"handle": s.handle, "cwd": s.cwd, "model": s.model,
-                       "pane": s.pane, "mode": s.mode}, f)
+                       "pane": s.pane, "mode": s.mode, "name": s.name}, f)
+
+    def persist_name(self, handle: str, name: str) -> None:
+        """Record a session's display name on disk so it survives a restart.
+        Called by session_manager when a name is set/changed."""
+        s = self._sessions.get(handle)
+        if s is None:
+            return
+        s.name = name
+        self._write_meta(s)
 
     def _write_mode(self, s: _TmuxSession) -> None:
         """Persist the permission mode where the PreToolUse hook can read it, so
@@ -188,6 +199,18 @@ class TmuxClaudeRunner(ClaudeRunner):
             await asyncio.sleep(0.4)
 
     async def shutdown(self) -> None:
+        """Stop tracking sessions on backend shutdown.
+
+        Default (VC_KILL_SESSIONS_ON_SHUTDOWN unset/false): DETACH — leave the
+        tmux panes and their `claude` processes running with control dirs intact,
+        so the next startup can rehydrate them. We only cancel our own in-process
+        tracking (background turns + the event tail).
+
+        With VC_KILL_SESSIONS_ON_SHUTDOWN=1: KILL — the old behavior, where each
+        pane is killed and its control dir removed (nothing survives the restart).
+
+        Either way, close() remains the explicit per-session destroy path."""
+        kill = config.KILL_SESSIONS_ON_SHUTDOWN
         for t in self._bg.values():
             if not t.done():
                 t.cancel()
@@ -196,9 +219,124 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._closed = True
             if s._tail and not s._tail.done():
                 s._tail.cancel()
-            await self._tmux("kill-session", "-t", s.pane)
-            shutil.rmtree(s.ctrl, ignore_errors=True)
+            if kill:
+                await self._tmux("kill-session", "-t", s.pane)
+                shutil.rmtree(s.ctrl, ignore_errors=True)
         self._sessions.clear()
+
+    # --- rehydration ------------------------------------------------------
+
+    async def _live_panes(self) -> set[str]:
+        """Names of tmux sessions currently alive (our panes start with 'vc_')."""
+        rc, out = await self._tmux("list-sessions", "-F", "#{session_name}")
+        if rc != 0:
+            return set()  # no server running -> nothing alive
+        return {ln.strip() for ln in out.splitlines() if ln.strip()}
+
+    async def rehydrate(self) -> list[dict]:
+        """Re-attach to interactive CLI sessions that outlived a previous backend.
+
+        On a hard kill the tmux panes and their `claude` processes keep running
+        and the control dir (events.jsonl / decisions/ / mode / settings.json)
+        stays intact, so we never relaunch claude — we just rebuild our in-memory
+        tracking and re-arm the event tail against the same files. Control dirs
+        whose pane is gone are garbage-collected. Best-effort and idempotent.
+        """
+        if shutil.which("tmux") is None or not os.path.isdir(CTRL_ROOT):
+            return []
+        live = await self._live_panes()
+        restored: list[dict] = []
+        for handle in sorted(os.listdir(CTRL_ROOT)):
+            ctrl = os.path.join(CTRL_ROOT, handle)
+            if not os.path.isdir(ctrl) or handle in self._sessions:
+                continue
+            meta = self._read_meta(ctrl)
+            pane = (meta or {}).get("pane") or f"vc_{handle[:8]}"
+            if pane not in live:
+                shutil.rmtree(ctrl, ignore_errors=True)  # dead leftover
+                continue
+            if not meta:
+                continue  # alive but unreadable meta — leave it untouched
+            try:
+                s = await self._adopt(handle, ctrl, meta)
+                self._sessions[handle] = s
+                s._tail = asyncio.create_task(self._tail_events(s))
+                restored.append({"handle": handle, "name": s.name, "cwd": s.cwd,
+                                 "mode": s.mode, "status": s.status})
+                log.info("rehydrated tmux session %s (%s) in %s [%s]",
+                         handle, s.name, s.cwd, s.status)
+            except Exception:
+                log.exception("failed to rehydrate %s", handle)
+        return restored
+
+    def _read_meta(self, ctrl: str) -> dict | None:
+        try:
+            with open(os.path.join(ctrl, "meta.json")) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    async def _adopt(self, handle: str, ctrl: str, meta: dict) -> _TmuxSession:
+        """Build a live _TmuxSession bound to an already-running pane."""
+        s = _TmuxSession(handle, meta.get("cwd", ""), meta.get("model", self._default_model))
+        s.pane = meta.get("pane") or s.pane
+        s.ctrl = ctrl
+        s.name = meta.get("name")
+
+        # Authoritative mode from the live TUI footer (meta may be stale); resync
+        # the mode file so the PreToolUse hook agrees.
+        s.mode = self._detect_mode(await self._capture(s))
+        self._write_mode(s)
+
+        # Stream only NEW assistant text from here; full history stays available
+        # via read_transcript (which reads the jsonl from the top).
+        tpath = self._find_transcript(s)
+        if tpath and os.path.exists(tpath):
+            s.jsonl_pos = os.path.getsize(tpath)
+
+        # Re-arm the event tail past existing events, but first recover an
+        # in-flight prompt that was open when the old backend died.
+        evpath = os.path.join(ctrl, "events.jsonl")
+        self._restore_pending(s, evpath)
+        s._evpos = os.path.getsize(evpath) if os.path.exists(evpath) else 0
+        return s
+
+    def _restore_pending(self, s: _TmuxSession, evpath: str) -> None:
+        """If the last event is an unanswered prompt, restore it so the user can
+        still approve/deny it — the PreToolUse hook stays parked polling the
+        decision file for ~590s, so a recently-orphaned prompt is still live."""
+        if not os.path.exists(evpath):
+            return
+        last = None
+        try:
+            with open(evpath) as f:
+                for line in f:
+                    if line.strip():
+                        last = line
+        except Exception:
+            return
+        if not last:
+            return
+        try:
+            ev = json.loads(last)
+        except Exception:
+            return
+        kind = ev.get("event")
+        if kind == "needs_permission":
+            s.pending = Prompt(
+                kind="permission",
+                text=_summarize_tool(ev.get("tool_name", ""), ev.get("tool_input", {})),
+                options=["allow", "deny"],
+                tool_name=ev.get("tool_name", ""),
+            )
+            s.pending_tool_use_id = ev.get("tool_use_id")
+            s.status = "needs_permission"
+        elif kind == "needs_choice":
+            text, options = _parse_question(ev.get("tool_input", {}))
+            s.pending = Prompt(kind="choice", text=text, options=options,
+                               tool_name=ev.get("tool_name", ""))
+            s.pending_tool_use_id = ev.get("tool_use_id")
+            s.status = "needs_choice"
 
     # --- driving ----------------------------------------------------------
 
