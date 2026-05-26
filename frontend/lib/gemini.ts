@@ -133,6 +133,15 @@ export class GeminiSession implements VoiceSession {
   private userText = "";
   private usage: VoiceUsage = emptyUsage();
 
+  // Reconnection: Gemini ends a session on a time/context limit. We keep the
+  // latest session-resumption handle and, on an unexpected close, reconnect with
+  // it to resume the SAME conversation (context preserved).
+  private stopped = false;          // set by stop() so we don't reconnect on purpose
+  private reconnecting = false;
+  private resumeHandle?: string;    // latest handle from sessionResumptionUpdate
+  private connectVoice?: string;
+  private onSetupComplete?: () => void;
+
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
   }
@@ -141,46 +150,50 @@ export class GeminiSession implements VoiceSession {
     const emit = this.opts.onEvent;
     emit({ type: "status", status: "Minting token..." });
 
-    const [sessionRes, toolsRes] = await Promise.all([
-      fetch("/api/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: "gemini",
-          model: this.opts.model,
-          voice: this.opts.voice,
-        }),
-      }),
-      fetch("/api/tools"),
-    ]);
+    const toolsRes = await fetch("/api/tools");
+    if (toolsRes.ok) this.tools = (await toolsRes.json()).tools || [];
 
+    // Prepare audio graph before the socket opens so we can stream immediately.
+    // It persists across reconnects — only the WebSocket is re-established.
+    await this.initAudio();
+    await this.openSocket();
+  }
+
+  // Mint a fresh single-use token and open the Gemini WebSocket. Pass a
+  // resumption handle to resume an existing conversation (used on reconnect).
+  private async openSocket(resumeHandle?: string): Promise<void> {
+    const emit = this.opts.onEvent;
+    const sessionRes = await fetch("/api/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "gemini",
+        model: this.opts.model,
+        voice: this.opts.voice,
+      }),
+    });
     if (!sessionRes.ok) throw new Error(`Session error: ${await sessionRes.text()}`);
     const session = await sessionRes.json();
     const token: string = session.value;
     const wsUrl: string = session.ws_url;
     if (!token || !wsUrl) throw new Error("Gemini session response missing token/ws_url");
     this.activeModel = session.model;
-    const voice: string = session.voice || this.opts.voice || "Kore";
-    if (toolsRes.ok) this.tools = (await toolsRes.json()).tools || [];
+    this.connectVoice = session.voice || this.opts.voice || "Kore";
 
-    // Prepare audio graph before the socket opens so we can stream immediately.
-    await this.initAudio();
-
-    emit({ type: "status", status: "Connecting to Gemini..." });
+    emit({ type: "status", status: resumeHandle ? "Reconnecting to Gemini..." : "Connecting to Gemini..." });
     const ws = new WebSocket(`${wsUrl}?access_token=${encodeURIComponent(token)}`);
     this.ws = ws;
 
-    ws.addEventListener("open", () => this.sendSetup(session.model, voice));
+    ws.addEventListener("open", () => this.sendSetup(session.model, this.connectVoice!, resumeHandle));
     ws.addEventListener("message", (ev) => this.onMessage(ev.data));
-    ws.addEventListener("error", () =>
-      emit({ type: "error", message: "Gemini WebSocket error" }),
-    );
-    ws.addEventListener("close", (ev) => {
-      if (!ev.wasClean) emit({ type: "error", message: `Gemini socket closed (${ev.code})` });
+    ws.addEventListener("error", () => {
+      if (!this.reconnecting) emit({ type: "error", message: "Gemini WebSocket error" });
     });
+    ws.addEventListener("close", (ev) => this.onClose(ev));
   }
 
   stop(): void {
+    this.stopped = true;  // user-initiated: the close handler must NOT reconnect
     try {
       this.ws?.close();
     } catch {
@@ -196,6 +209,71 @@ export class GeminiSession implements VoiceSession {
     this.outCtx = undefined;
     this.setupDone = false;
     this.opts.onEvent({ type: "status", status: "Disconnected." });
+  }
+
+  // --- reconnection -------------------------------------------------------
+
+  private onClose(ev: CloseEvent): void {
+    // Intentional disconnect, or a reconnect attempt already in flight: ignore.
+    if (this.stopped || this.reconnecting) return;
+    this.setupDone = false;
+    this.opts.onEvent({ type: "status", status: `Connection lost (${ev.code}) — reconnecting…` });
+    this.opts.onEvent({ type: "state", state: "connecting" });
+    void this.reconnectLoop();
+  }
+
+  // Resolves once the next setupComplete arrives, or false on timeout.
+  private waitForSetup(timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        this.onSetupComplete = undefined;
+        resolve(ok);
+      };
+      this.onSetupComplete = () => finish(true);
+      setTimeout(() => finish(false), timeoutMs);
+    });
+  }
+
+  private async reconnectLoop(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    const backoff = [300, 1000, 2000, 4000, 8000, 8000];
+    for (let i = 0; i < backoff.length && !this.stopped; i++) {
+      await new Promise((r) => setTimeout(r, backoff[i]));
+      if (this.stopped) break;
+      try {
+        await this.openSocket(this.resumeHandle);
+      } catch {
+        continue; // mint/open failed — back off and retry
+      }
+      if (await this.waitForSetup(8000)) {
+        this.reconnecting = false;
+        this.notifyReconnected();
+        return;
+      }
+      try { this.ws?.close(); } catch { /* ignore */ }  // setup stalled — retry
+    }
+    this.reconnecting = false;
+    if (!this.stopped) {
+      this.opts.onEvent({
+        type: "error",
+        message: "Couldn't reconnect the voice session. Please disconnect and reconnect.",
+      });
+    }
+  }
+
+  private notifyReconnected(): void {
+    this.opts.onEvent({ type: "status", status: "Reconnected." });
+    this.opts.onEvent({ type: "state", state: "listening" });
+    // "Reconnect but notify": have the agent briefly tell the user it's back.
+    // The resumption handle restored the prior context, so it can continue.
+    this.injectUpdate(
+      "[connection] You briefly lost the voice connection and just reconnected. " +
+        "In one short sentence, let the user know you're back, then continue where you left off.",
+    );
   }
 
   // --- audio setup --------------------------------------------------------
@@ -257,7 +335,7 @@ export class GeminiSession implements VoiceSession {
   }
 
   // --- protocol -----------------------------------------------------------
-  private sendSetup(model: string, voice: string) {
+  private sendSetup(model: string, voice: string, resumeHandle?: string) {
     const cost = !!this.opts.costSaver;
     const instructions = this.opts.instructions + (cost ? COST_SAVER_BREVITY : "");
     const setup: Record<string, unknown> = {
@@ -271,7 +349,12 @@ export class GeminiSession implements VoiceSession {
       tools: toGeminiTools(this.tools),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      sessionResumption: {},
+      // Resume the prior conversation when reconnecting (handle preserves
+      // context); otherwise start a fresh resumable session.
+      sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
+      // Let a single session outlive the model's context window by compressing
+      // the oldest turns — so long conversations don't hit a hard context cap.
+      contextWindowCompression: { slidingWindow: {} },
     };
     const fnCount = (toGeminiTools(this.tools)[0] as any)?.functionDeclarations?.length || 0;
     console.log(`[gemini] setup model=${setup.model} tools=${fnCount} costSaver=${cost}`);
@@ -296,8 +379,25 @@ export class GeminiSession implements VoiceSession {
 
     if (msg.setupComplete) {
       this.setupDone = true;
+      this.onSetupComplete?.();  // unblocks a reconnect attempt waiting on setup
       emit({ type: "status", status: "Connected — start talking." });
       emit({ type: "state", state: "listening" });
+      return;
+    }
+
+    // Gemini periodically emits a resumption handle; keep the latest so we can
+    // resume this exact conversation if the socket drops.
+    if (msg.sessionResumptionUpdate) {
+      const u = msg.sessionResumptionUpdate;
+      if (u.resumable && u.newHandle) this.resumeHandle = u.newHandle;
+      return;
+    }
+
+    // Sent shortly before Gemini terminates a session (e.g. time limit). The
+    // socket will close next; the close handler reconnects with the handle.
+    if (msg.goAway) {
+      console.log("[gemini] goAway, timeLeft=", msg.goAway.timeLeft);
+      emit({ type: "status", status: "Session expiring — will reconnect…" });
       return;
     }
 
