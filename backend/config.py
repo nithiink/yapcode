@@ -12,7 +12,9 @@ import os
 try:  # dotenv is present in the venv; stay importable without it (e.g. in tests)
     from dotenv import load_dotenv
 
-    load_dotenv()
+    # override=True so .env is authoritative: empty/stale vars exported in the
+    # shell environment must NOT shadow the values configured in .env.
+    load_dotenv(override=True)
 except Exception:
     pass
 
