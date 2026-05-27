@@ -18,6 +18,7 @@ import pty
 import signal
 import struct
 import termios
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -294,14 +295,17 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
 @app.post("/tools/execute")
 async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     """Run a function call dispatched from the voice session."""
+    start = time.monotonic()
     log.info("tool call: %s args=%s", req.name, req.arguments)
     try:
         result = await dispatch_tool(req.name, req.arguments)
+        log.info("tool done: %s in %.2fs", req.name, time.monotonic() - start)
         return {"ok": True, "result": result}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        log.info("tool failed: %s in %.2fs (%s)", req.name, time.monotonic() - start, exc)
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
-        log.exception("tool error")
+        log.exception("tool error after %.2fs", time.monotonic() - start)
         return {"ok": False, "error": str(exc)}
