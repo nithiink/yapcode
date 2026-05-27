@@ -48,12 +48,18 @@ function connectionParams(provider: VoiceProvider, costSaver: boolean): Partial<
       voice: "Kore",
     };
   }
-  // Use OpenAI direct explicitly (configured today). To route this toggle through
-  // Azure instead, change provider to "azure" once the Azure resource is set up.
+  if (provider === "azure") {
+    // Azure-hosted OpenAI realtime. The model is the Azure *deployment* name set
+    // server-side (AZURE_OPENAI_DEPLOYMENT) — point that at your gpt-realtime-mini
+    // deployment. Cost-saver is applied via session config, not a model swap.
+    return { provider: "azure", voice: "marin" };
+  }
+  // OpenAI direct — the "native" option, kept switchable alongside Azure.
   return { provider: "openai", model: "gpt-realtime-mini", voice: "marin" };
 }
 
 const PROVIDER_LABEL: Record<VoiceProvider, string> = {
+  azure: "Azure",
   openai: "OpenAI",
   gemini: "Gemini",
 };
@@ -74,7 +80,7 @@ const STATE_LABEL: Record<VoiceState, string> = {
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
-  const [provider, setProvider] = useState<VoiceProvider>("openai");
+  const [provider, setProvider] = useState<VoiceProvider>("azure");
   const [backend, setBackend] = useState<ClaudeBackend>("cli");
   const [costSaver, setCostSaver] = useState(true);
   const [modelLabel, setModelLabel] = useState("");
@@ -248,7 +254,7 @@ export default function VoiceAgent() {
   // Restore toggle prefs.
   useEffect(() => {
     const p = localStorage.getItem("vc_provider");
-    if (p === "openai" || p === "gemini") setProvider(p);
+    if (p === "azure" || p === "openai" || p === "gemini") setProvider(p);
     const c = localStorage.getItem("vc_cost_saver");
     if (c != null) setCostSaver(c === "1");
     const b = localStorage.getItem("vc_backend");
@@ -525,7 +531,7 @@ export default function VoiceAgent() {
 
       <div className="controls-row">
           <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
-            {(["openai", "gemini"] as VoiceProvider[]).map((p) => (
+            {(["azure", "openai", "gemini"] as VoiceProvider[]).map((p) => (
               <button
                 key={p}
                 className={`segbtn ${provider === p ? "on" : ""}`}

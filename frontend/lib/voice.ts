@@ -39,9 +39,10 @@ export type RealtimeEvent =
   | { type: "usage"; usage: VoiceUsage }
   | { type: "error"; message: string };
 
-// UI-level provider choice. "openai" covers the OpenAI/Azure WebRTC family
-// (the backend picks azure vs openai from its env default).
-export type VoiceProvider = "openai" | "gemini";
+// UI-level provider choice. "azure" and "openai" are both the OpenAI realtime
+// WebRTC family — azure routes through your Azure OpenAI deployment, openai is
+// the direct OpenAI API ("native").
+export type VoiceProvider = "azure" | "openai" | "gemini";
 
 export type ClaudeBackend = "cli" | "sdk";
 
