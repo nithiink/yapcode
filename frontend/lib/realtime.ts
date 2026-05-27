@@ -259,8 +259,34 @@ export class RealtimeSession implements VoiceSession {
         emit({ type: "state", state: hadCall ? "thinking" : "listening" });
         break;
       }
+      // The server reports remaining tokens/requests after each response. Surface
+      // it so we can SEE throttling (esp. the 60 RPM ceiling) instead of guessing.
+      case "rate_limits.updated": {
+        const limits: any[] = evt.rate_limits || [];
+        console.log(
+          "[realtime] rate_limits: " +
+            limits
+              .map((l) => `${l.name} ${l.remaining}/${l.limit} (reset ${l.reset_seconds}s)`)
+              .join(" · "),
+        );
+        const low = limits.find(
+          (l) => typeof l.remaining === "number" && l.remaining <= Math.max(2, (l.limit || 0) * 0.1),
+        );
+        if (low) {
+          emit({
+            type: "status",
+            status: `⚠ ${low.name} rate limit low: ${low.remaining}/${low.limit} left, resets in ${Math.ceil(low.reset_seconds || 0)}s`,
+          });
+        }
+        break;
+      }
       case "error": {
-        emit({ type: "error", message: evt.error?.message || JSON.stringify(evt) });
+        const e = evt.error || {};
+        const rate = e.code === "rate_limit_exceeded" || /rate limit/i.test(e.message || "");
+        emit({
+          type: "error",
+          message: (rate ? "Rate limited by the provider: " : "") + (e.message || JSON.stringify(evt)),
+        });
         break;
       }
       default:
