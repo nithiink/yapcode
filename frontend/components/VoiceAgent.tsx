@@ -350,7 +350,7 @@ export default function VoiceAgent() {
       }
       if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
       if (
-        ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session"].includes(
+        ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session"].includes(
           e.name,
         )
       ) {
