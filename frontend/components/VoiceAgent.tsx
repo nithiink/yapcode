@@ -7,8 +7,11 @@ import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSess
 import { INSTRUCTIONS } from "@/lib/instructions";
 import LiveTerminal from "./LiveTerminal";
 
-type Turn = { role: "user" | "assistant"; text: string; final: boolean };
-type ToolLine = { name: string; ok?: boolean };
+// One ordered list of bubbles + tool rows so the live "Conversation" panel renders
+// tool calls inline with the surrounding turns instead of piling them at the end.
+type TimelineItem =
+  | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
+  | { kind: "tool"; name: string; ok?: boolean };
 type Sess = {
   handle: string;
   session_id: string | null;
@@ -87,8 +90,7 @@ export default function VoiceAgent() {
   const [vstate, setVstate] = useState<VoiceState>("idle");
   const [muted, setMuted] = useState(false);
   const [status, setStatus] = useState("Tap connect and start talking.");
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [tools, setTools] = useState<ToolLine[]>([]);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [pending, setPending] = useState<Pending>(null);
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
@@ -333,18 +335,20 @@ export default function VoiceAgent() {
     else if (e.type === "usage") setVoiceUsage(e.usage);
     else if (e.type === "error") setStatus(`Error: ${e.message}`);
     else if (e.type === "transcript") {
-      setTurns((prev) => {
+      setTimeline((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last && last.role === e.role && !last.final) {
-          next[next.length - 1] = { role: e.role, text: e.text, final: e.final };
+        // Coalesce streaming deltas into the in-progress turn only if it's still
+        // the most recent item (nothing — including a tool row — came in between).
+        if (last && last.kind === "turn" && last.role === e.role && !last.final) {
+          next[next.length - 1] = { kind: "turn", role: e.role, text: e.text, final: e.final };
         } else {
-          next.push({ role: e.role, text: e.text, final: e.final });
+          next.push({ kind: "turn", role: e.role, text: e.text, final: e.final });
         }
-        return next.slice(-40);
+        return next.slice(-80);
       });
     } else if (e.type === "tool_call" && e.result !== undefined) {
-      setTools((prev) => [...prev, { name: e.name, ok: e.ok }].slice(-20));
+      setTimeline((prev) => [...prev, { kind: "tool" as const, name: e.name, ok: e.ok }].slice(-80));
       const res: any = e.result;
       // tell_claude/answer_prompt now return "working" — poll for the real result.
       if (
@@ -618,20 +622,21 @@ export default function VoiceAgent() {
           </h2>
           <div className="rule" />
           <div className="scroll">
-            {turns.length === 0 && tools.length === 0 && (
+            {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
-            {turns.map((t, i) => (
-              <div key={i} className={`bubble ${t.role}`}>
-                <div className="who">{t.role === "user" ? "You" : "Assistant"}</div>
-                {t.text}
-              </div>
-            ))}
-            {tools.slice(-6).map((t, i) => (
-              <div key={`tool-${i}`} className={`toolrow ${t.ok === false ? "err" : ""}`}>
-                → {t.name} {t.ok === false ? "✗" : "✓"}
-              </div>
-            ))}
+            {timeline.map((item, i) =>
+              item.kind === "turn" ? (
+                <div key={i} className={`bubble ${item.role}`}>
+                  <div className="who">{item.role === "user" ? "You" : "Assistant"}</div>
+                  {item.text}
+                </div>
+              ) : (
+                <div key={i} className={`toolrow ${item.ok === false ? "err" : ""}`}>
+                  → {item.name} {item.ok === false ? "✗" : "✓"}
+                </div>
+              ),
+            )}
           </div>
         </div>
 
