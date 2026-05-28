@@ -342,7 +342,7 @@ export default function VoiceAgent() {
       const res: any = e.result;
       // tell_claude/answer_prompt now return "working" — poll for the real result.
       if (
-        (e.name === "tell_claude" || e.name === "answer_prompt") &&
+        (e.name === "tell_claude" || e.name === "answer_prompt" || e.name === "run_slash_command") &&
         res?.status === "working" &&
         res.session_id
       ) {
@@ -350,7 +350,7 @@ export default function VoiceAgent() {
       }
       if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
       if (
-        ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session"].includes(
+        ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
           e.name,
         )
       ) {

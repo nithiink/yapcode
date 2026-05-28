@@ -34,6 +34,11 @@ def register_owner(handle: str, backend: str) -> None:
     _owner[handle] = (backend or "cli").lower()
 
 
+def backend_of(handle: str) -> str | None:
+    """Which backend owns this handle ('cli' or 'sdk'), or None if unknown."""
+    return _owner.get(handle)
+
+
 def runner_for(handle: str) -> ClaudeRunner:
     backend = _owner.get(handle)
     if backend is not None:

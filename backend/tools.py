@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from session_manager import (
+    backend_of,
     close_session,
     default_name_for,
     get_runner,
@@ -24,6 +25,7 @@ from session_manager import (
     set_session_mode,
     set_session_name,
 )
+from slash_commands import list_slash_commands
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -83,6 +85,32 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "name": {"type": "string", "description": "The new human-readable name."},
             },
             "required": ["session_id", "name"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_slash_commands",
+        "description": "List the slash commands available in a Claude session — built-ins (/init, /review, /clear, /model, /compact, …), user skills and plugin skills (e.g. /kb-query, /search-chat-history, /frontend-design), and any project-local commands. Call this when the user asks 'what commands are available?' or you need to find the right command for a request. If you pass session_id, the result also includes that session's project-local commands.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Optional: a session (name or id) to also include its project's local .claude/commands/."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "run_slash_command",
+        "description": "Invoke a Claude Code slash command in a session — a skill or built-in like /init, /review, /security-review, /verify, /compact, /clear, or any user/plugin/project command. Use when the user asks for something that maps cleanly to a command, e.g. 'initialize this project' (/init), 'review the diff' (/review), 'do a security review' (/security-review), 'compact the context' (/compact), 'call /kb-query about X'. For freeform engineering work prefer tell_claude. Use list_slash_commands first if unsure what's available. Returns immediately with status 'working'; you'll be told the result automatically.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "The session (name or id) to run the command in."},
+                "command": {"type": "string", "description": "Command name, with or without the leading slash (e.g. 'init' or '/init'). Use the FULL name — prefixes can be ambiguous."},
+                "args": {"type": "string", "description": "Optional space-separated arguments that follow the command (e.g. a PR number for /review)."},
+            },
+            "required": ["session_id", "command"],
         },
     },
     {
@@ -215,6 +243,34 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         sid = resolve_session(args["session_id"])
         mode = await set_session_mode(sid, args["mode"])
         return {"session_id": sid, "mode": mode}
+
+    if name == "list_slash_commands":
+        cwd: str | None = None
+        sid_arg = args.get("session_id")
+        if sid_arg:
+            try:
+                sid = resolve_session(sid_arg)
+                sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
+                if sess:
+                    cwd = sess["cwd"]
+            except KeyError:
+                pass
+        return {"commands": list_slash_commands(cwd)}
+
+    if name == "run_slash_command":
+        sid = resolve_session(args["session_id"])
+        if backend_of(sid) != "cli":
+            return {"ok": False, "error": "slash commands run in the interactive CLI; this session uses the SDK backend."}
+        cmd = str(args.get("command", "")).strip().lstrip("/")
+        if not cmd:
+            raise ValueError("command is required (e.g. 'init' or '/init')")
+        extra = (args.get("args") or "").strip()
+        text = f"/{cmd}" + (f" {extra}" if extra else "")
+        # Drive the live CLI: literal-paste the slash command + Enter, same path
+        # tell_claude uses for a message. Result events stream back through the
+        # existing event tail / poll_session pipeline.
+        runner_for(sid).start_advance(sid, text)
+        return {"status": "working", "session_id": sid, "sent": text}
 
     if name == "tell_claude":
         # Non-blocking: Claude turns can run for minutes. Kick it off in the
