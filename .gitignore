@@ -19,5 +19,9 @@ frontend/.certs/
 # Default location is inside the project; override with VC_SESSION_STORE.
 .voice-claude/
 
+# Cost log (per-connection voice + Claude session cost JSONL; for analysis,
+# not source). Override path with VC_COST_LOG_PATH.
+cost-log.jsonl
+
 # Misc
 .DS_Store

@@ -29,6 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from cost_log import COST_LOG_PATH, append_cost_event
 from session_manager import cli_pane_for, rehydrate_cli_sessions, shutdown_all
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
@@ -93,6 +94,13 @@ class SessionRequest(BaseModel):
 class ToolCallRequest(BaseModel):
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class CostLogRequest(BaseModel):
+    # Free-form record from the UI — schema is enforced by the writer's docstring
+    # rather than pydantic so we can evolve fields without bumping the API. The
+    # backend stamps `ts` if the client omits it.
+    record: dict[str, Any]
 
 
 @app.get("/health")
@@ -290,6 +298,14 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+
+
+@app.post("/cost/log")
+async def log_cost(req: CostLogRequest) -> dict[str, Any]:
+    """Append one cost record to the JSONL log. The UI calls this on connection
+    start, periodically while connected, and on disconnect."""
+    await append_cost_event(req.record)
+    return {"ok": True, "path": str(COST_LOG_PATH)}
 
 
 @app.post("/tools/execute")

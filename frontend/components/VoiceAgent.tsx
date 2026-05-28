@@ -108,6 +108,19 @@ export default function VoiceAgent() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Cost-log connection identity & snapshot timer. connectionId persists for one
+  // voice connect()/disconnect() cycle so snapshots can be grouped later.
+  const costLogRef = useRef<{
+    connectionId: string;
+    startedAt: number;
+    provider: VoiceProvider;
+    backend: ClaudeBackend;
+    model: string;
+    costSaver: boolean;
+    voiceUsage: VoiceUsage | null;
+    sessions: Sess[];
+  } | null>(null);
+  const costLogTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 
@@ -116,9 +129,20 @@ export default function VoiceAgent() {
       stopAnalyser();
       stopPolling();
       if (txPollRef.current) clearInterval(txPollRef.current);
+      if (costLogTimerRef.current) clearInterval(costLogTimerRef.current);
     },
     [],
   );
+
+  // Keep the cost-log context in sync with the latest voice usage + Claude
+  // session list so the periodic snapshot reads up-to-date values without
+  // recreating the timer (which would reset its 30s phase).
+  useEffect(() => {
+    if (costLogRef.current) costLogRef.current.voiceUsage = voiceUsage;
+  }, [voiceUsage]);
+  useEffect(() => {
+    if (costLogRef.current) costLogRef.current.sessions = sessions;
+  }, [sessions]);
 
   const fetchTranscript = async (handle: string) => {
     try {
@@ -278,6 +302,66 @@ export default function VoiceAgent() {
     localStorage.setItem("vc_cost_saver", costSaver ? "1" : "0");
   }, [costSaver]);
 
+  // Append one cost-log record to the backend's JSONL. Fire-and-forget — UI
+  // never blocks on it and a failure here must not break the session.
+  const logCost = (record: Record<string, unknown>) => {
+    try {
+      fetch("/api/cost/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record }),
+        keepalive: true, // lets the request survive a tab-close on the disconnect path
+      }).catch(() => undefined);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Build a snapshot of voice + per-session Claude costs as of right now.
+  // Pure read of refs/state; safe to call from intervals and event handlers.
+  const buildCostSnapshot = (kind: "snapshot" | "connection_end") => {
+    const ctx = costLogRef.current;
+    if (!ctx) return null;
+    const u = ctx.voiceUsage;
+    const sessSnap = ctx.sessions.map((s) => ({
+      handle: s.handle,
+      name: s.name || null,
+      cwd: s.cwd,
+      backend: s.backend || null,
+      model: s.model,
+      mode: s.mode || null,
+      status: s.status,
+      cost_usd: s.cost_usd || 0,
+    }));
+    const claudeTotalUsd = sessSnap.reduce((acc, s) => acc + (s.cost_usd || 0), 0);
+    const rec: Record<string, unknown> = {
+      kind,
+      connectionId: ctx.connectionId,
+      provider: ctx.provider,
+      model: ctx.model,
+      backend: ctx.backend,
+      costSaver: ctx.costSaver,
+      voice: u
+        ? {
+            costUsd: u.costUsd,
+            audioInTokens: u.audioInTokens,
+            audioCachedTokens: u.audioCachedTokens,
+            audioOutTokens: u.audioOutTokens,
+            textInTokens: u.textInTokens,
+            textCachedTokens: u.textCachedTokens,
+            textOutTokens: u.textOutTokens,
+            cacheHitRate: u.cacheHitRate,
+          }
+        : null,
+      claudeSessions: sessSnap,
+      claudeTotalUsd,
+    };
+    if (kind === "connection_end") {
+      rec.durationSec = (Date.now() - ctx.startedAt) / 1000;
+    }
+    return rec;
+  };
+
   const refreshSessions = async () => {
     try {
       const r = await fetch("/api/tools/execute", {
@@ -385,10 +469,41 @@ export default function VoiceAgent() {
     sessionRef.current = s;
     try {
       await s.start(audioRef.current!);
-      setModelLabel(s.activeModel || params.model || PROVIDER_LABEL[provider]);
+      const model = s.activeModel || params.model || PROVIDER_LABEL[provider];
+      setModelLabel(model);
       setConnected(true);
       setMuted(false);
       refreshSessions();
+      // Start the cost-log lifecycle: emit a connection_start record, hold a
+      // context object updated by the voiceUsage/sessions effects, then snapshot
+      // every 30s until disconnect.
+      const connectionId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      costLogRef.current = {
+        connectionId,
+        startedAt: Date.now(),
+        provider,
+        backend,
+        model,
+        costSaver,
+        voiceUsage: null,
+        sessions: [],
+      };
+      logCost({
+        kind: "connection_start",
+        connectionId,
+        provider,
+        model,
+        backend,
+        costSaver,
+      });
+      if (costLogTimerRef.current) clearInterval(costLogTimerRef.current);
+      costLogTimerRef.current = setInterval(() => {
+        const snap = buildCostSnapshot("snapshot");
+        if (snap) logCost(snap);
+      }, 30_000);
     } catch (err: any) {
       setStatus(`Failed: ${err?.message || err}`);
       setVstate("idle");
@@ -396,6 +511,17 @@ export default function VoiceAgent() {
   };
 
   const disconnect = () => {
+    // Final cost-log record BEFORE we tear down state, while voiceUsage and the
+    // session list still reflect what happened. keepalive on the POST lets it
+    // survive even if the user closes the tab right after.
+    const finalRec = buildCostSnapshot("connection_end");
+    if (finalRec) logCost(finalRec);
+    if (costLogTimerRef.current) {
+      clearInterval(costLogTimerRef.current);
+      costLogTimerRef.current = null;
+    }
+    costLogRef.current = null;
+
     sessionRef.current?.stop();
     sessionRef.current = null;
     stopAnalyser();
