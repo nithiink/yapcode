@@ -25,14 +25,7 @@ from session_manager import (
     set_session_mode,
     set_session_name,
 )
-from slash_commands import BUILTIN_SLASH_COMMANDS, list_slash_commands
-
-# Names of CLI built-in slash commands (e.g. /compact, /context, /clear, /model).
-# These do NOT generate an assistant turn, so they don't trigger the Stop hook
-# the regular advance() loop waits on — sending them through tell_claude's pipe
-# would hang. run_slash_command routes them to a different path that captures
-# the live screen after the command settles.
-_BUILTIN_SLASH_NAMES = {c["name"] for c in BUILTIN_SLASH_COMMANDS}
+from slash_commands import list_slash_commands
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -274,13 +267,13 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         extra = (args.get("args") or "").strip()
         text = f"/{cmd}" + (f" {extra}" if extra else "")
         runner = runner_for(sid)
-        # Built-in CLI commands (compact, context, clear, model, etc.) don't drive
-        # an assistant turn, so they never fire the Stop hook — advance() would
-        # wait on _stop.wait() forever. Route them through a screen-settle path
-        # that captures the visible output and returns 'completed' immediately.
-        # Skills and user/plugin/project commands DO drive Claude, so they go
-        # through the normal pipeline.
-        if cmd in _BUILTIN_SLASH_NAMES and hasattr(runner, "start_builtin_slash"):
+        # Route every slash command through the hybrid path: it races the Stop
+        # hook (for skills / commands that drive a real Claude turn) against
+        # screen-settle detection (for UI-only built-ins that never fire Stop).
+        # Whichever fires first wins, so we don't need to maintain a perfect
+        # list of which built-ins fire Stop. start_advance is the fallback only
+        # if the runner doesn't expose the hybrid path (e.g. SDK).
+        if hasattr(runner, "start_builtin_slash"):
             runner.start_builtin_slash(sid, text)
         else:
             runner.start_advance(sid, text)

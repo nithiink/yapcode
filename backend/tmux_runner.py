@@ -755,17 +755,19 @@ class TmuxClaudeRunner(ClaudeRunner):
             self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
 
     def start_builtin_slash(self, handle: str, command: str,
-                            settle_secs: float = 2.0, max_wait: float = 8.0) -> None:
-        """Run a CLI built-in slash command (/compact, /context, /clear, /model,
-        …). These do NOT emit a Stop hook because they don't drive an assistant
-        turn, so the normal advance() pipeline would hang forever waiting on
-        _stop.wait(). Instead: send keys, wait until the screen stops changing,
-        capture it, and return a synthetic 'completed' result so the voice agent
-        gets a [Claude update] immediately. `command` should start with '/'."""
+                            settle_secs: float = 1.5, max_wait: float = 60.0) -> None:
+        """Run a slash command — hybrid path. Races the Stop hook against a
+        screen-settle detector and returns whichever fires first.
+
+        Why hybrid: built-ins like /compact, /context, /clear DON'T fire a Stop
+        hook (no assistant turn), so a normal advance() hangs on _stop.wait()
+        forever. Skills DO fire a Stop hook. Rather than maintain a list and
+        risk missing a built-in, we race both detectors and use the right one
+        per-command automatically. `command` should start with '/'."""
         self._get(handle)
         self._harvest_finished(handle)
         task = asyncio.create_task(
-            self._run_builtin_slash(handle, command, settle_secs, max_wait)
+            self._run_slash(handle, command, settle_secs, max_wait)
         )
         if handle in self._bg and not self._bg[handle].done():
             s = self._sessions[handle]
@@ -774,8 +776,8 @@ class TmuxClaudeRunner(ClaudeRunner):
         else:
             self._bg[handle] = task
 
-    async def _run_builtin_slash(self, handle: str, command: str,
-                                 settle_secs: float, max_wait: float) -> AdvanceResult:
+    async def _run_slash(self, handle: str, command: str,
+                         settle_secs: float, max_wait: float) -> AdvanceResult:
         s = self._get(handle)
         async with s._turn_lock:
             if s.pending is not None:
@@ -784,34 +786,57 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._stop.clear()
             s.status = "running"
             await self._send_message(s, command)
-            # Settle detection: capture every 250ms; stop when two consecutive
-            # snapshots match (screen stopped changing) or max_wait elapses.
+
             loop = asyncio.get_event_loop()
-            deadline = loop.time() + max_wait
-            last = ""
-            stable_since: float | None = None
-            while loop.time() < deadline:
-                pane = await self._capture(s)
-                if pane == last:
-                    if stable_since is None:
-                        stable_since = loop.time()
-                    elif loop.time() - stable_since >= settle_secs:
-                        break
-                else:
-                    stable_since = None
-                    last = pane
-                await asyncio.sleep(0.25)
-            # Trim trailing/leading blank lines; the live pane is wider than the
-            # voice can comfortably narrate but a summary is enough.
-            rows = [r.rstrip() for r in last.splitlines()]
+            settle_task = asyncio.create_task(self._wait_for_settle(s, settle_secs, max_wait))
+            stop_task = asyncio.create_task(s._stop.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {settle_task, stop_task}, return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                for t in (settle_task, stop_task):
+                    if not t.done():
+                        t.cancel()
+
+            if stop_task in done:
+                # Real Claude turn — collect the structured assistant text.
+                log.info("slash %s: Stop hook fired (real turn)", command)
+                return self._collect(s)
+
+            # Settle detection won → UI-only built-in. Return what's on screen.
+            log.info("slash %s: screen settled (UI-only built-in)", command)
+            pane_text = settle_task.result() if not settle_task.cancelled() else ""
+            rows = [r.rstrip() for r in pane_text.splitlines()]
             while rows and not rows[0].strip():
                 rows.pop(0)
             while rows and not rows[-1].strip():
                 rows.pop()
-            text = "\n".join(rows[-50:])
+            text = "\n".join(rows[-50:]) or "(slash command ran)"
             s.status = "completed"
             return AdvanceResult(status="completed", assistant_text=text,
                                  session_id=s.handle, cost_usd=0.0)
+
+    async def _wait_for_settle(self, s: _TmuxSession, settle_secs: float,
+                                max_wait: float) -> str:
+        """Return the visible pane once it has stopped changing for `settle_secs`
+        seconds, or once `max_wait` elapses. Captures every 250ms."""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + max_wait
+        last = ""
+        stable_since: float | None = None
+        while loop.time() < deadline:
+            pane = await self._capture(s)
+            if pane == last:
+                if stable_since is None:
+                    stable_since = loop.time()
+                elif loop.time() - stable_since >= settle_secs:
+                    return pane
+            else:
+                stable_since = None
+                last = pane
+            await asyncio.sleep(0.25)
+        return last
 
     def poll_status(self, handle: str) -> dict:
         """Return the oldest unread result for this session, or the live status.

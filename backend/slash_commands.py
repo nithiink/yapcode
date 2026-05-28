@@ -19,19 +19,40 @@ import os
 import re
 
 
-# CLI built-ins baked into `claude` — not enumerable from disk. Conservative,
-# well-known set; the model is free to try others (e.g. plugin marketplace cmds).
+# CLI built-ins baked into `claude` — not enumerable from disk. Many of these
+# render a UI overlay or print a notice WITHOUT driving a Claude turn, which
+# means they never fire the Stop hook the regular advance() loop waits on.
+# tmux_runner routes them through a settle-detect path (universally, with the
+# Stop-hook still racing it — whichever fires first wins) so the voice agent
+# always gets a [Claude update]. The list is conservative; if you add or
+# discover new built-ins put them here so the description shows in
+# list_slash_commands too.
 BUILTIN_SLASH_COMMANDS: list[dict[str, str]] = [
-    {"name": "help",        "description": "Show available commands and shortcuts."},
-    {"name": "clear",       "description": "Clear the conversation history in this session."},
-    {"name": "model",       "description": "Switch the Claude model used in this session (opus/sonnet/haiku)."},
-    {"name": "permissions", "description": "Manage tool permissions for this session."},
-    {"name": "memory",      "description": "Open this session's memory file."},
-    {"name": "resume",      "description": "Resume a previous session by id."},
-    {"name": "add-dir",     "description": "Add a directory to the session's working set."},
-    {"name": "config",      "description": "Open Claude Code configuration."},
-    {"name": "compact",     "description": "Compact the conversation context to free room."},
-    {"name": "cost",        "description": "Show the running cost for this session."},
+    {"name": "help",            "description": "Show available commands and shortcuts."},
+    {"name": "clear",           "description": "Clear the conversation history in this session."},
+    {"name": "model",           "description": "Switch the Claude model used in this session (opus/sonnet/haiku)."},
+    {"name": "permissions",     "description": "Manage tool permissions for this session."},
+    {"name": "memory",          "description": "Open this session's memory file."},
+    {"name": "resume",          "description": "Resume a previous session by id."},
+    {"name": "add-dir",         "description": "Add a directory to the session's working set."},
+    {"name": "config",          "description": "Open Claude Code configuration."},
+    {"name": "compact",         "description": "Compact the conversation context to free room."},
+    {"name": "cost",            "description": "Show the running cost for this session."},
+    {"name": "context",         "description": "Show context-window usage breakdown for this session."},
+    {"name": "agents",          "description": "List and manage Claude subagents."},
+    {"name": "hooks",           "description": "List and manage Claude Code hooks."},
+    {"name": "mcp",             "description": "List and manage MCP servers."},
+    {"name": "skills",          "description": "List and manage skills."},
+    {"name": "login",           "description": "Sign in to Claude Code."},
+    {"name": "logout",          "description": "Sign out of Claude Code."},
+    {"name": "bug",             "description": "File a bug report from this session."},
+    {"name": "vim",             "description": "Toggle vim keybindings in the input box."},
+    {"name": "terminal-setup",  "description": "Configure terminal integration."},
+    {"name": "upgrade",         "description": "Upgrade the Claude Code CLI."},
+    {"name": "export",          "description": "Export the session transcript."},
+    {"name": "usage",           "description": "Show subscription/quota usage."},
+    {"name": "status",          "description": "Show session status info."},
+    {"name": "doctor",          "description": "Diagnose Claude Code setup."},
 ]
 
 
