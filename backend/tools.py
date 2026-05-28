@@ -25,7 +25,14 @@ from session_manager import (
     set_session_mode,
     set_session_name,
 )
-from slash_commands import list_slash_commands
+from slash_commands import BUILTIN_SLASH_COMMANDS, list_slash_commands
+
+# Names of CLI built-in slash commands (e.g. /compact, /context, /clear, /model).
+# These do NOT generate an assistant turn, so they don't trigger the Stop hook
+# the regular advance() loop waits on — sending them through tell_claude's pipe
+# would hang. run_slash_command routes them to a different path that captures
+# the live screen after the command settles.
+_BUILTIN_SLASH_NAMES = {c["name"] for c in BUILTIN_SLASH_COMMANDS}
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -266,10 +273,17 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("command is required (e.g. 'init' or '/init')")
         extra = (args.get("args") or "").strip()
         text = f"/{cmd}" + (f" {extra}" if extra else "")
-        # Drive the live CLI: literal-paste the slash command + Enter, same path
-        # tell_claude uses for a message. Result events stream back through the
-        # existing event tail / poll_session pipeline.
-        runner_for(sid).start_advance(sid, text)
+        runner = runner_for(sid)
+        # Built-in CLI commands (compact, context, clear, model, etc.) don't drive
+        # an assistant turn, so they never fire the Stop hook — advance() would
+        # wait on _stop.wait() forever. Route them through a screen-settle path
+        # that captures the visible output and returns 'completed' immediately.
+        # Skills and user/plugin/project commands DO drive Claude, so they go
+        # through the normal pipeline.
+        if cmd in _BUILTIN_SLASH_NAMES and hasattr(runner, "start_builtin_slash"):
+            runner.start_builtin_slash(sid, text)
+        else:
+            runner.start_advance(sid, text)
         return {"status": "working", "session_id": sid, "sent": text}
 
     if name == "tell_claude":

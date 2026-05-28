@@ -82,6 +82,14 @@ class _TmuxSession:
         self._evbuf = ""
         self._tail: asyncio.Task | None = None
         self._closed = False
+        # FIFO of completed turn results that poll_status hasn't read yet. Keeps a
+        # finished turn's reply from being lost when a new start_advance fires
+        # before poll_status drains it. Bounded so a wedged poll can't blow memory.
+        self._pending_results: list[AdvanceResult] = []
+        # Tasks queued behind the current bg task — runs serialized through
+        # _turn_lock so a rapid second tell_claude doesn't drop the first one's
+        # result (asyncio task ref lost = result lost).
+        self._extra_tasks: list[asyncio.Task] = []
 
 
 class TmuxClaudeRunner(ClaudeRunner):
@@ -222,6 +230,10 @@ class TmuxClaudeRunner(ClaudeRunner):
                 t.cancel()
         self._bg.clear()
         for s in list(self._sessions.values()):
+            for t in s._extra_tasks:
+                if not t.done():
+                    t.cancel()
+            s._extra_tasks.clear()
             s._closed = True
             if s._tail and not s._tail.done():
                 s._tail.cancel()
@@ -359,6 +371,12 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     # --- driving ----------------------------------------------------------
 
+    # Hard safety cap on how long advance() will wait for a Stop hook before
+    # returning whatever's been accumulated. Long enough for slow Claude turns
+    # (multi-minute Bash + thinking), short enough that a missed Stop hook can't
+    # hang the voice agent forever.
+    ADVANCE_HARD_TIMEOUT_S = float(os.getenv("VC_ADVANCE_TIMEOUT_S", "600"))
+
     async def advance(self, handle: str, message: str) -> AdvanceResult:
         s = self._get(handle)
         async with s._turn_lock:
@@ -368,7 +386,22 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._stop.clear()
             s.status = "running"
             await self._send_message(s, message)
-            await s._stop.wait()
+            try:
+                await asyncio.wait_for(s._stop.wait(), timeout=self.ADVANCE_HARD_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                # Don't leave the voice agent in limbo: return what we have plus a
+                # note so it can surface the wait to the user.
+                await self._read_new_text(s)
+                s.status = "completed"
+                log.warning("advance() for %s timed out after %ss with no Stop hook; "
+                            "returning partial result", handle, self.ADVANCE_HARD_TIMEOUT_S)
+                res = self._collect(s)
+                if not res.assistant_text.strip():
+                    res.assistant_text = (
+                        "(no completion event fired within the timeout; "
+                        "the session may still be working — try peek_screen to verify)"
+                    )
+                return res
             return self._collect(s)
 
     async def answer(self, handle: str, choice: str) -> AdvanceResult:
@@ -558,6 +591,10 @@ class TmuxClaudeRunner(ClaudeRunner):
         bg = self._bg.pop(handle, None)
         if bg and not bg.done():
             bg.cancel()
+        for t in s._extra_tasks:
+            if not t.done():
+                t.cancel()
+        s._extra_tasks.clear()
         if s.pending and s.pending.kind == "permission":
             self._write_decision(s, "deny")
         await self._tmux("send-keys", "-t", s.pane, "Escape")
@@ -570,6 +607,10 @@ class TmuxClaudeRunner(ClaudeRunner):
         bg = self._bg.pop(handle, None)
         if bg and not bg.done():
             bg.cancel()
+        for t in s._extra_tasks:
+            if not t.done():
+                t.cancel()
+        s._extra_tasks.clear()
         if s.pending and s.pending.kind == "permission":
             self._write_decision(s, "deny")  # unblock any parked PreToolUse hook
         s._closed = True
@@ -649,26 +690,146 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     # --- non-blocking driving (mirrors SDKClaudeRunner) -------------------
 
+    def _stash_result(self, s: _TmuxSession, task: asyncio.Task) -> None:
+        """Move a completed task's AdvanceResult into the session's pending
+        queue so poll_status can deliver it later. Tolerates cancelled tasks."""
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            res = AdvanceResult(status="error", assistant_text="",
+                                error=str(exc), session_id=s.handle)
+        else:
+            res = task.result()
+        s._pending_results.append(res)
+        if len(s._pending_results) > 8:  # hard cap, newest wins
+            s._pending_results = s._pending_results[-8:]
+
+    def _harvest_finished(self, handle: str) -> None:
+        """Sweep finished tasks (current bg + queued extras) into _pending_results
+        so a rapid new start_advance can't drop a previous turn's reply. The
+        original bug: _bg[handle] = create_task(...) overwrote the prior ref,
+        losing its result — the voice agent then talked about stale output and
+        could only see the latest by peek_screen.
+
+        Order matters: _bg holds the OLDEST in-flight task (the one that owns
+        _turn_lock), extras are newer. Harvest _bg first so results land in the
+        queue in send-order (FIFO)."""
+        s = self._sessions.get(handle)
+        if s is None:
+            return
+        task = self._bg.get(handle)
+        if task is not None and task.done():
+            self._stash_result(s, task)
+            self._bg.pop(handle, None)
+        still_running: list[asyncio.Task] = []
+        for t in s._extra_tasks:
+            if t.done():
+                self._stash_result(s, t)
+            else:
+                still_running.append(t)
+        s._extra_tasks = still_running
+
     def start_advance(self, handle: str, message: str) -> None:
         self._get(handle)
-        self._bg[handle] = asyncio.create_task(self.advance(handle, message))
+        self._harvest_finished(handle)
+        if handle in self._bg and not self._bg[handle].done():
+            # Previous turn still running. Queue this one — _turn_lock will
+            # serialize them and BOTH results land in _pending_results.
+            s = self._sessions[handle]
+            s._extra_tasks.append(asyncio.create_task(self.advance(handle, message)))
+            log.info("start_advance for %s queued behind running turn (%d in queue)",
+                     handle, len(s._extra_tasks))
+        else:
+            self._bg[handle] = asyncio.create_task(self.advance(handle, message))
 
     def start_answer(self, handle: str, choice: str) -> None:
         self._get(handle)
-        self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
+        self._harvest_finished(handle)
+        if handle in self._bg and not self._bg[handle].done():
+            s = self._sessions[handle]
+            s._extra_tasks.append(asyncio.create_task(self.answer(handle, choice)))
+            log.info("start_answer for %s queued behind running turn", handle)
+        else:
+            self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
+
+    def start_builtin_slash(self, handle: str, command: str,
+                            settle_secs: float = 2.0, max_wait: float = 8.0) -> None:
+        """Run a CLI built-in slash command (/compact, /context, /clear, /model,
+        …). These do NOT emit a Stop hook because they don't drive an assistant
+        turn, so the normal advance() pipeline would hang forever waiting on
+        _stop.wait(). Instead: send keys, wait until the screen stops changing,
+        capture it, and return a synthetic 'completed' result so the voice agent
+        gets a [Claude update] immediately. `command` should start with '/'."""
+        self._get(handle)
+        self._harvest_finished(handle)
+        task = asyncio.create_task(
+            self._run_builtin_slash(handle, command, settle_secs, max_wait)
+        )
+        if handle in self._bg and not self._bg[handle].done():
+            s = self._sessions[handle]
+            s._extra_tasks.append(task)
+            log.info("start_builtin_slash for %s queued behind running turn", handle)
+        else:
+            self._bg[handle] = task
+
+    async def _run_builtin_slash(self, handle: str, command: str,
+                                 settle_secs: float, max_wait: float) -> AdvanceResult:
+        s = self._get(handle)
+        async with s._turn_lock:
+            if s.pending is not None:
+                return self._err(s, "a prompt is pending; call answer first")
+            s._delta.clear()
+            s._stop.clear()
+            s.status = "running"
+            await self._send_message(s, command)
+            # Settle detection: capture every 250ms; stop when two consecutive
+            # snapshots match (screen stopped changing) or max_wait elapses.
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + max_wait
+            last = ""
+            stable_since: float | None = None
+            while loop.time() < deadline:
+                pane = await self._capture(s)
+                if pane == last:
+                    if stable_since is None:
+                        stable_since = loop.time()
+                    elif loop.time() - stable_since >= settle_secs:
+                        break
+                else:
+                    stable_since = None
+                    last = pane
+                await asyncio.sleep(0.25)
+            # Trim trailing/leading blank lines; the live pane is wider than the
+            # voice can comfortably narrate but a summary is enough.
+            rows = [r.rstrip() for r in last.splitlines()]
+            while rows and not rows[0].strip():
+                rows.pop(0)
+            while rows and not rows[-1].strip():
+                rows.pop()
+            text = "\n".join(rows[-50:])
+            s.status = "completed"
+            return AdvanceResult(status="completed", assistant_text=text,
+                                 session_id=s.handle, cost_usd=0.0)
 
     def poll_status(self, handle: str) -> dict:
-        task = self._bg.get(handle)
+        """Return the oldest unread result for this session, or the live status.
+        Order: queued completed result > running task (working) > idle. Always
+        sweeps finished tasks into the pending queue first so a turn that
+        finished between polls isn't lost."""
         sid = handle if handle in self._sessions else None
-        if task is None:
-            return {"status": "idle", "session_id": sid}
-        if not task.done():
+        self._harvest_finished(handle)
+        s = self._sessions.get(handle)
+        if s is not None and s._pending_results:
+            return s._pending_results.pop(0).to_dict()
+        bg = self._bg.get(handle)
+        extras_running = s is not None and any(not t.done() for t in s._extra_tasks)
+        if bg is not None and not bg.done():
             return {"status": "working", "session_id": sid}
-        self._bg.pop(handle, None)
-        exc = task.exception()
-        if exc is not None:
-            return {"status": "error", "error": str(exc), "session_id": sid}
-        return task.result().to_dict()
+        if extras_running:
+            return {"status": "working", "session_id": sid}
+        return {"status": "idle", "session_id": sid}
 
     # --- event tail + transcript reading ----------------------------------
 

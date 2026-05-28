@@ -136,6 +136,10 @@ class _Session:
         self._consumer: asyncio.Task | None = None
         self._perm_lock = asyncio.Lock()          # one pending prompt at a time
         self._turn_lock = asyncio.Lock()          # serialize advance/answer
+        # FIFO of completed turn results poll_status hasn't read yet. Keeps a
+        # finished turn's reply from being lost when a new start_advance fires
+        # before poll_status drains it.
+        self._pending_results: list[AdvanceResult] = []
 
 
 class SDKClaudeRunner(ClaudeRunner):
@@ -217,28 +221,68 @@ class SDKClaudeRunner(ClaudeRunner):
 
     # --- non-blocking driving (background + poll) -------------------------
 
+    def _harvest_finished(self, handle: str) -> None:
+        """If the current bg task is done, move its result into the pending queue
+        so a new start_advance/start_answer doesn't drop it. See the matching
+        TmuxClaudeRunner._harvest_finished for the bug history. Note: SDK
+        backend doesn't (yet) carry an extras-queue — the bug surface is
+        smaller because the SDK call itself is more synchronous, but if rapid
+        consecutive start_advance becomes an issue here too, mirror the
+        _extra_tasks pattern from the tmux runner."""
+        task = self._bg.get(handle)
+        if task is None or not task.done():
+            return
+        s = self._sessions.get(handle)
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            self._bg.pop(handle, None)
+            return
+        if s is not None:
+            if exc is not None:
+                res = AdvanceResult(status="error", assistant_text="",
+                                    error=str(exc), session_id=s.session_id)
+            else:
+                res = task.result()
+            s._pending_results.append(res)
+            if len(s._pending_results) > 8:
+                s._pending_results = s._pending_results[-8:]
+        self._bg.pop(handle, None)
+
     def start_advance(self, handle: str, message: str) -> None:
         self._get(handle)  # validate handle
+        self._harvest_finished(handle)
+        if handle in self._bg and not self._bg[handle].done():
+            log.warning("start_advance for %s while previous task still running", handle)
         self._bg[handle] = asyncio.create_task(self.advance(handle, message))
 
     def start_answer(self, handle: str, choice: str) -> None:
         self._get(handle)
+        self._harvest_finished(handle)
+        if handle in self._bg and not self._bg[handle].done():
+            log.warning("start_answer for %s while previous task still running", handle)
         self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
 
     def poll_status(self, handle: str) -> dict[str, Any]:
         """Report the in-flight background turn for a session.
 
-        Returns {"status":"working"} while Claude runs, the full AdvanceResult
-        once it stops (completed/needs_permission/needs_choice/error), or
+        Returns the oldest queued completed result first (so a new start_advance
+        can't drop a previous turn's reply), then the live task status, then
         {"status":"idle"} when nothing is in flight."""
-        task = self._bg.get(handle)
         sid = self._sessions[handle].session_id if handle in self._sessions else None
+        s = self._sessions.get(handle)
+        if s is not None and s._pending_results:
+            return s._pending_results.pop(0).to_dict()
+        task = self._bg.get(handle)
         if task is None:
             return {"status": "idle", "session_id": sid}
         if not task.done():
             return {"status": "working", "session_id": sid}
         self._bg.pop(handle, None)
-        exc = task.exception()
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return {"status": "idle", "session_id": sid}
         if exc is not None:
             return {"status": "error", "error": str(exc), "session_id": sid}
         return task.result().to_dict()

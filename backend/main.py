@@ -296,10 +296,22 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
 async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     """Run a function call dispatched from the voice session."""
     start = time.monotonic()
-    log.info("tool call: %s args=%s", req.name, req.arguments)
+    # poll_session fires every ~1.5s per active session — too noisy to log every
+    # call, but the moment it returns something interesting (not 'working' / not
+    # 'idle') we want to SEE it. Same for the result side below.
+    is_poll = req.name == "poll_session"
+    if not is_poll:
+        log.info("tool call: %s args=%s", req.name, req.arguments)
     try:
         result = await dispatch_tool(req.name, req.arguments)
-        log.info("tool done: %s in %.2fs", req.name, time.monotonic() - start)
+        elapsed = time.monotonic() - start
+        if is_poll:
+            status = (result or {}).get("status")
+            if status not in (None, "working", "idle"):
+                log.info("poll_session -> %s (sid=%s)", status,
+                         (result or {}).get("session_id"))
+        else:
+            log.info("tool done: %s in %.2fs", req.name, elapsed)
         return {"ok": True, "result": result}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

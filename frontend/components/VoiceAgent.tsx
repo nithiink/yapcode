@@ -232,6 +232,9 @@ export default function VoiceAgent() {
 
   const pollSession = (sessionId: string) => {
     if (!sessionId || pollTimers.current.has(sessionId)) return;
+    // Keep polling until the backend reports idle. On any non-working,
+    // non-idle response, surface it and KEEP polling so we drain queued results
+    // (poll_status returns one buffered result per call, FIFO).
     const timer = setInterval(async () => {
       try {
         const r = await fetch("/api/tools/execute", {
@@ -241,9 +244,12 @@ export default function VoiceAgent() {
         });
         const data = await r.json();
         const res = data?.result;
-        if (!res || res.status === "working") return; // keep polling
-        stopPolling(sessionId);
-        if (res.status !== "idle") handleClaudeResult(res);
+        if (!res || res.status === "working") return;     // keep polling
+        if (res.status === "idle") {                       // queue drained, stop
+          stopPolling(sessionId);
+          return;
+        }
+        handleClaudeResult(res);                           // drain & keep polling
       } catch {
         /* transient; keep polling */
       }

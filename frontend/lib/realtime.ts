@@ -25,7 +25,11 @@ const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 // conversation is re-sent every turn — so we cap response length, tighten VAD
 // to avoid spurious responses, and prune old turns to bound the re-billing.
 const COST_SAVER_MAX_OUTPUT_TOKENS = 200;
-const COST_SAVER_KEEP_ITEMS = 6; // ~3 turns of context retained
+// Was 6 — that's ~3 turns and dropped both prior user requests and the
+// [Claude update] system messages, making the model "forget" what was just
+// discussed and babble about stale Claude output. 30 keeps a useful window
+// without unbounded growth.
+const COST_SAVER_KEEP_ITEMS = 30;
 
 export class RealtimeSession implements VoiceSession {
   private pc?: RTCPeerConnection;
@@ -40,6 +44,14 @@ export class RealtimeSession implements VoiceSession {
   private usage: VoiceUsage = emptyUsage();
   // Ordered conversation item ids, for cost-saver context pruning.
   private itemIds: string[] = [];
+  // A response is in flight from response.created until response.done /
+  // response.completed. injectUpdate fires response.create which errors with
+  // "conversation_already_has_active_response" while one is active — the
+  // [Claude update] system message lands in the conversation but is never
+  // narrated, so the user thinks the voice agent "missed" it. Queue updates
+  // and drain when the current response ends.
+  private responseActive = false;
+  private pendingInjections: string[] = [];
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -136,11 +148,33 @@ export class RealtimeSession implements VoiceSession {
   }
 
   injectUpdate(text: string): void {
-    if (!this.dc || this.dc.readyState !== "open") return;
+    if (!this.dc || this.dc.readyState !== "open") {
+      console.warn("[realtime] injectUpdate dropped — data channel not open:", text.slice(0, 80));
+      return;
+    }
+    // Always add the system message to the conversation immediately so the
+    // model sees it whenever it next responds. But only call response.create if
+    // no response is in flight — otherwise queue it and fire on response.done.
     this.send({
       type: "conversation.item.create",
       item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
     });
+    if (this.responseActive) {
+      this.pendingInjections.push(text);
+      console.log("[realtime] injectUpdate queued (response in flight):", text.slice(0, 80));
+    } else {
+      this.responseActive = true;
+      this.send({ type: "response.create" });
+    }
+  }
+
+  private drainPendingInjections(): void {
+    if (this.pendingInjections.length === 0 || !this.dc || this.dc.readyState !== "open") return;
+    // The queued items are already in the conversation; just fire one
+    // response.create to make the model respond. response.done will re-drain if
+    // more arrived while this one was running.
+    this.pendingInjections.length = 0;
+    this.responseActive = true;
     this.send({ type: "response.create" });
   }
 
@@ -203,6 +237,7 @@ export class RealtimeSession implements VoiceSession {
         emit({ type: "state", state: "thinking" });
         break;
       case "response.created":
+        this.responseActive = true;
         emit({ type: "state", state: "thinking" });
         break;
       case "output_audio_buffer.started":
@@ -256,6 +291,14 @@ export class RealtimeSession implements VoiceSession {
           }
         }
         this.pruneContext();
+        // The response that just finished is no longer active. runFunctionCall
+        // may have started a new one (sets responseActive=true via its own
+        // response.create); if not, drain any [Claude update] system messages
+        // that were queued while this response was speaking.
+        if (!hadCall) {
+          this.responseActive = false;
+          this.drainPendingInjections();
+        }
         emit({ type: "state", state: hadCall ? "thinking" : "listening" });
         break;
       }
@@ -282,6 +325,22 @@ export class RealtimeSession implements VoiceSession {
       }
       case "error": {
         const e = evt.error || {};
+        // 'conversation_already_has_active_response' means our response.create
+        // raced the model — the system message is still in context, just not
+        // narrated. Don't surface it as a user-visible error; just retry when
+        // the current response ends (drainPendingInjections handles this on
+        // response.done). For other errors, surface normally.
+        const racy = e.code === "conversation_already_has_active_response";
+        if (racy) {
+          console.warn("[realtime] response.create raced an in-flight response; will retry on response.done");
+          break;
+        }
+        // Many error frames don't end the active response, but a hard error
+        // leaves the flag stuck true and blocks future drains. Reset on safe
+        // codes; leave it on transient ones.
+        if (e.code === "response_cancel_not_active" || e.code === "input_audio_buffer_commit_empty") {
+          this.responseActive = false;
+        }
         const rate = e.code === "rate_limit_exceeded" || /rate limit/i.test(e.message || "");
         emit({
           type: "error",
@@ -345,6 +404,8 @@ export class RealtimeSession implements VoiceSession {
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: JSON.stringify(result) },
     });
+    // The model needs to respond to the tool result; this is a fresh response.
+    this.responseActive = true;
     this.send({ type: "response.create" });
   }
 }
