@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Cyberpunk Neon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070512; --bg2:#0c0820; --mag:#ff2e97; --cyan:#21e6ff; --violet:#9d6bff; --lime:#b6ff3c;
+    --txt:#dfe3ff; --mut:#7a7bb5; --line:rgba(157,107,255,.22);
+    --disp:'Oxanium',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{background:var(--bg);color:var(--txt);font-family:var(--disp);position:relative;overflow-x:hidden;padding:24px}
+  /* perspective grid horizon */
+  body::before{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;z-index:-2;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:46px 46px;transform:perspective(420px) rotateX(64deg);transform-origin:bottom;opacity:.7}
+  body::after{content:"";position:fixed;inset:0;z-index:-1;
+    background:radial-gradient(60% 50% at 50% 0%, rgba(255,46,151,.16), transparent 60%),
+               radial-gradient(50% 40% at 100% 30%, rgba(33,230,255,.12), transparent 60%)}
+  .wrap{max-width:1140px;margin:0 auto}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;
+    border-bottom:1px solid var(--line);padding-bottom:14px}
+  .logo{font-family:var(--disp);font-weight:800;font-size:24px;letter-spacing:.06em;text-transform:uppercase;
+    color:#fff;text-shadow:0 0 8px var(--mag),0 0 22px var(--mag)}
+  .logo span{color:var(--cyan);text-shadow:0 0 8px var(--cyan),0 0 22px var(--cyan)}
+  .stat{font-family:var(--mono);font-size:12px;color:var(--mut);text-align:right;letter-spacing:.04em}
+  .stat .on{color:var(--lime);text-shadow:0 0 10px var(--lime)} .stat b{color:var(--cyan)}
+
+  .hero{display:grid;grid-template-columns:.95fr 1.05fr;gap:30px;align-items:center;margin-bottom:26px}
+  @media(max-width:860px){.hero{grid-template-columns:1fr}}
+  .orbwrap{display:grid;place-items:center;height:300px;position:relative}
+  .orb{width:170px;height:170px;border-radius:50%;position:relative;
+    background:radial-gradient(circle at 42% 36%,#fff,#ff8fd0 30%,var(--mag) 70%,#7a1450 100%);
+    box-shadow:0 0 60px var(--mag),0 0 120px rgba(255,46,151,.5);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+  .orb::before,.orb::after{content:"";position:absolute;border-radius:50%}
+  .orb::before{inset:-26px;border:2px solid var(--cyan);box-shadow:0 0 18px var(--cyan);opacity:.7;animation:spin 6s linear infinite}
+  .orb::after{inset:-50px;border:1px dashed var(--violet);opacity:.5;animation:spin 12s linear infinite reverse}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .hxt{text-align:left}
+  .glitch{font-family:var(--disp);font-weight:800;text-transform:uppercase;font-size:clamp(34px,5.5vw,60px);line-height:1;margin:0 0 14px;
+    color:#fff;letter-spacing:.01em;text-shadow:2px 0 var(--mag),-2px 0 var(--cyan)}
+  .hxt p{color:var(--mut);font-family:var(--mono);font-size:14px;max-width:40ch;margin:0 0 24px;line-height:1.6}
+  .actions{display:flex;gap:14px;flex-wrap:wrap}
+  .connect{font-family:var(--disp);font-weight:700;text-transform:uppercase;letter-spacing:.1em;font-size:14px;
+    color:#06121a;background:linear-gradient(90deg,var(--cyan),var(--mag));border:0;padding:14px 34px;cursor:pointer;
+    clip-path:polygon(0 0,100% 0,100% 70%,92% 100%,0 100%);box-shadow:0 0 26px rgba(33,230,255,.5)}
+  .mute{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--cyan);
+    background:transparent;border:1px solid var(--cyan);padding:14px 20px;cursor:pointer;box-shadow:inset 0 0 18px rgba(33,230,255,.15)}
+
+  .controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+  .seg{display:flex;border:1px solid var(--line);clip-path:polygon(0 0,100% 0,100% 100%,8px 100%,0 calc(100% - 8px))}
+  .seg button{font-family:var(--mono);font-size:12px;background:rgba(157,107,255,.06);border:0;color:var(--mut);padding:9px 16px;cursor:pointer;text-transform:uppercase}
+  .seg button.on{background:linear-gradient(90deg,rgba(255,46,151,.25),rgba(33,230,255,.25));color:#fff;text-shadow:0 0 8px var(--cyan)}
+  .saver{font-family:var(--mono);font-size:12px;text-transform:uppercase;color:var(--lime);border:1px solid rgba(182,255,60,.4);
+    background:rgba(182,255,60,.06);padding:9px 16px;cursor:pointer}
+
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:860px){.panels{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(12,8,32,.85),rgba(7,5,18,.85));padding:20px;position:relative;
+    clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+  .card h2{font-family:var(--disp);font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:14px;margin:0 0 16px;color:var(--cyan);
+    display:flex;justify-content:space-between;align-items:center}
+  .card h2 .ct{font-family:var(--mono);color:var(--mag);font-size:11px;border:1px solid rgba(255,46,151,.4);padding:2px 9px}
+  .bubble{padding:11px 14px;margin-bottom:10px;font-family:var(--mono);font-size:13.5px;line-height:1.5;border-left:2px solid var(--mag)}
+  .bubble.ai{border-left-color:var(--cyan)}
+  .who{font-family:var(--disp);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);margin-bottom:3px}
+  .tool{font-family:var(--mono);font-size:12px;color:var(--mut);padding:4px 0}
+  .tool b{color:var(--cyan)} .tool .ok{color:var(--lime)}
+  .sess{border:1px solid var(--line);background:rgba(157,107,255,.05);padding:13px;margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .chip{font-family:var(--mono);font-size:10px;text-transform:uppercase;border:1px solid var(--line);padding:2px 8px;color:var(--mut)}
+  .chip.run{color:var(--lime);border-color:rgba(182,255,60,.4)}
+  .chip.auto{color:var(--mag);border-color:rgba(255,46,151,.5);margin-left:auto}
+  .chip.plan{color:var(--cyan);border-color:rgba(33,230,255,.5);margin-left:auto}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--mut);margin:9px 0 11px}
+  .modebar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--mono);font-size:11px;text-transform:uppercase;border:1px solid var(--line);background:transparent;color:var(--mut);padding:5px 11px;cursor:pointer}
+  .mp.on{background:linear-gradient(90deg,rgba(255,46,151,.3),rgba(157,107,255,.3));color:#fff;border-color:transparent}
+  .lk{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--cyan);border:1px solid rgba(33,230,255,.4);background:transparent;padding:5px 11px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">VOICE<span>//</span>CLAUDE</div>
+      <div class="stat"><span class="on">● LISTENING</span> · OPENAI · CLI<br>CLAUDE <b>$0.0421</b> · VOICE <b>$0.0123</b></div>
+    </div>
+
+    <div class="hero">
+      <div class="orbwrap"><div class="orb"></div></div>
+      <div class="hxt">
+        <h1 class="glitch">Talk.<br>It ships.</h1>
+        <p>// voice interface bridged to Claude Code. issue commands; sessions spawn, edits land, the agent reports back.</p>
+        <div class="actions"><button class="connect">CONNECT</button><button class="mute">MUTE</button></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="seg"><button class="on">OPENAI</button><button>GEMINI</button></div>
+      <div class="seg"><button class="on">CLI</button><button>SDK</button></div>
+      <button class="saver">◧ COST SAVER ON</button>
+    </div>
+
+    <div class="panels">
+      <div class="card">
+        <h2>Comms <span class="ct">LIVE</span></h2>
+        <div class="bubble"><div class="who">You → Claude</div>Open the repo and run the test suite.</div>
+        <div class="bubble ai"><div class="who">Assistant</div>On it — starting a CLI session and running the tests. Stand by.</div>
+        <div class="tool">→ <b>start_session</b> <span class="ok">[ok]</span></div>
+        <div class="tool">→ <b>tell_claude</b> <span class="ok">[ok]</span></div>
+      </div>
+      <div class="card">
+        <h2>Sessions <span class="ct">02</span></h2>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">RUN</span><span class="chip auto">AUTO</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">PLAN</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Edits</button><button class="mp">Auto</button><button class="lk">LIVE ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

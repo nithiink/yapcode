@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Pixel Arcade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1a1033; --bg2:#241546; --txt:#e9e7ff; --mut:#8f86c4;
+    --green:#39ff88; --pink:#ff5fa2; --cyan:#33e1ff; --yellow:#ffe14d; --purple:#9b6bff;
+    --disp:'Pixelify Sans',sans-serif; --term:'VT323',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{background:var(--bg);color:var(--txt);font-family:var(--disp);padding:24px;image-rendering:pixelated;
+    background-image:linear-gradient(rgba(155,107,255,.08) 2px,transparent 2px),linear-gradient(90deg,rgba(155,107,255,.08) 2px,transparent 2px);
+    background-size:32px 32px}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;background:repeating-linear-gradient(to bottom,rgba(0,0,0,.22) 0 2px,transparent 2px 4px);opacity:.4}
+  .pix{box-shadow:0 0 0 4px var(--bg), 0 0 0 8px currentColor}
+  .wrap{max-width:1120px;margin:0 auto}
+
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;
+    border:4px solid var(--purple);background:var(--bg2);padding:12px 16px;box-shadow:8px 8px 0 rgba(0,0,0,.4)}
+  .logo{font-family:var(--disp);font-weight:700;font-size:24px;letter-spacing:.02em;color:var(--yellow);text-shadow:3px 3px 0 #00000055}
+  .logo span{color:var(--green)}
+  .hud{font-family:var(--term);font-size:20px;color:var(--mut);text-align:right;line-height:1}
+  .hud .on{color:var(--green)} .hud b{color:var(--cyan)}
+
+  .arc{border:4px solid var(--green);background:var(--bg2);box-shadow:8px 8px 0 rgba(0,0,0,.4);display:grid;grid-template-columns:1.1fr .9fr}
+  @media(max-width:860px){.arc{grid-template-columns:1fr}}
+  .stage{padding:28px;border-right:4px solid var(--purple);text-align:center}
+  .avatar{width:120px;height:120px;margin:10px auto 0;background:
+      conic-gradient(from 0deg, var(--pink),var(--cyan),var(--yellow),var(--green),var(--pink));
+    image-rendering:pixelated;clip-path:polygon(20% 0,80% 0,100% 20%,100% 80%,80% 100%,20% 100%,0 80%,0 20%);
+    animation:hop .7s steps(2) infinite}
+  @keyframes hop{50%{transform:translateY(-8px)}}
+  .heart{font-family:var(--term);color:var(--pink);font-size:22px;letter-spacing:4px;margin-top:12px}
+  .state{font-family:var(--disp);font-weight:700;font-size:22px;color:var(--green);margin-top:10px;text-shadow:2px 2px 0 #00000055}
+  .blink{font-family:var(--term);font-size:20px;color:var(--yellow);margin-top:6px;animation:bl 1s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+
+  .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:24px}
+  .seg{display:flex;border:3px solid var(--cyan)}
+  .seg button{font-family:var(--disp);font-weight:600;font-size:13px;background:transparent;border:0;border-right:3px solid var(--cyan);color:var(--mut);padding:8px 14px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--cyan);color:#12082a}
+  .saver{font-family:var(--disp);font-weight:600;font-size:13px;border:3px solid var(--yellow);background:transparent;color:var(--yellow);padding:8px 14px;cursor:pointer}
+  .cta{display:flex;gap:12px;justify-content:center;margin-top:22px}
+  .connect{font-family:var(--disp);font-weight:700;font-size:16px;color:#12082a;background:var(--green);border:0;padding:13px 30px;cursor:pointer;
+    box-shadow:5px 5px 0 #1c8f4e}
+  .connect:active{transform:translate(2px,2px);box-shadow:3px 3px 0 #1c8f4e}
+  .mute{font-family:var(--disp);font-weight:700;font-size:15px;color:var(--txt);background:transparent;border:3px solid var(--purple);padding:11px 18px;cursor:pointer}
+
+  .side{padding:22px}
+  .h{font-family:var(--disp);font-weight:700;font-size:16px;color:var(--yellow);margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;
+    border-bottom:3px dashed var(--purple);padding-bottom:8px}
+  .h .n{font-family:var(--term);font-size:18px;color:var(--cyan)}
+  .block+.block{margin-top:22px}
+  .turn{font-family:var(--term);font-size:19px;line-height:1.25;margin-bottom:8px}
+  .turn .who{font-family:var(--disp);font-weight:600;font-size:12px;letter-spacing:.04em;color:var(--pink);margin-bottom:2px}
+  .turn.ai .who{color:var(--green)}
+  .tool{font-family:var(--term);font-size:18px;color:var(--mut)} .tool b{color:var(--cyan)} .ok{color:var(--green)}
+  .sess{border:3px solid var(--purple);padding:12px;margin-bottom:12px;background:rgba(155,107,255,.08)}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);font-weight:700;font-size:16px;color:var(--cyan)}
+  .chip{font-family:var(--term);font-size:16px;border:2px solid var(--purple);padding:0 7px;color:var(--mut)}
+  .chip.run{color:var(--green);border-color:var(--green)} .chip.auto{color:var(--pink);border-color:var(--pink);margin-left:auto}
+  .chip.plan{color:var(--cyan);border-color:var(--cyan);margin-left:auto}
+  .meta{font-family:var(--term);font-size:17px;color:var(--mut);margin:8px 0 9px}
+  .modebar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--disp);font-weight:600;font-size:11px;border:2px solid var(--purple);background:transparent;color:var(--mut);padding:4px 9px;cursor:pointer}
+  .mp.on{background:var(--pink);color:#12082a;border-color:var(--pink)}
+  .lk{margin-left:auto;font-family:var(--disp);font-weight:600;font-size:11px;border:2px solid var(--green);background:transparent;color:var(--green);padding:4px 9px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">VOICE<span>·</span>CLAUDE</div>
+      <div class="hud"><span class="on">● LISTENING</span> OPENAI CLI<br>$<b>0.0421</b> + $<b>0.0123</b></div>
+    </div>
+
+    <div class="arc">
+      <div class="stage">
+        <div class="avatar"></div>
+        <div class="heart">&#9829; &#9829; &#9829;</div>
+        <div class="state">LISTENING</div>
+        <div class="blink">&#9658; PRESS CONNECT TO START</div>
+
+        <div class="controls">
+          <div class="seg"><button class="on">OPENAI</button><button>GEMINI</button></div>
+          <div class="seg"><button class="on">CLI</button><button>SDK</button></div>
+          <button class="saver">$ SAVER ON</button>
+        </div>
+        <div class="cta"><button class="connect">CONNECT</button><button class="mute">MUTE</button></div>
+      </div>
+
+      <div class="side">
+        <div class="block">
+          <div class="h">COMMS <span class="n">LIVE</span></div>
+          <div class="turn"><div class="who">YOU &gt; CLAUDE</div>open the repo and run the test suite</div>
+          <div class="turn ai"><div class="who">CLAUDE</div>on it — starting a session, running tests now</div>
+          <div class="tool">&gt; <b>start_session</b> <span class="ok">[OK]</span></div>
+          <div class="tool">&gt; <b>tell_claude</b> <span class="ok">[OK]</span></div>
+        </div>
+        <div class="block">
+          <div class="h">SESSIONS <span class="n">x2</span></div>
+          <div class="sess">
+            <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">RUN</span><span class="chip auto">AUTO</span></div>
+            <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+            <div class="modebar"><button class="mp">NORMAL</button><button class="mp">PLAN</button><button class="mp">EDITS</button><button class="mp on">AUTO</button></div>
+          </div>
+          <div class="sess">
+            <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">PLAN</span></div>
+            <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+            <div class="modebar"><button class="mp">NORMAL</button><button class="mp on">PLAN</button><button class="mp">EDITS</button><button class="mp">AUTO</button><button class="lk">LIVE</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — G language, new structures &amp; colors</title>
+<style>
+  :root{--bg:#16140f;--card:#1d1b15;--txt:#ece4d6;--mut:#988b78;--line:#312a20;--accent:#b9cf86}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;padding:28px}
+  header{max-width:1500px;margin:0 auto 22px}
+  h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+  p.sub{color:var(--mut);margin:0;font-size:14px}
+  a.back{color:var(--accent);font-size:13px;text-decoration:none;border:1px solid var(--line);padding:5px 11px;border-radius:8px;margin-left:10px}
+  .grid{max-width:1500px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .head .nm{font-weight:650;font-size:15px}
+  .head .nm small{display:block;color:var(--mut);font-weight:400;font-size:12px;margin-top:2px}
+  .head a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+  .head a:hover{border-color:var(--accent)}
+  .frame{position:relative;height:640px;background:#000}
+  .frame iframe{position:absolute;top:0;left:0;width:200%;height:200%;border:0;transform:scale(.5);transform-origin:top left}
+</style>
+</head>
+<body>
+  <header>
+    <h1>G’s language — new structures &amp; colors<a class="back" href="g.html">← G family</a></h1>
+    <p class="sub">Big display type · one accent · hairlines · calm — but each a different layout and palette. Tell me which structure + which color (mix freely).</p>
+  </header>
+  <div class="grid">
+    <div class="item">
+      <div class="head"><div class="nm">S1 · Centered <small>single-column, centered orb + stacked sections · Ink &amp; Rust (terracotta)</small></div><a href="s-centered.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="s-centered.html"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">S2 · Sidebar app <small>left control rail + main workspace · Graphite &amp; Ice (cyan-blue)</small></div><a href="s-sidebar.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="s-sidebar.html"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">S3 · Magazine <small>hero band + 3-column ruled grid (adds Status col) · Espresso &amp; Pistachio</small></div><a href="s-magazine.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="s-magazine.html"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">S4 · Orb hub <small>orb + controls centered as the hub, conversation/sessions flank · Onyx &amp; Lilac</small></div><a href="s-hub.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="s-hub.html"></iframe></div>
+    </div>
+  </div>
+</body>
+</html>

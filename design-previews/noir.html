@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Luxe Noir</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b0d; --bg2:#101013; --txt:#ece7df; --mut:#8b8579;
+    --gold:#c9a86a; --gold-dim:#6e5e3d; --line:rgba(201,168,106,.22); --line2:rgba(201,168,106,.1);
+    --disp:'Cormorant Garamond',serif; --body:'Jost',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{background:
+      radial-gradient(80% 60% at 50% -10%, rgba(201,168,106,.06), transparent 60%),
+      var(--bg);color:var(--txt);font-family:var(--body);font-weight:300;letter-spacing:.02em;padding:30px}
+  .wrap{max-width:1080px;margin:0 auto}
+  .rule{height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent)}
+
+  .top{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:16px}
+  .logo{font-family:var(--disp);font-weight:400;font-size:30px;letter-spacing:.04em}
+  .logo .am{color:var(--gold);font-style:italic}
+  .meta{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--mut);text-align:right;line-height:1.9}
+  .meta .on{color:var(--gold)} .meta b{color:var(--txt);font-weight:400}
+
+  .hero{display:grid;grid-template-columns:1fr .8fr;gap:50px;align-items:center;padding:64px 0}
+  @media(max-width:840px){.hero{grid-template-columns:1fr;gap:30px}}
+  .lede .kicker{font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:var(--gold);margin-bottom:22px}
+  .lede h1{font-family:var(--disp);font-weight:300;font-size:clamp(48px,7vw,92px);line-height:.98;letter-spacing:.01em;margin:0 0 22px}
+  .lede h1 em{font-style:italic;color:var(--gold)}
+  .lede p{font-size:15px;color:var(--mut);max-width:42ch;line-height:1.8;margin:0 0 34px;font-weight:300}
+  .actions{display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+  .connect{font-family:var(--body);font-weight:400;letter-spacing:.22em;text-transform:uppercase;font-size:12px;color:#0b0b0d;
+    background:linear-gradient(180deg,#e4c98c,var(--gold));border:0;padding:16px 40px;cursor:pointer}
+  .connect:hover{filter:brightness(1.08)}
+  .textlink{font-family:var(--disp);font-style:italic;font-size:18px;color:var(--txt);border-bottom:1px solid var(--gold-dim);cursor:pointer}
+
+  .orbwrap{display:grid;place-items:center;position:relative}
+  .orb{width:200px;height:200px;border-radius:50%;position:relative;
+    background:radial-gradient(circle at 42% 36%, #fff7e6, #d9b574 40%, #5a4422 100%);
+    box-shadow:0 0 70px rgba(201,168,106,.35), inset 0 -10px 30px rgba(40,28,8,.6), inset 0 8px 22px rgba(255,240,200,.5)}
+  .orb::after{content:"";position:absolute;inset:-24px;border-radius:50%;border:1px solid var(--line)}
+  .orb::before{content:"";position:absolute;inset:-46px;border-radius:50%;border:1px solid var(--line2)}
+  .orbcap{position:absolute;bottom:-46px;left:50%;transform:translateX(-50%);font-family:var(--disp);font-style:italic;font-size:17px;color:var(--mut);white-space:nowrap}
+
+  .controls{display:flex;gap:40px;flex-wrap:wrap;align-items:flex-end;padding:26px 0}
+  .ctl .lab{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--mut);margin-bottom:10px}
+  .seg{display:flex;gap:24px}
+  .seg button{font-family:var(--disp);font-size:21px;background:transparent;border:0;color:var(--mut);cursor:pointer;padding:0;font-style:italic}
+  .seg button.on{color:var(--gold);border-bottom:1px solid var(--gold)}
+  .saver{font-family:var(--disp);font-size:19px;font-style:italic;background:transparent;border:0;color:var(--gold);cursor:pointer;border-bottom:1px solid var(--gold-dim)}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:54px;padding-top:40px}
+  @media(max-width:840px){.cols{grid-template-columns:1fr;gap:34px}}
+  .ch{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--gold);margin:0 0 4px;display:flex;justify-content:space-between}
+  .ch span{color:var(--mut)}
+  .chrule{margin-bottom:20px}
+  .turn{margin-bottom:20px}
+  .turn .who{font-family:var(--disp);font-style:italic;font-size:15px;color:var(--mut);margin-bottom:4px}
+  .turn p{margin:0;font-family:var(--disp);font-weight:300;font-size:21px;line-height:1.4;color:var(--txt)}
+  .turn.you p{color:var(--gold)}
+  .tool{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);padding:8px 0;border-top:1px solid var(--line2)}
+  .tool b{color:var(--txt);font-weight:400}
+
+  .sess{padding:18px 0;border-bottom:1px solid var(--line2)}
+  .srow{display:flex;align-items:baseline;gap:14px}
+  .idx{font-family:var(--disp);font-style:italic;font-size:16px;color:var(--gold)}
+  .nm{font-family:var(--disp);font-size:24px;font-weight:400}
+  .st{margin-left:auto;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--mut)}
+  .sub{font-size:12px;letter-spacing:.1em;color:var(--mut);margin:6px 0 14px}
+  .modebar{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+  .mp{font-family:var(--disp);font-style:italic;font-size:17px;background:transparent;border:0;color:var(--mut);cursor:pointer;padding:0}
+  .mp.on{color:var(--gold);border-bottom:1px solid var(--gold)}
+  .lk{margin-left:auto;font-family:var(--disp);font-style:italic;font-size:15px;color:var(--txt);border-bottom:1px solid var(--gold-dim);cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">Voice <span class="am">de</span> Claude</div>
+      <div class="meta"><span class="on">● Listening</span><br>Claude <b>$0.0421</b> · Voice <b>$0.0123</b><br>OpenAI — CLI</div>
+    </div>
+    <div class="rule"></div>
+
+    <section class="hero">
+      <div class="lede">
+        <div class="kicker">Hands-free engineering</div>
+        <h1>Speak.<br>And it is <em>made</em>.</h1>
+        <p>A considered voice atop Claude Code. Express the work aloud — sessions open, files change, commands run — and it returns with the result.</p>
+        <div class="actions"><button class="connect">Connect</button><a class="textlink">or mute</a></div>
+      </div>
+      <div class="orbwrap"><div class="orb"></div><div class="orbcap">“On it — I’ll let you know.”</div></div>
+    </section>
+
+    <div class="rule"></div>
+    <div class="controls">
+      <div class="ctl"><div class="lab">Voice</div><div class="seg"><button class="on">OpenAI</button><button>Gemini</button></div></div>
+      <div class="ctl"><div class="lab">Backend</div><div class="seg"><button class="on">CLI</button><button>SDK</button></div></div>
+      <div class="ctl"><div class="lab">Economy</div><button class="saver">Cost saver on</button></div>
+    </div>
+    <div class="rule"></div>
+
+    <div class="cols">
+      <div>
+        <div class="ch">Conversation <span>live</span></div><div class="rule chrule"></div>
+        <div class="turn you"><div class="who">You → Claude</div><p>Open the repository and run the full test suite.</p></div>
+        <div class="turn"><div class="who">Assistant</div><p>On it — starting a session and beginning the tests now.</p></div>
+        <div class="tool">→ <b>start_session</b> · ok</div>
+        <div class="tool">→ <b>tell_claude</b> · ok</div>
+      </div>
+      <div>
+        <div class="ch">Sessions <span>2 active</span></div><div class="rule chrule"></div>
+        <div class="sess">
+          <div class="srow"><span class="idx">I</span><span class="nm">voice-claude</span><span class="st">running</span></div>
+          <div class="sub">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="srow"><span class="idx">II</span><span class="nm">assistant</span><span class="st">completed</span></div>
+          <div class="sub">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Edits</button><button class="mp">Auto</button><span class="lk">Live ↗</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Soft Bauhaus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1d1b22; --panel:#24222c; --panel2:#2a2833; --ink:#e7e1d6; --mut:#979198;
+    --brick:#d07a5f; --blue:#7a93c9; --ochre:#d7ab5e; --line:#37343f;
+    --disp:'Syne',sans-serif; --body:'Archivo',sans-serif;
+    --shadow:0 10px 26px -16px rgba(0,0,0,.7);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.5}
+  .wrap{max-width:1140px;margin:0 auto;padding:30px 26px}
+  .top{display:flex;justify-content:space-between;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .logo{font-family:var(--disp);font-weight:800;font-size:23px;letter-spacing:-.01em;display:flex;align-items:center;gap:11px}
+  .logo .sq{width:18px;height:18px;border-radius:4px;background:var(--brick)}
+  .logo .ci{width:18px;height:18px;border-radius:50%;background:var(--blue)}
+  .logo .tr{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:18px solid var(--ochre)}
+  .badge{font-family:var(--body);font-weight:600;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);padding:7px 14px;border-radius:10px;display:flex;align-items:center;gap:8px}
+  .badge i{width:8px;height:8px;border-radius:50%;background:var(--brick)}
+
+  .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:center;padding:46px 0;border-bottom:1px solid var(--line)}
+  @media(max-width:840px){.hero{grid-template-columns:1fr;gap:28px}}
+  .lede h1{font-family:var(--disp);font-weight:800;font-size:clamp(40px,6vw,68px);line-height:1;margin:0 0 16px;letter-spacing:-.02em}
+  .lede h1 .r{color:var(--brick)} .lede h1 .b{color:var(--blue)} .lede h1 .o{color:var(--ochre)}
+  .lede p{font-size:17px;color:var(--mut);max-width:42ch;margin:0 0 26px}
+  .actions{display:flex;gap:14px;flex-wrap:wrap}
+  .connect{font-family:var(--disp);font-weight:700;font-size:15px;color:#241a16;background:var(--brick);border:0;padding:14px 30px;border-radius:12px;cursor:pointer;box-shadow:var(--shadow)}
+  .connect:hover{filter:brightness(1.05)}
+  .mute{font-family:var(--body);font-weight:600;font-size:14px;color:var(--ink);background:var(--panel);border:1px solid var(--line);padding:14px 22px;border-radius:12px;cursor:pointer}
+
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:36px;display:flex;flex-direction:column;align-items:center;box-shadow:var(--shadow)}
+  .orb{width:140px;height:140px;border-radius:50%;background:var(--blue);position:relative;box-shadow:0 16px 34px -16px rgba(122,147,201,.7);animation:bob 3s ease-in-out infinite}
+  .orb::after{content:"";position:absolute;width:54px;height:54px;border-radius:50%;background:var(--ochre);top:-14px;right:-14px;box-shadow:0 10px 20px -10px rgba(215,171,94,.8)}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+  .state{font-family:var(--disp);font-weight:700;font-size:20px;margin-top:26px}
+  .hint{font-size:13px;color:var(--mut);text-align:center;margin-top:5px}
+
+  .controls{display:flex;gap:24px;flex-wrap:wrap;align-items:center;padding:22px 0;border-bottom:1px solid var(--line)}
+  .ctl .lab{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);margin-bottom:8px}
+  .seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:4px}
+  .seg button{font-family:var(--body);font-weight:600;font-size:14px;background:transparent;border:0;color:var(--mut);padding:8px 16px;border-radius:8px;cursor:pointer}
+  .seg button.on{background:var(--panel2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+  .seg.brick button.on{background:var(--brick);color:#241a16} .seg.blue button.on{background:var(--blue);color:#161b27}
+  .saver{font-family:var(--body);font-weight:600;font-size:14px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px 16px;cursor:pointer;display:inline-flex;gap:9px;align-items:center}
+  .saver .k{width:30px;height:18px;border-radius:999px;background:var(--ochre);position:relative}
+  .saver .k::after{content:"";position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:#241a16}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:36px;padding-top:32px}
+  @media(max-width:840px){.cols{grid-template-columns:1fr;gap:26px}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow)}
+  .ch{font-family:var(--disp);font-weight:700;font-size:16px;margin:0 0 16px;display:flex;justify-content:space-between;align-items:center}
+  .ch .n{font-family:var(--body);font-weight:600;font-size:12px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);padding:3px 11px;border-radius:999px}
+  .turn{padding:11px 14px;border-radius:13px;margin-bottom:10px;max-width:92%;font-size:15px}
+  .turn.you{background:rgba(122,147,201,.16);border:1px solid var(--line);margin-left:auto}
+  .turn.ai{background:var(--panel2);border:1px solid var(--line)}
+  .who{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px}
+  .tool{font-size:13px;color:var(--mut);padding:5px 2px} .tool b{color:var(--brick)} .ok{color:#8fc7a0}
+  .sess{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);font-weight:700;font-size:16px}
+  .chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--mut);background:var(--panel)}
+  .chip.run{color:#8fc7a0} .chip.auto{color:var(--brick);margin-left:auto} .chip.plan{color:var(--blue);margin-left:auto}
+  .meta{font-size:13px;color:var(--mut);margin:9px 0 11px}
+  .modebar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--body);font-weight:600;font-size:12.5px;border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:9px;padding:5px 12px;cursor:pointer}
+  .mp.on{background:var(--brick);color:#241a16;border-color:transparent}
+  .lk{margin-left:auto;font-family:var(--body);font-weight:600;font-size:12.5px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:9px;padding:5px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo"><span class="sq"></span><span class="ci"></span><span class="tr"></span>&nbsp;Voice-Claude</div>
+      <div class="badge"><i></i> Listening</div>
+    </div>
+    <div class="hero">
+      <div class="lede">
+        <h1>Say it.<br><span class="r">Claude</span> <span class="o">does</span> it.</h1>
+        <p>A voice layer over Claude Code. Talk; it opens sessions, edits files, runs commands, and reports back.</p>
+        <div class="actions"><button class="connect">Connect &amp; talk</button><button class="mute">🎙 Mute</button></div>
+      </div>
+      <div class="stage">
+        <div class="orb"></div>
+        <div class="state">Listening…</div>
+        <div class="hint">“run the tests in voice-claude”</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="ctl"><div class="lab">Voice</div><div class="seg brick"><button class="on">OpenAI</button><button>Gemini</button></div></div>
+      <div class="ctl"><div class="lab">Backend</div><div class="seg blue"><button class="on">CLI</button><button>SDK</button></div></div>
+      <div class="ctl"><div class="lab">Economy</div><button class="saver"><span class="k"></span>Cost saver on</button></div>
+    </div>
+    <div class="cols">
+      <div class="card">
+        <div class="ch">Conversation <span class="n">live</span></div>
+        <div class="turn you"><div class="who">You</div>Open the repo and run the test suite.</div>
+        <div class="turn ai"><div class="who">Assistant</div>On it — starting a CLI session and kicking off the tests. I’ll let you know.</div>
+        <div class="tool">→ <b>start_session</b> <span class="ok">✓</span></div>
+        <div class="tool">→ <b>tell_claude</b> <span class="ok">✓</span></div>
+      </div>
+      <div class="card">
+        <div class="ch">Claude sessions <span class="n">2 active</span></div>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">running</span><span class="chip auto">Auto</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Accept edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">Plan</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Accept edits</button><button class="mp">Auto</button><button class="lk">Live ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Acid Brutalist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08090a; --panel:#101213; --txt:#eef2ed; --mut:#7e8a7c;
+    --lime:#c6ff00; --mag:#ff2e88; --line:#222826;
+    --disp:'Archivo',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--mono);padding:24px}
+  .wrap{max-width:1140px;margin:0 auto}
+  .top{display:flex;justify-content:space-between;align-items:center;border:3px solid var(--lime);padding:12px 16px;background:var(--panel)}
+  .logo{font-family:var(--disp);font-weight:900;font-size:26px;letter-spacing:-.02em;text-transform:uppercase}
+  .logo span{color:var(--lime)}
+  .badge{font-family:var(--mono);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.1em;background:var(--lime);color:var(--bg);padding:6px 12px}
+  .stat{font-family:var(--mono);font-size:11px;color:var(--mut);text-align:right;letter-spacing:.04em}
+  .stat b{color:var(--mag)}
+
+  .hero{border:3px solid var(--txt);border-top:0;display:grid;grid-template-columns:1.15fr .85fr}
+  @media(max-width:840px){.hero{grid-template-columns:1fr}}
+  .lede{padding:36px 26px;border-right:3px solid var(--txt)}
+  .lede h1{font-family:var(--disp);font-weight:900;text-transform:uppercase;font-size:clamp(44px,7vw,86px);line-height:.86;margin:0 0 18px;letter-spacing:-.03em}
+  .lede h1 .hl{background:var(--lime);color:var(--bg);padding:0 6px} .lede h1 .mg{color:var(--mag)}
+  .lede p{font-family:var(--mono);font-size:14px;color:var(--mut);max-width:42ch;line-height:1.6;margin:0 0 26px}
+  .actions{display:flex;gap:12px;flex-wrap:wrap}
+  .connect{font-family:var(--disp);font-weight:800;text-transform:uppercase;letter-spacing:.04em;font-size:15px;background:var(--lime);color:var(--bg);
+    border:3px solid var(--txt);padding:13px 30px;cursor:pointer;box-shadow:6px 6px 0 var(--mag)}
+  .connect:active{transform:translate(3px,3px);box-shadow:3px 3px 0 var(--mag)}
+  .mute{font-family:var(--disp);font-weight:800;text-transform:uppercase;background:transparent;color:var(--txt);border:3px solid var(--txt);padding:13px 20px;cursor:pointer}
+  .stage{padding:30px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#0c0e0c 0 12px,#0a0c0a 12px 24px)}
+  .orb{width:140px;height:140px;border:3px solid var(--lime);background:var(--bg);position:relative;display:grid;place-items:center;box-shadow:8px 8px 0 var(--mag)}
+  .orb .dot{width:62px;height:62px;border-radius:50%;background:var(--lime);box-shadow:0 0 30px var(--lime);animation:p 1.8s ease-in-out infinite}
+  @keyframes p{50%{transform:scale(1.18)}}
+  .meter{display:flex;gap:3px;margin-top:18px}
+  .meter i{width:7px;height:16px;background:var(--line)}
+  .meter i.f{background:var(--lime)}
+  .state{font-family:var(--disp);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;color:var(--lime)}
+  .hint{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:5px}
+
+  .ctlrow{display:flex;border:3px solid var(--txt);border-top:0;flex-wrap:wrap}
+  .ctl{flex:1;min-width:200px;border-right:3px solid var(--txt);padding:14px 16px}
+  .ctl:last-child{border-right:0}
+  .ctl .k{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);margin-bottom:9px}
+  .seg{display:flex;border:2px solid var(--txt)}
+  .seg button{flex:1;font-family:var(--mono);font-weight:700;text-transform:uppercase;font-size:12px;background:transparent;color:var(--mut);border:0;border-right:2px solid var(--txt);padding:8px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--lime);color:var(--bg)}
+  .seg.mag button.on{background:var(--mag);color:var(--bg)}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;border:3px solid var(--txt);border-top:0}
+  @media(max-width:840px){.cols{grid-template-columns:1fr}}
+  .col{padding:20px;border-right:3px solid var(--txt)}
+  .col:last-child{border-right:0}
+  .ch{font-family:var(--disp);font-weight:800;text-transform:uppercase;font-size:14px;letter-spacing:.04em;margin:0 0 14px;display:flex;justify-content:space-between}
+  .ch .n{background:var(--mag);color:var(--bg);padding:1px 9px}
+  .turn{border-left:3px solid var(--lime);padding:8px 0 8px 12px;margin-bottom:11px}
+  .turn.you{border-left-color:var(--mag)}
+  .who{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:3px}
+  .turn p{margin:0;font-family:var(--mono);font-size:13px;line-height:1.5}
+  .tool{font-family:var(--mono);font-size:12px;color:var(--mut);padding:4px 0} .tool b{color:var(--lime)} .ok{color:var(--lime)}
+  .sess{border:2px solid var(--txt);padding:12px;margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);font-weight:800;text-transform:uppercase;font-size:15px}
+  .chip{font-family:var(--mono);font-size:10px;text-transform:uppercase;border:2px solid var(--line);padding:2px 7px;color:var(--mut)}
+  .chip.run{color:var(--lime);border-color:var(--lime)} .chip.auto{color:var(--mag);border-color:var(--mag);margin-left:auto} .chip.plan{color:var(--txt);margin-left:auto}
+  .meta{font-family:var(--mono);font-size:11px;color:var(--mut);margin:8px 0 10px}
+  .modebar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--mono);font-weight:700;font-size:10px;text-transform:uppercase;border:2px solid var(--line);background:transparent;color:var(--mut);padding:5px 10px;cursor:pointer}
+  .mp.on{background:var(--mag);color:var(--bg);border-color:var(--mag)}
+  .lk{margin-left:auto;font-family:var(--mono);font-weight:700;font-size:10px;text-transform:uppercase;border:2px solid var(--lime);background:transparent;color:var(--lime);padding:5px 10px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">VOICE<span>/</span>CLAUDE</div>
+      <div class="badge">● Listening</div>
+      <div class="stat">OPENAI · CLI<br>CLAUDE <b>$0.0421</b> · VOICE <b>$0.0123</b></div>
+    </div>
+    <div class="hero">
+      <div class="lede">
+        <h1>SAY <span class="hl">IT.</span><br><span class="mg">SHIP</span> IT.</h1>
+        <p>// voice on top of claude code. talk — sessions spawn, files change, commands run, results come back.</p>
+        <div class="actions"><button class="connect">Connect ▸</button><button class="mute">Mute</button></div>
+      </div>
+      <div class="stage">
+        <div class="orb"><div class="dot"></div></div>
+        <div class="meter"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div>
+        <div class="state">Listening</div>
+        <div class="hint">"start a session in voice-claude"</div>
+      </div>
+    </div>
+    <div class="ctlrow">
+      <div class="ctl"><div class="k">Voice</div><div class="seg"><button class="on">OpenAI</button><button>Gemini</button></div></div>
+      <div class="ctl"><div class="k">Backend</div><div class="seg mag"><button class="on">CLI</button><button>SDK</button></div></div>
+      <div class="ctl"><div class="k">Cost saver</div><div class="seg"><button class="on">On</button><button>Off</button></div></div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <div class="ch">Conversation <span class="n">LIVE</span></div>
+        <div class="turn you"><div class="who">You → Claude</div><p>Open the repo and run the test suite.</p></div>
+        <div class="turn"><div class="who">Assistant</div><p>On it — starting a session and kicking off the tests.</p></div>
+        <div class="tool">→ <b>start_session</b> <span class="ok">[ok]</span></div>
+        <div class="tool">→ <b>tell_claude</b> <span class="ok">[ok]</span></div>
+      </div>
+      <div class="col">
+        <div class="ch">Sessions <span class="n">02</span></div>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">RUN</span><span class="chip auto">AUTO</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">PLAN</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Edits</button><button class="mp">Auto</button><button class="lk">LIVE ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

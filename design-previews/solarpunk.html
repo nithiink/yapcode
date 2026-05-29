@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Solarpunk Botanical</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Mulish:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#f5f1e3; --cream2:#ece6d2; --leaf:#3f7d4f; --leaf-dk:#28543a; --moss:#6fae6a;
+    --terra:#c9743a; --sun:#e7b94e; --ink:#243127; --mut:#6b7a68;
+    --disp:'DM Serif Display',serif; --body:'Mulish',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{background:
+      radial-gradient(70% 50% at 80% 0%, rgba(231,185,78,.25), transparent 60%),
+      radial-gradient(60% 50% at 0% 100%, rgba(111,174,106,.25), transparent 60%),
+      var(--cream);color:var(--ink);font-family:var(--body);padding:28px}
+  .wrap{max-width:1100px;margin:0 auto}
+  .leafline{height:2px;background:linear-gradient(90deg,transparent,var(--moss),var(--leaf),transparent)}
+
+  .top{display:flex;justify-content:space-between;align-items:center;padding-bottom:16px}
+  .logo{font-family:var(--disp);font-size:26px;display:flex;align-items:center;gap:11px}
+  .logo .leaf{width:24px;height:24px;background:var(--leaf);border-radius:0 50% 0 50%;transform:rotate(8deg)}
+  .status{display:flex;align-items:center;gap:16px;font-size:14px;color:var(--mut)}
+  .status .live{display:inline-flex;align-items:center;gap:8px;color:var(--leaf-dk);font-weight:700}
+  .status .live i{width:9px;height:9px;border-radius:50%;background:var(--moss);box-shadow:0 0 0 4px rgba(111,174,106,.25)}
+  .cost b{color:var(--terra)}
+
+  .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:44px;align-items:center;padding:48px 0}
+  @media(max-width:840px){.hero{grid-template-columns:1fr;gap:28px}}
+  .lede .kick{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--leaf);font-weight:700;margin-bottom:16px}
+  .lede h1{font-family:var(--disp);font-size:clamp(42px,6vw,74px);line-height:1.04;margin:0 0 18px}
+  .lede h1 em{font-style:italic;color:var(--terra)}
+  .lede p{font-size:17px;color:var(--mut);max-width:42ch;line-height:1.7;margin:0 0 28px}
+  .actions{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+  .connect{font-family:var(--body);font-weight:700;font-size:15px;letter-spacing:.02em;color:var(--cream);
+    background:linear-gradient(135deg,var(--leaf),var(--leaf-dk));border:0;padding:15px 34px;border-radius:999px;cursor:pointer;
+    box-shadow:0 14px 28px -12px rgba(40,84,58,.7)}
+  .textlink{font-family:var(--disp);font-style:italic;font-size:18px;color:var(--ink);border-bottom:2px solid var(--sun);cursor:pointer}
+
+  .orbwrap{display:grid;place-items:center;position:relative}
+  .orb{width:200px;height:200px;border-radius:50%;position:relative;
+    background:radial-gradient(circle at 40% 34%, #fff8e6, var(--sun) 38%, var(--leaf) 100%);
+    box-shadow:0 0 60px rgba(111,174,106,.5), inset 0 -12px 30px rgba(30,70,40,.4), inset 0 10px 26px rgba(255,255,255,.5);
+    animation:grow 5s ease-in-out infinite}
+  @keyframes grow{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+  .orb::after{content:"";position:absolute;inset:-22px;border-radius:50%;border:2px solid rgba(111,174,106,.35)}
+  .petal{position:absolute;width:34px;height:34px;background:var(--moss);border-radius:0 50% 0 50%}
+  .p1{top:-6px;left:50%;transform:translateX(-50%) rotate(0)} .p2{right:-6px;top:50%;transform:translateY(-50%) rotate(90deg)}
+  .p3{bottom:-6px;left:50%;transform:translateX(-50%) rotate(180deg)} .p4{left:-6px;top:50%;transform:translateY(-50%) rotate(270deg)}
+  .orbcap{position:absolute;bottom:-44px;left:50%;transform:translateX(-50%);font-family:var(--disp);font-style:italic;font-size:17px;color:var(--mut);white-space:nowrap}
+
+  .controls{display:flex;gap:26px;flex-wrap:wrap;align-items:center;padding:22px 0}
+  .ctl .lab{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--mut);font-weight:700;margin-bottom:8px}
+  .seg{display:inline-flex;border:2px solid var(--leaf);border-radius:999px;overflow:hidden}
+  .seg button{font-family:var(--body);font-weight:600;background:transparent;border:0;color:var(--mut);padding:8px 18px;cursor:pointer;font-size:14px}
+  .seg button.on{background:var(--leaf);color:var(--cream)}
+  .saver{font-family:var(--body);font-weight:600;font-size:14px;border:2px solid var(--sun);background:rgba(231,185,78,.15);color:var(--leaf-dk);
+    border-radius:999px;padding:8px 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  .saver i{width:9px;height:9px;border-radius:50%;background:var(--sun)}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding-top:34px}
+  @media(max-width:840px){.cols{grid-template-columns:1fr;gap:28px}}
+  .card{background:rgba(255,253,245,.6);border:1.5px solid rgba(111,174,106,.4);border-radius:22px;padding:22px;backdrop-filter:blur(6px)}
+  .card h2{font-family:var(--disp);font-size:20px;margin:0 0 16px;display:flex;justify-content:space-between;align-items:baseline}
+  .card h2 .ct{font-family:var(--body);font-weight:700;font-size:12px;color:var(--leaf);background:rgba(111,174,106,.18);padding:3px 11px;border-radius:999px}
+  .bubble{padding:12px 15px;border-radius:16px 16px 16px 4px;margin-bottom:11px;font-size:15px;line-height:1.55;max-width:90%}
+  .bubble.you{background:linear-gradient(135deg,rgba(201,116,58,.2),rgba(231,185,78,.2));border:1px solid rgba(201,116,58,.3);border-radius:16px 16px 4px 16px;margin-left:auto}
+  .bubble.ai{background:rgba(111,174,106,.14);border:1px solid rgba(111,174,106,.3)}
+  .who{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:700;margin-bottom:3px}
+  .tool{font-size:13px;color:var(--mut);font-weight:600;padding:5px 2px} .tool b{color:var(--leaf-dk)} .ok{color:var(--leaf)}
+  .sess{background:rgba(255,253,245,.55);border:1.5px solid rgba(111,174,106,.35);border-radius:16px;padding:14px;margin-bottom:13px}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);font-size:19px}
+  .chip{font-size:11px;font-weight:700;border-radius:999px;padding:3px 11px;color:var(--mut);background:rgba(111,174,106,.12);border:1px solid rgba(111,174,106,.3)}
+  .chip.run{color:var(--leaf-dk)} .chip.auto{color:var(--terra);border-color:rgba(201,116,58,.4);margin-left:auto} .chip.plan{color:var(--leaf);margin-left:auto}
+  .meta{font-size:13px;color:var(--mut);margin:9px 0 11px}
+  .modebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--body);font-weight:600;font-size:12.5px;border:1.5px solid rgba(111,174,106,.4);background:transparent;color:var(--mut);border-radius:999px;padding:5px 13px;cursor:pointer}
+  .mp.on{background:var(--leaf);color:var(--cream);border-color:var(--leaf)}
+  .lk{margin-left:auto;font-family:var(--disp);font-style:italic;font-size:14px;color:var(--leaf-dk);border-bottom:2px solid var(--sun);cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo"><span class="leaf"></span>Voice-Claude</div>
+      <div class="status"><span class="live"><i></i> Listening</span><span class="cost">Claude <b>$0.0421</b> · Voice <b>$0.0123</b></span></div>
+    </div>
+    <div class="leafline"></div>
+
+    <section class="hero">
+      <div class="lede">
+        <div class="kick">Hands-free engineering</div>
+        <h1>Speak, and watch it <em>grow</em>.</h1>
+        <p>A gentle voice over Claude Code. Say what you need — sessions sprout, files take shape, commands run — and it reports back while you keep talking.</p>
+        <div class="actions"><button class="connect">Connect &amp; talk</button><a class="textlink">or mute</a></div>
+      </div>
+      <div class="orbwrap">
+        <div class="orb"><span class="petal p1"></span><span class="petal p2"></span><span class="petal p3"></span><span class="petal p4"></span></div>
+        <div class="orbcap">“On it — I’ll let you know.”</div>
+      </div>
+    </section>
+
+    <div class="leafline"></div>
+    <div class="controls">
+      <div class="ctl"><div class="lab">Voice</div><div class="seg"><button class="on">OpenAI</button><button>Gemini</button></div></div>
+      <div class="ctl"><div class="lab">Backend</div><div class="seg"><button class="on">CLI</button><button>SDK</button></div></div>
+      <div class="ctl"><div class="lab">Economy</div><button class="saver"><i></i>Cost saver on</button></div>
+    </div>
+    <div class="leafline"></div>
+
+    <div class="cols">
+      <div class="card">
+        <h2>Conversation <span class="ct">live</span></h2>
+        <div class="bubble you"><div class="who">You</div>Open the repo and run the test suite.</div>
+        <div class="bubble ai"><div class="who">Assistant</div>On it — starting a CLI session and kicking off the tests. I’ll let you know the moment it finishes.</div>
+        <div class="tool">→ <b>start_session</b> <span class="ok">✓</span></div>
+        <div class="tool">→ <b>tell_claude</b> <span class="ok">✓</span></div>
+      </div>
+      <div class="card">
+        <h2>Claude sessions <span class="ct">2 active</span></h2>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">running</span><span class="chip auto">Auto</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Accept edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">Plan</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Accept edits</button><button class="mp">Auto</button><span class="lk">Live ↗</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

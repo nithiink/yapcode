@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Dusk Riso</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#201b26; --panel:#28222f; --panel2:#2f2837; --ink:#e6ded2; --mut:#9c93a3;
+    --rose:#d98aa0; --teal:#6fb3a8; --line:#3a3342;
+    --disp:'Anton',sans-serif; --body:'DM Sans',sans-serif;
+    --shadow:0 12px 30px -18px rgba(0,0,0,.8);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.5;position:relative;padding:30px 26px}
+  /* faint halftone, very low opacity */
+  body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.04;
+    background-image:radial-gradient(#fff 30%, transparent 31%);background-size:6px 6px}
+  .wrap{max-width:1120px;margin:0 auto;position:relative;z-index:1}
+  .top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid var(--line);padding-bottom:14px}
+  .logo{font-family:var(--disp);font-size:36px;text-transform:uppercase;line-height:.9;letter-spacing:.01em}
+  .logo .p{color:var(--rose)} .logo .b{color:var(--teal)}
+  .iss{font-family:var(--body);font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);text-align:right;line-height:1.6}
+  .iss .live{color:var(--rose)} .iss b{color:var(--teal)}
+
+  .hero{position:relative;padding:34px 0;border-bottom:2px solid var(--line);overflow:hidden}
+  .big{font-family:var(--disp);text-transform:uppercase;font-size:clamp(56px,12vw,134px);line-height:.84;margin:0;position:relative;z-index:2}
+  .big .o1{color:var(--rose)} .big .o2{color:var(--teal)}
+  .blob{position:absolute;right:0;top:8px;width:200px;height:200px;border-radius:50%;background:var(--rose);opacity:.22;filter:blur(28px);animation:wob 6s ease-in-out infinite}
+  .blob.b2{right:80px;top:60px;width:170px;height:170px;background:var(--teal);animation-delay:-2.5s}
+  @keyframes wob{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-14px,12px) scale(1.08)}}
+  .sub{position:relative;z-index:2;font-size:17px;color:var(--mut);max-width:46ch;margin:18px 0 0}
+
+  .ctabar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:20px 0;border-bottom:2px solid var(--line)}
+  .connect{font-family:var(--disp);text-transform:uppercase;letter-spacing:.03em;font-size:17px;background:var(--rose);color:#2a1820;border:0;padding:12px 30px;border-radius:12px;cursor:pointer;box-shadow:var(--shadow)}
+  .mute{font-family:var(--disp);text-transform:uppercase;font-size:15px;background:var(--panel);color:var(--ink);border:1px solid var(--line);padding:12px 20px;border-radius:12px;cursor:pointer}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:4px;margin-left:auto}
+  .seg button{font-family:var(--body);font-weight:600;background:transparent;color:var(--mut);border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px}
+  .seg button.on{background:var(--teal);color:#15211f} .seg.rose button.on{background:var(--rose);color:#2a1820}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:32px;padding-top:30px}
+  @media(max-width:820px){.cols{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow)}
+  .ch{font-family:var(--disp);text-transform:uppercase;font-size:20px;margin:0 0 16px;display:flex;justify-content:space-between;align-items:baseline}
+  .ch .n{font-family:var(--body);font-weight:600;font-size:12px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);padding:3px 11px;border-radius:999px}
+  .turn{padding:11px 14px;border-radius:13px;margin-bottom:10px;max-width:92%;font-size:15px}
+  .turn.you{background:rgba(217,138,160,.16);border:1px solid var(--line);margin-left:auto}
+  .turn.ai{background:var(--panel2);border:1px solid var(--line)}
+  .who{font-family:var(--disp);text-transform:uppercase;font-size:12px;letter-spacing:.04em;color:var(--mut);margin-bottom:3px}
+  .tool{font-size:13px;color:var(--mut);padding:5px 2px} .tool b{color:var(--rose)} .ok{color:var(--teal)}
+  .sess{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);text-transform:uppercase;font-size:17px}
+  .chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--mut);background:var(--panel)}
+  .chip.run{color:var(--teal)} .chip.auto{color:var(--rose);margin-left:auto} .chip.plan{color:var(--teal);margin-left:auto}
+  .meta{font-size:13px;color:var(--mut);margin:9px 0 11px}
+  .modebar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--body);font-weight:600;font-size:12.5px;border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:9px;padding:5px 12px;cursor:pointer}
+  .mp.on{background:var(--rose);color:#2a1820;border-color:transparent}
+  .lk{margin-left:auto;font-family:var(--body);font-weight:600;font-size:12.5px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:9px;padding:5px 12px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo"><span class="p">Voice</span><span class="b">Claude</span></div>
+      <div class="iss"><span class="live">● Listening</span><br>OpenAI · CLI<br>$<b>0.0421</b> + $<b>0.0123</b></div>
+    </div>
+    <section class="hero">
+      <div class="blob"></div><div class="blob b2"></div>
+      <h1 class="big"><span class="o1">Say</span> <span class="o2">it</span><br>out loud.</h1>
+      <p class="sub">A voice on top of Claude Code. Talk — it opens sessions, edits files, runs commands, and reports back.</p>
+    </section>
+    <div class="ctabar">
+      <button class="connect">Connect ▸</button>
+      <button class="mute">Mute</button>
+      <div class="seg rose"><button class="on">OpenAI</button><button>Gemini</button></div>
+      <div class="seg"><button class="on">CLI</button><button>SDK</button></div>
+    </div>
+    <div class="cols">
+      <div class="card">
+        <div class="ch">Conversation <span class="n">live</span></div>
+        <div class="turn you"><div class="who">You</div>Open the repo and run the test suite.</div>
+        <div class="turn ai"><div class="who">Assistant</div>On it — starting a session and kicking off the tests. I’ll let you know.</div>
+        <div class="tool">→ <b>start_session</b> <span class="ok">✓</span></div>
+        <div class="tool">→ <b>tell_claude</b> <span class="ok">✓</span></div>
+      </div>
+      <div class="card">
+        <div class="ch">Sessions <span class="n">02</span></div>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">running</span><span class="chip auto">Auto</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Accept edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">Plan</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Accept edits</button><button class="mp">Auto</button><button class="lk">Live ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

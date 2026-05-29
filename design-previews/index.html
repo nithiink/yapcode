@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Design Directions</title>
+<style>
+  :root{--bg:#0c0d10;--card:#15171c;--txt:#e8eaf0;--mut:#8a90a0;--line:#262a33;--accent:#7da7ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;padding:28px}
+  header{max-width:1400px;margin:0 auto 22px}
+  h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+  p.sub{color:var(--mut);margin:0;font-size:14px}
+  .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .head .nm{font-weight:650;font-size:15px}
+  .head .nm small{display:block;color:var(--mut);font-weight:400;font-size:12px;margin-top:2px}
+  .head a{color:var(--accent);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+  .head a:hover{border-color:var(--accent)}
+  .frame{position:relative;height:560px;background:#000}
+  .frame iframe{position:absolute;top:0;left:0;width:200%;height:200%;border:0;transform:scale(.5);transform-origin:top left}
+  .tag{font-size:11px;color:var(--mut);padding:10px 16px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Voice-Claude — four design directions</h1>
+    <p class="sub">Each tile is the live mockup at half scale. Click “Open full ↗” to see it real-size and interactive. Tell me which number you want.</p>
+  </header>
+  <div class="grid">
+    <div class="item">
+      <div class="head"><div class="nm">1 · JARVIS HUD <small>retro-futuristic command deck · dark · cyan/amber</small></div><a href="hud.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="hud.html" title="HUD"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">2 · Editorial Minimal <small>refined serif · warm paper · one ink accent · light</small></div><a href="editorial.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="editorial.html" title="Editorial"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">3 · Brutalist Terminal <small>phosphor CRT · monospace · hard edges · green/amber</small></div><a href="brutalist.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="brutalist.html" title="Brutalist"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">4 · Warm Ambient <small>gradient mesh · glassmorphism · soft · friendly</small></div><a href="ambient.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="ambient.html" title="Ambient"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">5 · Bauhaus Geometric <small>primary red/blue/yellow · hard shadows · chunky · playful-bold</small></div><a href="bauhaus.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="bauhaus.html" title="Bauhaus"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">6 · Cyberpunk Neon <small>magenta/cyan glow · glitch · grid horizon · dark</small></div><a href="neon.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="neon.html" title="Neon"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">7 · Claymorphism <small>soft 3D · pastel · puffy rounded · tactile · light</small></div><a href="clay.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="clay.html" title="Clay"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">8 · Luxe Noir <small>black + gold · elegant serif · ultra-refined · luxury</small></div><a href="noir.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="noir.html" title="Noir"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">9 · Blueprint <small>navy + cyan drafting grid · dimension lines · technical · engineering</small></div><a href="blueprint.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="blueprint.html" title="Blueprint"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">10 · Risograph Zine <small>pink/blue duotone · halftone + grain · condensed type · indie print</small></div><a href="riso.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="riso.html" title="Riso"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">11 · Pixel Arcade <small>pixel fonts · CRT scanlines · neon game UI · playful retro</small></div><a href="arcade.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="arcade.html" title="Arcade"></iframe></div>
+    </div>
+    <div class="item">
+      <div class="head"><div class="nm">12 · Solarpunk Botanical <small>greens + cream · organic curves · leaf motifs · calm/natural</small></div><a href="solarpunk.html" target="_blank">Open full ↗</a></div>
+      <div class="frame"><iframe src="solarpunk.html" title="Solarpunk"></iframe></div>
+    </div>
+  </div>
+</body>
+</html>

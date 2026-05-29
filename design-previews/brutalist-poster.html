@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice-Claude — Brutalist Poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#100f0d; --panel:#191814; --txt:#f2efe6; --mut:#928c7e;
+    --elec:#2bff6a; --orange:#ff6a1f; --line:#2c2a24;
+    --disp:'Anton',sans-serif; --body:'Archivo',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--body);padding:0;position:relative}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px;border-left:4px solid var(--txt);border-right:4px solid var(--txt);min-height:100vh}
+  .top{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--txt);padding-bottom:14px}
+  .logo{font-family:var(--disp);font-size:30px;text-transform:uppercase;letter-spacing:.02em}
+  .logo span{color:var(--elec)}
+  .stat{font-family:var(--body);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);text-align:right;line-height:1.7}
+  .stat .live{color:var(--elec)} .stat b{color:var(--orange)}
+
+  .hero{padding:40px 0 30px;border-bottom:4px solid var(--txt);position:relative;overflow:hidden}
+  .mega{font-family:var(--disp);text-transform:uppercase;font-size:clamp(74px,17vw,210px);line-height:.78;letter-spacing:-.02em;margin:0}
+  .mega .out{color:transparent;-webkit-text-stroke:2px var(--mut)}
+  .mega .el{color:var(--elec)}
+  .row2{display:flex;justify-content:space-between;align-items:flex-end;margin-top:18px;gap:24px;flex-wrap:wrap}
+  .row2 p{font-size:16px;color:var(--mut);max-width:44ch;margin:0;line-height:1.55}
+  .actions{display:flex;gap:12px}
+  .connect{font-family:var(--disp);text-transform:uppercase;letter-spacing:.04em;font-size:18px;background:var(--elec);color:var(--bg);
+    border:0;padding:14px 36px;cursor:pointer}
+  .connect:hover{background:var(--orange)}
+  .mute{font-family:var(--disp);text-transform:uppercase;font-size:16px;background:transparent;color:var(--txt);border:3px solid var(--txt);padding:11px 20px;cursor:pointer}
+
+  .marq{border-bottom:4px solid var(--txt);overflow:hidden;white-space:nowrap;background:var(--elec);color:var(--bg)}
+  .marq div{display:inline-block;font-family:var(--disp);text-transform:uppercase;font-size:14px;letter-spacing:.1em;padding:7px 0;animation:scroll 18s linear infinite}
+  .marq span{padding:0 24px}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+
+  .ctlrow{display:flex;border-bottom:4px solid var(--txt);flex-wrap:wrap}
+  .ctl{flex:1;min-width:200px;border-right:4px solid var(--txt);padding:16px 18px}
+  .ctl:last-child{border-right:0}
+  .ctl .k{font-family:var(--body);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin-bottom:10px}
+  .seg{display:flex;border:3px solid var(--txt)}
+  .seg button{flex:1;font-family:var(--disp);text-transform:uppercase;font-size:14px;background:transparent;color:var(--mut);border:0;border-right:3px solid var(--txt);padding:8px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--txt);color:var(--bg)}
+  .seg.el button.on{background:var(--elec);color:var(--bg)}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr}
+  @media(max-width:840px){.cols{grid-template-columns:1fr}}
+  .col{padding:22px 20px;border-right:4px solid var(--txt)}
+  .col:last-child{border-right:0}
+  .ch{font-family:var(--disp);text-transform:uppercase;font-size:20px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:baseline}
+  .ch .n{font-size:12px;background:var(--orange);color:var(--bg);padding:2px 9px}
+  .turn{border:3px solid var(--txt);padding:11px 13px;margin-bottom:12px;background:var(--panel)}
+  .turn.you{border-color:var(--elec)}
+  .who{font-family:var(--body);font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:.1em;margin-bottom:4px;color:var(--mut)}
+  .turn.you .who{color:var(--elec)}
+  .turn p{margin:0;font-size:15px;line-height:1.45}
+  .tool{font-family:var(--body);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.04em;padding:5px 0;color:var(--mut)}
+  .tool .ok{color:var(--elec)}
+  .sess{border:3px solid var(--txt);padding:13px;margin-bottom:13px;background:var(--panel)}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .nm{font-family:var(--disp);text-transform:uppercase;font-size:18px}
+  .chip{font-family:var(--body);font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;border:2px solid var(--line);padding:2px 8px;color:var(--mut)}
+  .chip.run{color:var(--elec);border-color:var(--elec)} .chip.auto{color:var(--orange);border-color:var(--orange);margin-left:auto} .chip.plan{color:var(--txt);margin-left:auto}
+  .meta{font-size:13px;color:var(--mut);margin:9px 0 11px}
+  .modebar{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .mp{font-family:var(--body);font-weight:700;font-size:11px;text-transform:uppercase;border:2px solid var(--line);background:transparent;color:var(--mut);padding:5px 11px;cursor:pointer}
+  .mp.on{background:var(--elec);color:var(--bg);border-color:var(--elec)}
+  .lk{margin-left:auto;font-family:var(--body);font-weight:700;font-size:11px;text-transform:uppercase;border:2px solid var(--txt);background:transparent;color:var(--txt);padding:5px 11px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="logo">VOICE<span>·</span>CLAUDE</div>
+      <div class="stat"><span class="live">● Listening</span><br>OpenAI · CLI · saver on<br>Claude <b>$0.0421</b> · Voice <b>$0.0123</b></div>
+    </div>
+    <section class="hero">
+      <h1 class="mega">SPEAK.<br><span class="out">CLAUDE</span> <span class="el">BUILDS.</span></h1>
+      <div class="row2">
+        <p>A voice on top of Claude Code. Talk; it opens sessions, edits files, runs commands, and reports back — while you keep talking.</p>
+        <div class="actions"><button class="connect">Connect</button><button class="mute">Mute</button></div>
+      </div>
+    </section>
+    <div class="marq"><div>
+      <span>● LISTENING</span><span>VOICE → CLAUDE</span><span>HANDS-FREE ENGINEERING</span><span>OPEN A SESSION</span><span>● LISTENING</span><span>VOICE → CLAUDE</span><span>HANDS-FREE ENGINEERING</span><span>OPEN A SESSION</span>
+    </div></div>
+    <div class="ctlrow">
+      <div class="ctl"><div class="k">Voice</div><div class="seg el"><button class="on">OpenAI</button><button>Gemini</button></div></div>
+      <div class="ctl"><div class="k">Backend</div><div class="seg"><button class="on">CLI</button><button>SDK</button></div></div>
+      <div class="ctl"><div class="k">Cost saver</div><div class="seg el"><button class="on">On</button><button>Off</button></div></div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <div class="ch">Conversation <span class="n">LIVE</span></div>
+        <div class="turn you"><div class="who">You → Claude</div><p>Open the repo and run the test suite.</p></div>
+        <div class="turn"><div class="who">Assistant</div><p>On it — starting a session and kicking off the tests.</p></div>
+        <div class="tool">→ start_session <span class="ok">✓</span></div>
+        <div class="tool">→ tell_claude <span class="ok">✓</span></div>
+      </div>
+      <div class="col">
+        <div class="ch">Sessions <span class="n">02</span></div>
+        <div class="sess">
+          <div class="row"><span class="nm">voice-claude</span><span class="chip">CLI</span><span class="chip run">RUN</span><span class="chip auto">AUTO</span></div>
+          <div class="meta">opus · $0.0421 · ~/dev/voice-claude</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp">Plan</button><button class="mp">Edits</button><button class="mp on">Auto</button></div>
+        </div>
+        <div class="sess">
+          <div class="row"><span class="nm">assistant</span><span class="chip">CLI</span><span class="chip plan">PLAN</span></div>
+          <div class="meta">sonnet · $0.0089 · ~/dev/assistant</div>
+          <div class="modebar"><button class="mp">Normal</button><button class="mp on">Plan</button><button class="mp">Edits</button><button class="mp">Auto</button><button class="lk">LIVE ↗</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
