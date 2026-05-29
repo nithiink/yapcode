@@ -156,6 +156,41 @@ body {
 .qdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: qpulse 1.2s ease-in-out infinite; }
 @keyframes qpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
+/* the actual running/queued turns under a session (with message text) */
+.queuelist { margin: 2px 0 11px; display: flex; flex-direction: column; gap: 4px; }
+.qitem { display: flex; gap: 9px; align-items: baseline; font-size: 12.5px; }
+.qitem .qmark { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; min-width: 62px; }
+.qitem.running .qmark { color: var(--acc); }
+.qitem.queued .qmark { color: var(--warn); }
+.qitem .qtext { color: var(--ink); word-break: break-word; }
+.qitem.queued .qtext { color: var(--mut); }
+
+/* activity / pipeline log panel */
+.debugpanel { margin-top: 18px; }
+.loghead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.logctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.logsearch { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 4px 9px; font-size: 12px; outline: none; min-width: 110px; }
+.logsearch:focus { border-color: var(--acc); }
+.textbtn.on { color: var(--acc); }
+.logscroll { margin-top: 10px; max-height: 380px; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.logrow { display: flex; gap: 9px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid rgba(50,47,43,0.45); white-space: nowrap; }
+.logrow .lt { color: var(--dim); flex: none; }
+.logrow .lhop { flex: none; display: inline-flex; gap: 3px; align-items: center; }
+.logrow .harr { color: var(--dim); }
+.logrow .htag { text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.htag.voice { color: var(--plan); }
+.htag.backend { color: var(--mut); }
+.htag.claude { color: var(--acc); }
+.htag.user { color: var(--good); }
+.logrow .lk { color: var(--dim); flex: none; min-width: 74px; }
+.logrow .lsess { color: var(--mut); flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.logrow .lsum { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.logrow.k-error .lsum { color: var(--danger); }
+.logrow.k-send .lsum { color: var(--acc); }
+.logrow.k-assistant .lsum { color: var(--good); }
+.logrow.k-transcript .lsum { color: var(--plan); }
+.logrow.k-inject .lsum { color: var(--warn); }
+
 .modebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
 .modelbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
 .modepill { font: inherit; font-weight: 500; font-size: 12.5px; padding: 5px 13px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--mut); cursor: pointer; }

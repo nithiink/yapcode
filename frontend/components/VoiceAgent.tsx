@@ -27,6 +27,20 @@ type Sess = {
   running?: boolean;
   queued?: number;
   pending?: number;
+  // The actual in-flight + waiting turns, in order, with their message text.
+  queue?: { text: string; state: "running" | "queued" }[];
+};
+
+// One event on the unified pipeline bus (backend /debug/stream + browser posts).
+type DebugEvent = {
+  seq: number;
+  ts: string;
+  source: string; // voice | backend | claude | user
+  dest: string;
+  kind: string; // tool_call | tool_result | send | decision | hook | assistant | inject | transcript | error | poll | info
+  session?: string | null;
+  summary: string;
+  detail?: unknown;
 };
 
 const MODES: { id: string; label: string; title: string }[] = [
@@ -104,6 +118,14 @@ export default function VoiceAgent() {
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
+  // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
+  const [logFilter, setLogFilter] = useState("");
+  const [logErrorsOnly, setLogErrorsOnly] = useState(false);
+  const [logPaused, setLogPaused] = useState(false);
+  const logScrollRef = useRef<HTMLDivElement | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -128,6 +150,15 @@ export default function VoiceAgent() {
   const costLogTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
+
+  const filteredLog = debugEvents.filter((ev) => {
+    if (logErrorsOnly && ev.kind !== "error") return false;
+    if (logFilter) {
+      const hay = `${ev.source} ${ev.dest} ${ev.kind} ${ev.summary} ${ev.session || ""}`.toLowerCase();
+      if (!hay.includes(logFilter.toLowerCase())) return false;
+    }
+    return true;
+  });
 
   useEffect(
     () => () => {
@@ -246,17 +277,18 @@ export default function VoiceAgent() {
           ? `[Claude update] Claude is asking: ${res.prompt.text}${opts ? ` Options: ${opts}.` : ""} Read this to the user and get their choice.`
           : `[Claude update] Claude needs permission to ${res.prompt.text}. Ask the user to approve or deny.`;
       sessionRef.current?.injectUpdate(msg);
+      logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "completed") {
       setPending(null);
       const txt = (res.assistant_text || "").trim();
-      sessionRef.current?.injectUpdate(
-        `[Claude update] Claude finished. ${txt ? `It said: ${txt}` : "Done."} Summarize this briefly for the user.`,
-      );
+      const msg = `[Claude update] Claude finished. ${txt ? `It said: ${txt}` : "Done."} Summarize this briefly for the user.`;
+      sessionRef.current?.injectUpdate(msg);
+      logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "error") {
       setPending(null);
-      sessionRef.current?.injectUpdate(
-        `[Claude update] Claude hit an error: ${res.error || "unknown"}. Tell the user.`,
-      );
+      const msg = `[Claude update] Claude hit an error: ${res.error || "unknown"}. Tell the user.`;
+      sessionRef.current?.injectUpdate(msg);
+      logDebug("inject", msg, { session: sid }, "backend", "voice");
     }
     refreshSessions();
   };
@@ -392,6 +424,67 @@ export default function VoiceAgent() {
     return () => clearInterval(t);
   }, []);
 
+  // The backend (and live terminal) is on :8000 at the same host the page loaded
+  // from — works on localhost and from the phone alike. Mirrors LiveTerminal.
+  const backendBase = () => {
+    const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+    const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http";
+    return `${proto}://${host}:8000`;
+  };
+
+  // Push a browser-only event (voice transcripts, [Claude update] injections,
+  // voice errors, connect/disconnect) into the backend bus so it lands in the
+  // file and streams back to every panel alongside the backend events.
+  const logDebug = (
+    kind: string,
+    summary: string,
+    detail?: unknown,
+    source = "voice",
+    dest = "backend",
+  ) => {
+    try {
+      fetch(`${backendBase()}/debug/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, dest, kind, summary, detail }),
+        keepalive: true,
+      }).catch(() => undefined);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Subscribe to the unified pipeline stream. EventSource auto-reconnects; we
+  // drop replayed events by monotonic seq so a reconnect doesn't duplicate.
+  useEffect(() => {
+    const es = new EventSource(`${backendBase()}/debug/stream?limit=300`);
+    esRef.current = es;
+    es.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data) as DebugEvent;
+        setDebugEvents((prev) => {
+          const maxSeq = prev.length ? prev[prev.length - 1].seq : 0;
+          if (ev.seq <= maxSeq) return prev; // replay/reconnect duplicate
+          const next = [...prev, ev];
+          return next.length > 800 ? next.slice(-800) : next;
+        });
+      } catch {
+        /* ignore malformed frame */
+      }
+    };
+    return () => {
+      es.close();
+      esRef.current = null;
+    };
+  }, []);
+
+  // Auto-scroll the log to the newest line unless the user paused.
+  useEffect(() => {
+    if (logPaused || !showDebug) return;
+    const el = logScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [debugEvents, logPaused, showDebug]);
+
   // Drive the orb's size from the assistant audio amplitude.
   const startAnalyser = (stream: MediaStream) => {
     try {
@@ -433,8 +526,19 @@ export default function VoiceAgent() {
     if (e.type === "status") setStatus(e.status);
     else if (e.type === "state") setVstate(e.state);
     else if (e.type === "usage") setVoiceUsage(e.usage);
-    else if (e.type === "error") setStatus(`Error: ${e.message}`);
-    else if (e.type === "transcript") {
+    else if (e.type === "error") {
+      setStatus(`Error: ${e.message}`);
+      logDebug("error", `voice error: ${e.message}`);
+    } else if (e.type === "transcript") {
+      if (e.final) {
+        logDebug(
+          "transcript",
+          `[${e.role}] ${e.text}`,
+          { role: e.role },
+          e.role === "user" ? "user" : "voice",
+          e.role === "user" ? "voice" : "user",
+        );
+      }
       setTimeline((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
@@ -489,6 +593,7 @@ export default function VoiceAgent() {
       setModelLabel(model);
       setConnected(true);
       setMuted(false);
+      logDebug("info", `voice connected (${provider} · ${model})`, { provider, model, backend }, "voice", "user");
       refreshSessions();
       // Start the cost-log lifecycle: emit a connection_start record, hold a
       // context object updated by the voiceUsage/sessions effects, then snapshot
@@ -527,6 +632,7 @@ export default function VoiceAgent() {
   };
 
   const disconnect = () => {
+    logDebug("info", "voice disconnected", undefined, "voice", "user");
     // Final cost-log record BEFORE we tear down state, while voiceUsage and the
     // session list still reflect what happened. keepalive on the POST lets it
     // survive even if the user closes the tab right after.
@@ -668,6 +774,13 @@ export default function VoiceAgent() {
             )}
             <button className="textbtn" onClick={refreshSessions}>
               Refresh
+            </button>
+            <button
+              className={`textbtn ${showDebug ? "on" : ""}`}
+              onClick={() => setShowDebug((v) => !v)}
+              title="Full voice ↔ backend ↔ Claude pipeline log"
+            >
+              {showDebug ? "Hide activity" : "Activity log"}
             </button>
           </div>
           <div className="state-row">{status}</div>
@@ -875,6 +988,16 @@ export default function VoiceAgent() {
                   <div className="path">
                     {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
                   </div>
+                  {(s.queue?.length ?? 0) > 0 && (
+                    <div className="queuelist">
+                      {s.queue!.map((q, i) => (
+                        <div key={i} className={`qitem ${q.state}`}>
+                          <span className="qmark">{q.state === "running" ? "▶ now" : "⋯ queued"}</span>
+                          <span className="qtext">{q.text || "(turn)"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="modebar" role="group" aria-label="Permission mode">
                     <span className="modelbl">Mode</span>
                     {MODES.map((m) => (
@@ -910,6 +1033,56 @@ export default function VoiceAgent() {
           </div>
         </div>
       </div>
+
+      {showDebug && (
+        <div className="panel debugpanel">
+          <div className="loghead">
+            <h2>
+              Activity <span className="ct">{filteredLog.length} / {debugEvents.length}</span>
+            </h2>
+            <div className="logctl">
+              <input
+                className="logsearch"
+                placeholder="filter…"
+                value={logFilter}
+                onChange={(e) => setLogFilter(e.target.value)}
+              />
+              <button className={`textbtn ${logErrorsOnly ? "on" : ""}`} onClick={() => setLogErrorsOnly((v) => !v)}>
+                Errors
+              </button>
+              <button className={`textbtn ${logPaused ? "on" : ""}`} onClick={() => setLogPaused((v) => !v)}>
+                {logPaused ? "Resume" : "Pause"}
+              </button>
+              <button className="textbtn" onClick={() => setDebugEvents([])}>
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="rule" />
+          <div className="logscroll" ref={logScrollRef}>
+            {filteredLog.length === 0 && (
+              <div className="empty">No matching events yet — talk to the agent and the full pipeline shows here.</div>
+            )}
+            {filteredLog.map((ev) => (
+              <div
+                key={ev.seq}
+                className={`logrow k-${ev.kind}`}
+                title={ev.detail ? JSON.stringify(ev.detail).slice(0, 800) : undefined}
+              >
+                <span className="lt">{ev.ts.slice(11, 23)}</span>
+                <span className="lhop">
+                  <span className={`htag ${ev.source}`}>{ev.source}</span>
+                  <span className="harr">→</span>
+                  <span className={`htag ${ev.dest}`}>{ev.dest}</span>
+                </span>
+                <span className="lk">{ev.kind}</span>
+                {ev.session && <span className="lsess">{ev.session}</span>}
+                <span className="lsum">{ev.summary}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {fullscreen && openSession && (
         <div className="tx-overlay" onClick={() => setFullscreen(false)}>
