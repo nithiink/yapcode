@@ -329,6 +329,23 @@ class SDKClaudeRunner(ClaudeRunner):
     async def read(self, handle: str) -> str:
         return "".join(self._get(handle)._transcript)
 
+    def _queue_counts(self, s: _Session) -> dict[str, Any]:
+        """Live work-pipeline view for the UI, mirroring the tmux runner. The SDK
+        backend has no extras queue (a turn runs to completion before the next
+        start_advance), so at most one turn is in flight and `queued` is always 0;
+        see TmuxClaudeRunner for the queued path. A finished-but-unharvested task
+        counts toward `pending` so the number is continuous across the harvest
+        boundary. Cancelled tasks never become results, so they're excluded. Pure
+        read — never harvests."""
+        bg = self._bg.get(s.handle)
+        running = bg is not None and not bg.done()
+        done = 1 if (bg is not None and bg.done() and not bg.cancelled()) else 0
+        return {
+            "running": running,
+            "queued": 0,
+            "pending": len(s._pending_results) + done,
+        }
+
     def list(self) -> list[dict[str, Any]]:
         return [
             {
@@ -339,6 +356,7 @@ class SDKClaudeRunner(ClaudeRunner):
                 "mode": s.mode,
                 "status": s.status,
                 "cost_usd": round(s.cost_usd, 4),
+                **self._queue_counts(s),
             }
             for s in self._sessions.values()
         ]

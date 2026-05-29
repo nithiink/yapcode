@@ -37,7 +37,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "list_sessions",
-        "description": "List the Claude Code sessions currently running on this machine, with their human-readable name, project directory, and status. Use the names here to refer to sessions in other calls.",
+        "description": "List the Claude Code sessions currently running on this machine, with their human-readable name, project directory, and status. Each session also reports its work pipeline: `running` (a turn is executing right now), `queued` (how many follow-up turns are waiting behind the current one), and `pending` (finished turns not yet narrated). Use these to answer 'is it still working?' or 'what's queued on the billing session?'. Use the names here to refer to sessions in other calls.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {

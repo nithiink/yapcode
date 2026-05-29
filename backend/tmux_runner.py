@@ -681,10 +681,36 @@ class TmuxClaudeRunner(ClaudeRunner):
             rows = rows[-lines:]
         return "\n".join(rows)
 
+    def _queue_counts(self, s: _TmuxSession) -> dict:
+        """Live view of a session's work pipeline for the UI. Turns are serialized
+        through _turn_lock, so among the in-flight tasks (the _bg task plus any
+        _extra_tasks queued behind it) at most one executes at a time and the rest
+        wait. A finished task stays referenced until the next _harvest_finished
+        sweeps it into _pending_results, so finished-but-unharvested tasks count
+        toward `pending` too — making the number continuous across the harvest
+        boundary and correct even when nothing is polling. Cancelled tasks never
+        become results (see _stash_result), so they're excluded. Pure read; never
+        harvests; safe on every list() refresh.
+
+          running : a turn is executing right now
+          queued  : turns waiting behind it
+          pending : finished turns not yet drained/narrated by poll_status
+        """
+        bg = self._bg.get(s.handle)
+        tasks = ([bg] if bg is not None else []) + list(s._extra_tasks)
+        live = sum(1 for t in tasks if not t.done())
+        done = sum(1 for t in tasks if t.done() and not t.cancelled())
+        return {
+            "running": live > 0,
+            "queued": max(0, live - 1),
+            "pending": len(s._pending_results) + done,
+        }
+
     def list(self) -> list[dict]:
         return [
             {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
-             "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0}
+             "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0,
+             **self._queue_counts(s)}
             for s in self._sessions.values()
         ]
 
