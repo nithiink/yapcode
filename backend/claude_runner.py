@@ -24,6 +24,7 @@ from uuid import uuid4
 import claude_agent_sdk as sdk
 
 from permissions import classify
+from event_log import log_event
 
 log = logging.getLogger("voice-claude.runner")
 
@@ -201,6 +202,9 @@ class SDKClaudeRunner(ClaudeRunner):
             s._stop.clear()
             s.status = "running"
             assert s.client is not None
+            log_event("backend", "claude", "send", message,
+                      session=s.session_id or s.handle[:8],
+                      detail={"handle": s.handle, "text": message})
             await s.client.query(message)
             s._consumer = asyncio.create_task(self._consume(s))
             await s._stop.wait()
@@ -254,14 +258,18 @@ class SDKClaudeRunner(ClaudeRunner):
         self._harvest_finished(handle)
         if handle in self._bg and not self._bg[handle].done():
             log.warning("start_advance for %s while previous task still running", handle)
-        self._bg[handle] = asyncio.create_task(self.advance(handle, message))
+        task = asyncio.create_task(self.advance(handle, message))
+        task.set_name(message)  # carries the message into list()'s `queue`
+        self._bg[handle] = task
 
     def start_answer(self, handle: str, choice: str) -> None:
         self._get(handle)
         self._harvest_finished(handle)
         if handle in self._bg and not self._bg[handle].done():
             log.warning("start_answer for %s while previous task still running", handle)
-        self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
+        task = asyncio.create_task(self.answer(handle, choice))
+        task.set_name(f"answer: {choice}")
+        self._bg[handle] = task
 
     def poll_status(self, handle: str) -> dict[str, Any]:
         """Report the in-flight background turn for a session.
@@ -340,10 +348,15 @@ class SDKClaudeRunner(ClaudeRunner):
         bg = self._bg.get(s.handle)
         running = bg is not None and not bg.done()
         done = 1 if (bg is not None and bg.done() and not bg.cancelled()) else 0
+        queue = []
+        if running:
+            name = bg.get_name()
+            queue.append({"text": "" if name.startswith("Task-") else name, "state": "running"})
         return {
             "running": running,
             "queued": 0,
             "pending": len(s._pending_results) + done,
+            "queue": queue,
         }
 
     def list(self) -> list[dict[str, Any]]:
@@ -386,6 +399,10 @@ class SDKClaudeRunner(ClaudeRunner):
                             s._transcript.append(b.text)
                         elif isinstance(b, sdk.ToolUseBlock):
                             s.tools_used.append(b.name)
+                            log_event("claude", "backend", "hook", f"tool: {b.name}",
+                                      session=s.session_id or s.handle[:8],
+                                      detail={"handle": s.handle, "tool_name": b.name,
+                                              "tool_input": b.input})
                 elif isinstance(msg, sdk.ResultMessage):
                     if not s.session_id:
                         s.session_id = msg.session_id
@@ -398,8 +415,15 @@ class SDKClaudeRunner(ClaudeRunner):
                     if msg.is_error:
                         s.status = "error"
                         s.error = (msg.errors or ["unknown error"])[0]
+                        log_event("backend", "voice", "error", s.error or "error",
+                                  session=s.session_id or s.handle[:8])
                     else:
                         s.status = "completed"
+                        txt = "".join(s._delta)
+                        if txt:
+                            log_event("claude", "backend", "assistant", txt,
+                                      session=s.session_id or s.handle[:8],
+                                      detail={"handle": s.handle, "text": txt})
                     s._stop.set()
                     return
         except asyncio.CancelledError:
@@ -421,10 +445,17 @@ class SDKClaudeRunner(ClaudeRunner):
             s._decision = fut
             s.pending = self._build_prompt(kind, tool_name, tool_input)
             s.status = "needs_choice" if kind == "question" else "needs_permission"
+            log_event("claude", "backend", "hook",
+                      f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",
+                      session=s.session_id or s.handle[:8],
+                      detail={"handle": s.handle, "tool_name": tool_name})
             s._stop.set()                  # let advance/answer return with the prompt
             choice = await fut             # parked until answer() resolves
             s._decision = None
             s.pending = None
+            log_event("backend", "claude", "decision", str(choice),
+                      session=s.session_id or s.handle[:8],
+                      detail={"handle": s.handle, "tool_name": tool_name, "choice": choice})
             return self._map_decision(kind, tool_name, tool_input, choice)
 
     def _collect(self, s: _Session) -> AdvanceResult:

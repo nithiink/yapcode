@@ -23,5 +23,9 @@ frontend/.certs/
 # not source). Override path with VC_COST_LOG_PATH.
 cost-log.jsonl
 
+# Debug pipeline log (full voice<->backend<->Claude event stream JSONL; runtime
+# observability, not source). Override path with VC_DEBUG_LOG_PATH.
+debug-log.jsonl
+
 # Misc
 .DS_Store

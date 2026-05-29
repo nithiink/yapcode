@@ -44,8 +44,21 @@ from claude_runner import (
     normalize_mode,
 )
 from permissions import classify
+from event_log import log_event
 
 log = logging.getLogger("voice-claude.tmux")
+
+
+def _slabel(s: "_TmuxSession") -> str:
+    """Short session label for the debug stream (name if set, else short handle)."""
+    return s.name or s.handle[:8]
+
+
+def _task_label(t: asyncio.Task) -> str:
+    """The message text a queued/running turn carries (set via task.set_name at
+    enqueue). Empty for an unlabeled task (asyncio's default "Task-N")."""
+    name = t.get_name()
+    return "" if name.startswith("Task-") else name
 
 CTRL_ROOT = config.SESSION_STORE_DIR  # set via VC_SESSION_STORE; defaults inside the project
 HOOK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmux_hooks")
@@ -455,6 +468,8 @@ class TmuxClaudeRunner(ClaudeRunner):
         # the input settles, makes Enter submit. Verify via capture-pane and
         # retry once if the text is still sitting unsent.
         text = " ".join(message.splitlines())
+        log_event("backend", "claude", "send", text, session=_slabel(s),
+                  detail={"handle": s.handle, "text": text})
         await self._tmux("send-keys", "-t", s.pane, "-l", "--", text)
         await asyncio.sleep(0.4)
         await self._tmux("send-keys", "-t", s.pane, "Enter")
@@ -487,6 +502,11 @@ class TmuxClaudeRunner(ClaudeRunner):
             json.dump({"decision": "allow" if allow else "deny",
                        "reason": "" if allow else f"user said: {choice}"}, f)
         os.replace(tmp, path)
+        log_event("backend", "claude", "decision",
+                  f"{'allow' if allow else 'deny'}" + (f" ({choice})" if not allow else ""),
+                  session=_slabel(s),
+                  detail={"handle": s.handle, "decision": "allow" if allow else "deny",
+                          "choice": choice, "tool_use_id": s.pending_tool_use_id})
 
     async def _answer_question(self, s: _TmuxSession, choice: str) -> bool:
         """Drive one question of the AskUserQuestion menu.
@@ -697,13 +717,18 @@ class TmuxClaudeRunner(ClaudeRunner):
           pending : finished turns not yet drained/narrated by poll_status
         """
         bg = self._bg.get(s.handle)
-        tasks = ([bg] if bg is not None else []) + list(s._extra_tasks)
-        live = sum(1 for t in tasks if not t.done())
-        done = sum(1 for t in tasks if t.done() and not t.cancelled())
+        ordered = ([bg] if bg is not None else []) + list(s._extra_tasks)
+        live = [t for t in ordered if not t.done()]
+        done = sum(1 for t in ordered if t.done() and not t.cancelled())
+        queue = [
+            {"text": _task_label(t), "state": "running" if i == 0 else "queued"}
+            for i, t in enumerate(live)
+        ]
         return {
-            "running": live > 0,
-            "queued": max(0, live - 1),
+            "running": len(live) > 0,
+            "queued": max(0, len(live) - 1),
             "pending": len(s._pending_results) + done,
+            "queue": queue,
         }
 
     def list(self) -> list[dict]:
@@ -760,25 +785,31 @@ class TmuxClaudeRunner(ClaudeRunner):
     def start_advance(self, handle: str, message: str) -> None:
         self._get(handle)
         self._harvest_finished(handle)
+        # The task name carries the message so list()'s `queue` can show WHAT is
+        # running/queued, not just a count.
+        task = asyncio.create_task(self.advance(handle, message))
+        task.set_name(message)
         if handle in self._bg and not self._bg[handle].done():
             # Previous turn still running. Queue this one — _turn_lock will
             # serialize them and BOTH results land in _pending_results.
             s = self._sessions[handle]
-            s._extra_tasks.append(asyncio.create_task(self.advance(handle, message)))
+            s._extra_tasks.append(task)
             log.info("start_advance for %s queued behind running turn (%d in queue)",
                      handle, len(s._extra_tasks))
         else:
-            self._bg[handle] = asyncio.create_task(self.advance(handle, message))
+            self._bg[handle] = task
 
     def start_answer(self, handle: str, choice: str) -> None:
         self._get(handle)
         self._harvest_finished(handle)
+        task = asyncio.create_task(self.answer(handle, choice))
+        task.set_name(f"answer: {choice}")
         if handle in self._bg and not self._bg[handle].done():
             s = self._sessions[handle]
-            s._extra_tasks.append(asyncio.create_task(self.answer(handle, choice)))
+            s._extra_tasks.append(task)
             log.info("start_answer for %s queued behind running turn", handle)
         else:
-            self._bg[handle] = asyncio.create_task(self.answer(handle, choice))
+            self._bg[handle] = task
 
     def start_builtin_slash(self, handle: str, command: str,
                             settle_secs: float = 1.5, max_wait: float = 60.0) -> None:
@@ -795,6 +826,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         task = asyncio.create_task(
             self._run_slash(handle, command, settle_secs, max_wait)
         )
+        task.set_name(command)
         if handle in self._bg and not self._bg[handle].done():
             s = self._sessions[handle]
             s._extra_tasks.append(task)
@@ -919,6 +951,8 @@ class TmuxClaudeRunner(ClaudeRunner):
             name = ev.get("tool_name", "")
             if name:
                 s.tools_used.append(name)
+                log_event("claude", "backend", "hook", f"tool: {name}", session=_slabel(s),
+                          detail=ev)
         elif kind == "needs_permission":
             s.pending = Prompt(
                 kind="permission",
@@ -928,6 +962,8 @@ class TmuxClaudeRunner(ClaudeRunner):
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_permission"
+            log_event("claude", "backend", "hook",
+                      f"needs permission: {s.pending.text}", session=_slabel(s), detail=ev)
             s._stop.set()
         elif kind == "needs_choice":
             s.questions = _parse_questions(ev.get("tool_input", {}))
@@ -935,10 +971,13 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.pending = self._prompt_for_question(s, 0, ev.get("tool_name", ""))
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.status = "needs_choice"
+            log_event("claude", "backend", "hook",
+                      f"needs choice: {s.pending.text}", session=_slabel(s), detail=ev)
             s._stop.set()
         elif kind == "turn_complete":
             await self._read_new_text(s)
             s.status = "completed"
+            log_event("claude", "backend", "hook", "turn complete", session=_slabel(s))
             s._stop.set()
 
     async def _read_new_text(self, s: _TmuxSession) -> None:
@@ -953,6 +992,8 @@ class TmuxClaudeRunner(ClaudeRunner):
         if text:
             s._delta.append(text)
             s._transcript.append(text)
+            log_event("claude", "backend", "assistant", text, session=_slabel(s),
+                      detail={"handle": s.handle, "text": text})
 
     def _extract(self, s: _TmuxSession) -> str:
         path = self._find_transcript(s)

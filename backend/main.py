@@ -27,8 +27,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
 from session_manager import cli_pane_for, rehydrate_cli_sessions, shutdown_all
 from tools import TOOL_DEFINITIONS, dispatch_tool
@@ -65,6 +67,7 @@ TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "600"))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    event_log.start_writer()
     try:
         restored = await rehydrate_cli_sessions()
         if restored:
@@ -73,7 +76,14 @@ async def lifespan(_: FastAPI):
     except Exception:
         log.exception("CLI session rehydration failed (continuing without it)")
     yield
+    await event_log.stop_writer()
     await shutdown_all()
+
+
+# Routine poll heartbeats (every ~1.5s per active session) are pure noise; by
+# default they're suppressed from the debug stream. Set VC_DEBUG_POLLS=1 to emit
+# every poll tick (still default-hidden in the UI filter).
+DEBUG_POLLS = os.getenv("VC_DEBUG_POLLS", "0") == "1"
 
 
 app = FastAPI(title="Voice-Claude", lifespan=lifespan)
@@ -101,6 +111,17 @@ class CostLogRequest(BaseModel):
     # rather than pydantic so we can evolve fields without bumping the API. The
     # backend stamps `ts` if the client omits it.
     record: dict[str, Any]
+
+
+class DebugLogRequest(BaseModel):
+    # Browser-only pipeline events the backend can't see otherwise (voice
+    # transcripts, [Claude update] injections, voice errors, connect/disconnect).
+    source: str = "voice"
+    dest: str = "backend"
+    kind: str
+    summary: str
+    session: str | None = None
+    detail: dict[str, Any] | None = None
 
 
 @app.get("/health")
@@ -308,6 +329,49 @@ async def log_cost(req: CostLogRequest) -> dict[str, Any]:
     return {"ok": True, "path": str(COST_LOG_PATH)}
 
 
+@app.get("/debug/recent")
+async def debug_recent(limit: int = 500) -> dict[str, Any]:
+    """Snapshot of the most recent pipeline events (ring buffer). Fallback for
+    clients that can't hold an SSE connection."""
+    return {"events": event_log.recent(limit)}
+
+
+@app.post("/debug/log")
+async def debug_log(req: DebugLogRequest) -> dict[str, str]:
+    """Ingest a browser-only event into the unified bus so it lands in the file
+    and streams to every other connected panel alongside the backend events."""
+    event_log.log_event(req.source, req.dest, req.kind, req.summary,
+                        session=req.session, detail=req.detail)
+    return {"ok": "true"}
+
+
+@app.get("/debug/stream")
+async def debug_stream(limit: int = 200) -> StreamingResponse:
+    """Server-Sent Events stream of the full pipeline. Replays the last `limit`
+    buffered events on connect (so the panel isn't empty), then live-streams new
+    ones. Emits a comment ping every 15s to keep the connection open."""
+    async def gen():
+        q = event_log.subscribe()
+        try:
+            for rec in event_log.recent(limit):
+                yield f"data: {json.dumps(rec, default=str)}\n\n"
+            while True:
+                try:
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(rec, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            event_log.unsubscribe(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/tools/execute")
 async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     """Run a function call dispatched from the voice session."""
@@ -315,25 +379,48 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     # poll_session fires every ~1.5s per active session — too noisy to log every
     # call, but the moment it returns something interesting (not 'working' / not
     # 'idle') we want to SEE it. Same for the result side below.
+    sid = req.arguments.get("session_id")
+    # poll_session and list_sessions are UI heartbeats (every ~1.5-2s per the
+    # frontend's poll + session-list refresh). They drown out real communication,
+    # so keep them out of the INFO log and the debug stream unless VC_DEBUG_POLLS=1.
     is_poll = req.name == "poll_session"
-    if not is_poll:
-        log.info("tool call: %s args=%s", req.name, req.arguments)
+    is_quiet = req.name in ("poll_session", "list_sessions")
+    if not is_quiet or DEBUG_POLLS:
+        if not is_quiet:
+            log.info("tool call: %s args=%s", req.name, req.arguments)
+        event_log.log_event("voice", "backend", "tool_call", req.name,
+                            session=sid, detail={"name": req.name, "arguments": req.arguments})
     try:
         result = await dispatch_tool(req.name, req.arguments)
         elapsed = time.monotonic() - start
         if is_poll:
             status = (result or {}).get("status")
+            rsid = (result or {}).get("session_id")
             if status not in (None, "working", "idle"):
-                log.info("poll_session -> %s (sid=%s)", status,
-                         (result or {}).get("session_id"))
+                log.info("poll_session -> %s (sid=%s)", status, rsid)
+                event_log.log_event("backend", "voice", "poll", f"poll → {status}",
+                                    session=rsid, detail=result)
+            elif DEBUG_POLLS:
+                event_log.log_event("backend", "voice", "poll", f"poll → {status}",
+                                    session=rsid, detail=result)
+        elif is_quiet:
+            if DEBUG_POLLS:
+                event_log.log_event("backend", "voice", "tool_result", f"{req.name} → ok",
+                                    session=sid, detail=result)
         else:
             log.info("tool done: %s in %.2fs", req.name, elapsed)
+            event_log.log_event("backend", "voice", "tool_result",
+                                f"{req.name} → {(result or {}).get('status', 'ok')}",
+                                session=sid, detail=result)
         return {"ok": True, "result": result}
     except KeyError as exc:
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         log.info("tool failed: %s in %.2fs (%s)", req.name, time.monotonic() - start, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
         log.exception("tool error after %.2fs", time.monotonic() - start)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
