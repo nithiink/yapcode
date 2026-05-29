@@ -54,6 +54,7 @@ class AdvanceResult:
     error: Optional[str] = None
     session_id: Optional[str] = None
     cost_usd: float = 0.0  # cumulative Claude API-equivalent cost for this session
+    request: Optional[str] = None  # the user message this result answers (narration attribution)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -62,6 +63,8 @@ class AdvanceResult:
             "session_id": self.session_id,
             "cost_usd": round(self.cost_usd, 4),
         }
+        if self.request:
+            d["request"] = self.request
         if self.error:
             d["error"] = self.error
         if self.prompt:
@@ -126,6 +129,7 @@ class _Session:
         self.client: sdk.ClaudeSDKClient | None = None
         self.session_id: str | None = None        # real on-disk id (for handoff)
         self.status: Status = "running"
+        self.turn_prompt: str | None = None        # message of the in-flight turn
         self.error: str | None = None
         self.cost_usd: float = 0.0                 # cumulative API-equivalent cost
         self._delta: list[str] = []               # assistant text since last collect
@@ -201,6 +205,7 @@ class SDKClaudeRunner(ClaudeRunner):
             s._delta.clear()
             s._stop.clear()
             s.status = "running"
+            s.turn_prompt = message
             assert s.client is not None
             log_event("backend", "claude", "send", message,
                       session=s.session_id or s.handle[:8],
@@ -468,6 +473,7 @@ class SDKClaudeRunner(ClaudeRunner):
             error=s.error,
             session_id=s.session_id,
             cost_usd=s.cost_usd,
+            request=s.turn_prompt,
         )
 
     def _err(self, s: _Session, msg: str) -> AdvanceResult:

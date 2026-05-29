@@ -280,6 +280,11 @@ export default function VoiceAgent() {
   const handleClaudeResult = (res: any) => {
     if (!res || typeof res !== "object") return;
     const sid = res.session_id;
+    // Name the originating request so the model can't confuse this update with a
+    // previous prompt's (the backend threads it through as res.request).
+    const reqRaw = (res.request || "").trim();
+    const req = reqRaw.length > 90 ? `${reqRaw.slice(0, 90)}…` : reqRaw;
+    const forReq = req ? ` for your request “${req}”` : "";
     if ((res.status === "needs_permission" || res.status === "needs_choice") && res.prompt) {
       setPending({
         sessionId: sid,
@@ -290,19 +295,19 @@ export default function VoiceAgent() {
       const opts = (res.prompt.options || []).join(", ");
       const msg =
         res.prompt.kind === "choice"
-          ? `[Claude update] Claude is asking: ${res.prompt.text}${opts ? ` Options: ${opts}.` : ""} Read this to the user and get their choice.`
-          : `[Claude update] Claude needs permission to ${res.prompt.text}. Ask the user to approve or deny.`;
+          ? `[Claude update] Claude is asking${forReq}: ${res.prompt.text}${opts ? ` Options: ${opts}.` : ""} Read this to the user and get their choice.`
+          : `[Claude update] Claude needs permission${forReq} to ${res.prompt.text}. Ask the user to approve or deny.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "completed") {
       setPending(null);
       const txt = (res.assistant_text || "").trim();
-      const msg = `[Claude update] Claude finished. ${txt ? `It said: ${txt}` : "Done."} Summarize this briefly for the user.`;
+      const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${txt}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "error") {
       setPending(null);
-      const msg = `[Claude update] Claude hit an error: ${res.error || "unknown"}. Tell the user.`;
+      const msg = `[Claude update] Claude hit an error${forReq}: ${res.error || "unknown"}. Tell the user.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     }

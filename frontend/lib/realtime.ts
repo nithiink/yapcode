@@ -170,10 +170,14 @@ export class RealtimeSession implements VoiceSession {
 
   private drainPendingInjections(): void {
     if (this.pendingInjections.length === 0 || !this.dc || this.dc.readyState !== "open") return;
-    // The queued items are already in the conversation; just fire one
-    // response.create to make the model respond. response.done will re-drain if
-    // more arrived while this one was running.
-    this.pendingInjections.length = 0;
+    // Narrate exactly ONE queued update per response. Each queued item is
+    // already in the conversation (its own conversation.item.create), so we just
+    // need one response.create per item. response.done with hadCall=false calls
+    // this again, draining the rest in FIFO order — so N updates yield N
+    // narrations. (The old code zeroed the whole queue and fired a single
+    // response.create, which collapsed N updates into one narration: the model
+    // read the oldest and called the newest "still processing".)
+    this.pendingInjections.shift();
     this.responseActive = true;
     this.send({ type: "response.create" });
   }
@@ -335,12 +339,14 @@ export class RealtimeSession implements VoiceSession {
           console.warn("[realtime] response.create raced an in-flight response; will retry on response.done");
           break;
         }
-        // Many error frames don't end the active response, but a hard error
-        // leaves the flag stuck true and blocks future drains. Reset on safe
-        // codes; leave it on transient ones.
-        if (e.code === "response_cancel_not_active" || e.code === "input_audio_buffer_commit_empty") {
-          this.responseActive = false;
-        }
+        // Any non-racy error means the response.create we fired won't produce a
+        // response.done — so responseActive would stick true and every later
+        // [Claude update] would queue silently and never narrate (the current
+        // prompt then looks "still processing" forever). Clear the flag and try
+        // to drain so updates keep flowing. If a response really was still
+        // active, the drain's response.create just races and is handled above.
+        this.responseActive = false;
+        this.drainPendingInjections();
         const rate = e.code === "rate_limit_exceeded" || /rate limit/i.test(e.message || "");
         emit({
           type: "error",

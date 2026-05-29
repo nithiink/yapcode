@@ -77,6 +77,7 @@ class _TmuxSession:
         self.transcript_path: str | None = None
         self.jsonl_pos = 0                  # bytes of transcript consumed
         self.status: Status = "running"
+        self.turn_prompt: str | None = None  # message of the in-flight turn (narration attribution)
         self.error: str | None = None
         self.cost_usd = 0.0                 # interactive = subscription, no $ in jsonl
         self._delta: list[str] = []
@@ -398,6 +399,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._delta.clear()
             s._stop.clear()
             s.status = "running"
+            s.turn_prompt = message
             await self._send_message(s, message)
             try:
                 await asyncio.wait_for(s._stop.wait(), timeout=self.ADVANCE_HARD_TIMEOUT_S)
@@ -843,6 +845,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._delta.clear()
             s._stop.clear()
             s.status = "running"
+            s.turn_prompt = command
             await self._send_message(s, command)
 
             loop = asyncio.get_event_loop()
@@ -980,15 +983,37 @@ class TmuxClaudeRunner(ClaudeRunner):
             log_event("claude", "backend", "hook", "turn complete", session=_slabel(s))
             s._stop.set()
 
-    async def _read_new_text(self, s: _TmuxSession) -> None:
-        """Collect assistant text produced since the last read, tolerating the
-        Stop hook firing just before the final line is flushed."""
-        text = ""
-        for _ in range(10):  # ~1.5s
-            text += self._extract(s)
+    async def _read_new_text(self, s: _TmuxSession, settle: float = 0.7,
+                             max_wait: float = 10.0) -> None:
+        """Collect ALL assistant text of the just-finished turn.
+
+        Two failure modes this must survive (both seen live):
+        - the Stop hook can fire a beat BEFORE Claude's final message line is
+          flushed to the jsonl;
+        - a tool-using turn streams preamble text ("I'll search…") early, then
+          its real answer only after the tool round completes.
+
+        The old code broke out of the read loop on the FIRST non-empty extract,
+        so it captured only the preamble; the real answer then bled into the
+        NEXT turn's read. The voice therefore narrated the previous prompt's
+        result and called the just-finished one "still processing" (and the
+        last turn's answer could be dropped entirely).
+
+        Fix: wait for the TUI to stop changing before reading. The spinner
+        animates continuously while Claude works, so a stable screen is the true
+        "turn done" signal even when the Stop hook fired early. Then read every
+        new complete jsonl line. Because this runs *before* `_stop.set()` in
+        `_handle_event`, the next queued prompt is held back until this turn is
+        fully captured — fixing the cross-turn mis-attribution at the source."""
+        await self._wait_for_settle(s, settle, max_wait)
+        text = self._extract(s)
+        # The closing line may flush a hair after the screen settles; a few short
+        # grace reads catch it without busy-waiting.
+        for _ in range(4):
             if text.strip():
                 break
             await asyncio.sleep(0.15)
+            text += self._extract(s)
         if text:
             s._delta.append(text)
             s._transcript.append(text)
@@ -1048,6 +1073,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         return AdvanceResult(
             status=s.status, assistant_text=text, prompt=s.pending,
             error=s.error, session_id=s.handle, cost_usd=0.0,
+            request=s.turn_prompt,
         )
 
     def _err(self, s: _TmuxSession, msg: str) -> AdvanceResult:
