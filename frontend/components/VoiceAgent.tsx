@@ -124,6 +124,7 @@ export default function VoiceAgent() {
   const [logFilter, setLogFilter] = useState("");
   const [logErrorsOnly, setLogErrorsOnly] = useState(false);
   const [logPaused, setLogPaused] = useState(false);
+  const [logCopied, setLogCopied] = useState(false);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
@@ -159,6 +160,21 @@ export default function VoiceAgent() {
     }
     return true;
   });
+
+  // Copy the currently-shown events as readable text (full, untruncated lines)
+  // for pasting into a bug report / sharing.
+  const copyLog = () => {
+    const text = filteredLog
+      .map((e) => `${e.ts}  ${e.source}→${e.dest}  ${e.kind}${e.session ? "  " + e.session : ""}  ${e.summary}`)
+      .join("\n");
+    const done = () => {
+      setLogCopied(true);
+      window.setTimeout(() => setLogCopied(false), 1200);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => undefined);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -1052,6 +1068,9 @@ export default function VoiceAgent() {
               </button>
               <button className={`textbtn ${logPaused ? "on" : ""}`} onClick={() => setLogPaused((v) => !v)}>
                 {logPaused ? "Resume" : "Pause"}
+              </button>
+              <button className={`textbtn ${logCopied ? "on" : ""}`} onClick={copyLog} title="Copy all shown events to the clipboard">
+                {logCopied ? "Copied ✓" : "Copy"}
               </button>
               <button className="textbtn" onClick={() => setDebugEvents([])}>
                 Clear

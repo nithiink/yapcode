@@ -172,8 +172,11 @@ body {
 .logsearch { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 4px 9px; font-size: 12px; outline: none; min-width: 110px; }
 .logsearch:focus { border-color: var(--acc); }
 .textbtn.on { color: var(--acc); }
-.logscroll { margin-top: 10px; max-height: 380px; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
-.logrow { display: flex; gap: 9px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid rgba(50,47,43,0.45); white-space: nowrap; }
+/* overflow: auto on both axes — rows size to content (width: max-content) so
+   long lines scroll horizontally instead of truncating; min-width: 100% keeps
+   short rows full-width for the divider. */
+.logscroll { margin-top: 10px; max-height: 380px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.logrow { display: flex; gap: 9px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid rgba(50,47,43,0.45); white-space: nowrap; width: max-content; min-width: 100%; }
 .logrow .lt { color: var(--dim); flex: none; }
 .logrow .lhop { flex: none; display: inline-flex; gap: 3px; align-items: center; }
 .logrow .harr { color: var(--dim); }
@@ -183,8 +186,8 @@ body {
 .htag.claude { color: var(--acc); }
 .htag.user { color: var(--good); }
 .logrow .lk { color: var(--dim); flex: none; min-width: 74px; }
-.logrow .lsess { color: var(--mut); flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-.logrow .lsum { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.logrow .lsess { color: var(--mut); flex: none; }
+.logrow .lsum { color: var(--ink); flex: none; }
 .logrow.k-error .lsum { color: var(--danger); }
 .logrow.k-send .lsum { color: var(--acc); }
 .logrow.k-assistant .lsum { color: var(--good); }
