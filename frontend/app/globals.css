@@ -148,6 +148,14 @@ body {
 .modechip.acceptEdits { color: var(--good); border-color: var(--good); }
 .modechip.auto { color: var(--acc); border-color: var(--acc); }
 
+/* live work-pipeline chips (running / queued / pending) */
+.qchip { font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); display: inline-flex; align-items: center; gap: 5px; }
+.qchip.run { color: var(--acc); border-color: var(--acc); }
+.qchip.queued { color: var(--warn); border-color: var(--warn); }
+.qchip.pending { color: var(--good); border-color: var(--good); }
+.qdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: qpulse 1.2s ease-in-out infinite; }
+@keyframes qpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
 .modebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
 .modelbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
 .modepill { font: inherit; font-weight: 500; font-size: 12.5px; padding: 5px 13px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--mut); cursor: pointer; }

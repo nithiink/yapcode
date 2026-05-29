@@ -22,6 +22,11 @@ type Sess = {
   backend?: string;
   mode?: string;
   name?: string | null;
+  // Live work-pipeline (from the runner's list()): a turn executing now,
+  // turns waiting behind it, and finished turns not yet narrated by poll.
+  running?: boolean;
+  queued?: number;
+  pending?: number;
 };
 
 const MODES: { id: string; label: string; title: string }[] = [
@@ -375,6 +380,17 @@ export default function VoiceAgent() {
       /* ignore */
     }
   };
+
+  // Keep the session list — and its live running/queued/pending badges — fresh
+  // even when no voice session is driving. The other refreshSessions() calls are
+  // event-driven (connect, after a result, mode/rename), which can't show the
+  // work pipeline ticking down between events. list() is an in-memory read on the
+  // backend, so a steady 2s poll is cheap. Initial call loads sessions on mount.
+  useEffect(() => {
+    refreshSessions();
+    const t = setInterval(refreshSessions, 2000);
+    return () => clearInterval(t);
+  }, []);
 
   // Drive the orb's size from the assistant audio amplitude.
   const startAnalyser = (stream: MediaStream) => {
@@ -805,6 +821,22 @@ export default function VoiceAgent() {
                     <span className={`modechip ${s.mode || "default"}`}>
                       {MODE_LABEL[s.mode || "default"] || "Normal"}
                     </span>
+                    {s.running && (
+                      <span className="qchip run" title="A turn is executing right now">
+                        <span className="qdot" />
+                        working
+                      </span>
+                    )}
+                    {(s.queued ?? 0) > 0 && (
+                      <span className="qchip queued" title="Turns waiting behind the current one">
+                        {s.queued} queued
+                      </span>
+                    )}
+                    {(s.pending ?? 0) > 0 && (
+                      <span className="qchip pending" title="Finished turns not yet narrated by the voice agent">
+                        {s.pending} unread
+                      </span>
+                    )}
                     <span className={`badge ${s.status}`}>{s.status}</span>
                     {s.backend === "cli" && (
                       <button
