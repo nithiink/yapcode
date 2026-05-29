@@ -126,6 +126,7 @@ export default function VoiceAgent() {
   const [logPaused, setLogPaused] = useState(false);
   const [logCopied, setLogCopied] = useState(false);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
+  const logAtBottomRef = useRef(true);
   const esRef = useRef<EventSource | null>(null);
 
   const sessionRef = useRef<VoiceSession | null>(null);
@@ -499,9 +500,11 @@ export default function VoiceAgent() {
     };
   }, []);
 
-  // Auto-scroll the log to the newest line unless the user paused.
+  // Auto-scroll to the newest line only when the user is already at the bottom,
+  // so scrolling up to read history isn't yanked back down by new events.
   useEffect(() => {
     if (logPaused || !showDebug) return;
+    if (!logAtBottomRef.current) return;
     const el = logScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
@@ -1083,7 +1086,15 @@ export default function VoiceAgent() {
             </div>
           </div>
           <div className="rule" />
-          <div className="logscroll" ref={logScrollRef}>
+          <div
+            className="logscroll"
+            ref={logScrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              logAtBottomRef.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }}
+          >
             {filteredLog.length === 0 && (
               <div className="empty">No matching events yet — talk to the agent and the full pipeline shows here.</div>
             )}
