@@ -174,12 +174,26 @@ body {
 .bubble.assistant .who { color: var(--mut); }
 /* Tool calls are inline "action cards": a tool the voice assistant invoked.
    Collapsed = status dot · mono name · human summary · chevron. Click to expand
-   structured input/output. */
-.tcall { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; transition: border-color 0.15s ease, background 0.15s ease; }
-.tcall:hover { border-color: var(--line2); }
-.tcall[open] { background: var(--panel2); border-color: var(--line2); }
-.tcall > summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; user-select: none; }
+   structured input/output. An isolated call uses the full .card style; runs of
+   consecutive calls condense into light .line rows inside one .tcall-group. */
+.tcall { overflow: hidden; transition: border-color 0.15s ease, background 0.15s ease; }
+.tcall > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; user-select: none; }
 .tcall > summary::-webkit-details-marker { display: none; }
+
+/* Full card — a single isolated call. */
+.tcall.card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tcall.card:hover { border-color: var(--line2); }
+.tcall.card[open] { background: var(--panel2); border-color: var(--line2); }
+.tcall.card > summary { padding: 9px 12px; }
+
+/* Grouped lines — a run of consecutive calls. The container owns the single
+   border + rounded frame; each line is a light, divider-separated row. */
+.tcall-group { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.tcall.line { background: transparent; }
+.tcall.line > summary { padding: 6px 12px; }
+.tcall.line + .tcall.line { border-top: 1px solid var(--line); }
+.tcall.line:hover { background: var(--panel2); }
+.tcall.line[open] { background: var(--panel2); }
 
 /* Semantic status dot with a soft halo; the working state gently pulses. */
 .tc-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }

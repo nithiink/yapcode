@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
@@ -99,11 +99,11 @@ function PayloadView({ value }: { value: unknown }) {
 // One tool call as an expandable inline "action card": collapsed shows a status
 // dot, the mono tool name, and a human summary; expanded reveals structured
 // input/output.
-function ToolCall({ item }: { item: ToolItem }) {
+function ToolCall({ item, variant = "card" }: { item: ToolItem; variant?: "card" | "line" }) {
   const state = toolState(item);
   const summary = toolSummary(item.name, item.args, item.result);
   return (
-    <details className={`tcall ${state}`}>
+    <details className={`tcall ${variant} ${state}`}>
       <summary>
         <span className={`tc-dot ${state}`} aria-hidden />
         <span className="tc-name">{item.name}</span>
@@ -125,6 +125,48 @@ function ToolCall({ item }: { item: ToolItem }) {
       </div>
     </details>
   );
+}
+
+// Render the conversation timeline, grouping runs of consecutive tool calls.
+// An isolated call renders as a full card; a run of 2+ condenses into light
+// lines inside one grouped container, so a burst of actions reads as a single
+// tidy block instead of a stack of heavy boxes. Each line stays independently
+// expandable (native <details>, keyed by stable id so open state survives
+// re-renders and the timeline cap).
+function renderConversation(items: TimelineItem[]): ReactElement[] {
+  const nodes: ReactElement[] = [];
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    if (item.kind === "turn") {
+      nodes.push(
+        <div key={`turn-${i}`} className={`bubble ${item.role}`}>
+          <div className="who">{item.role === "user" ? "You" : "Assistant"}</div>
+          {item.text}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+    // Collect the run of consecutive tool calls starting here.
+    const run: ToolItem[] = [];
+    while (i < items.length && items[i].kind === "tool") {
+      run.push(items[i] as ToolItem);
+      i++;
+    }
+    if (run.length === 1) {
+      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" />);
+    } else {
+      nodes.push(
+        <div key={`tgroup-${run[0].id}`} className="tcall-group">
+          {run.map((t) => (
+            <ToolCall key={`tool-${t.id}`} item={t} variant="line" />
+          ))}
+        </div>,
+      );
+    }
+  }
+  return nodes;
 }
 type Sess = {
   handle: string;
@@ -1032,16 +1074,7 @@ export default function VoiceAgent() {
             {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
-            {timeline.map((item, i) =>
-              item.kind === "turn" ? (
-                <div key={i} className={`bubble ${item.role}`}>
-                  <div className="who">{item.role === "user" ? "You" : "Assistant"}</div>
-                  {item.text}
-                </div>
-              ) : (
-                <ToolCall key={`tool-${item.id}`} item={item} />
-              ),
-            )}
+            {renderConversation(timeline)}
           </div>
         </div>
 
