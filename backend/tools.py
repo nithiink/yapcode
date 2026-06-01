@@ -207,6 +207,43 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["session_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "send_keys",
+        "description": (
+            "ESCAPE HATCH — send raw keystrokes straight to a Claude session's terminal. "
+            "Use only when the dedicated tools (tell_claude, answer_prompt, "
+            "interrupt_session, set_mode) can't control the session: it's stuck on an "
+            "unexpected prompt or menu, a tool didn't work, or Claude Code's interface "
+            "changed and there's no dedicated tool for what's on screen. Pass 'items', an "
+            "ordered list where each entry is either {\"key\": \"<name>\"} for a named "
+            "key/movement (Escape, Enter, Up, Down, Left, Right, Tab, BTab, Space, C-c, "
+            "C-d, ...) or {\"text\": \"<literal text>\"} to type text. They're sent in "
+            "order. Examples: [{\"key\":\"Escape\"}] to back out; [{\"key\":\"C-c\"}] to "
+            "cancel; [{\"key\":\"Down\"},{\"key\":\"Down\"},{\"key\":\"Enter\"}] to pick a "
+            "menu item; [{\"text\":\"yes\"},{\"key\":\"Enter\"}] to type an answer and "
+            "submit. Returns a snapshot of the screen so you can see what happened. "
+            "CLI sessions only."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "The session to send keys to."},
+                "items": {
+                    "type": "array",
+                    "description": "Ordered list of keys/text to send.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string", "description": "A tmux key name or chord, e.g. Escape, Enter, Up, Down, Left, Right, Tab, BTab, Space, C-c."},
+                            "text": {"type": "string", "description": "Literal text to type at the cursor."},
+                        },
+                    },
+                },
+            },
+            "required": ["session_id", "items"],
+        },
+    },
 ]
 
 
@@ -327,5 +364,14 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             raise KeyError(f"unknown session: {sid}")
         cmd = handoff_command(sess["cwd"], sess["session_id"])
         return {"session_id": sid, "name": sess.get("name"), "cwd": sess["cwd"], "command": cmd}
+
+    if name == "send_keys":
+        sid = resolve_session(args["session_id"])
+        if backend_of(sid) != "cli":
+            return {"ok": False, "error": "send_keys controls the interactive CLI; this session uses the SDK backend."}
+        items = args.get("items") or []
+        if not isinstance(items, list) or not items:
+            raise ValueError("items is required (a non-empty list of {key} or {text} objects)")
+        return await runner_for(sid).send_keys(sid, items)
 
     raise KeyError(f"unknown tool: {name}")

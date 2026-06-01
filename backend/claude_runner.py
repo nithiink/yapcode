@@ -119,6 +119,12 @@ class ClaudeRunner(ABC):
     @abstractmethod
     async def shutdown(self) -> None: ...
 
+    # Escape hatch for sending raw terminal keys/text. Only the interactive CLI
+    # (tmux) backend can honor this; the SDK has no TUI. Non-abstract so SDK
+    # runners inherit this backstop — dispatch gates it out before calling.
+    async def send_keys(self, handle: str, items: list[dict]) -> dict[str, Any]:
+        raise NotImplementedError("send_keys requires the CLI (tmux) backend")
+
 
 class _Session:
     def __init__(self, handle: str, cwd: str, model: str):

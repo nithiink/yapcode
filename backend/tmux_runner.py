@@ -630,6 +630,35 @@ class TmuxClaudeRunner(ClaudeRunner):
         s.status = "completed"
         s._stop.set()
 
+    async def send_keys(self, handle: str, items: list[dict]) -> dict:
+        """Escape hatch: send raw tmux keys/text straight to the session pane.
+
+        Each item is either {"key": "<tmux key name/chord>"} (interpreted by
+        tmux, e.g. Escape, Enter, Up, C-c, BTab) or {"text": "<literal>"} (typed
+        verbatim). Sent in order with a short pause between, mirroring the cadence
+        _send_message/set_mode rely on for the TUI's paste detection. Deliberately
+        does NOT take the turn lock — this exists to unstick a session mid-turn —
+        and returns a screen snapshot so the caller can see the effect."""
+        s = self._get(handle)
+        if not await self._alive(s):
+            return {"ok": False, "error": "session is not running"}
+        summary = " ".join(
+            it["key"] if it.get("key") else f"type:{it.get('text', '')!r}"
+            for it in items
+        )
+        log_event("backend", "claude", "raw_keys", summary, session=_slabel(s),
+                  detail={"handle": s.handle, "items": items})
+        for it in items:
+            if it.get("key"):
+                await self._tmux("send-keys", "-t", s.pane, it["key"])
+            elif "text" in it:
+                await self._tmux("send-keys", "-t", s.pane, "-l", "--", it["text"])
+            else:
+                continue  # ignore a malformed item rather than abort the sequence
+            await asyncio.sleep(0.15)
+        await asyncio.sleep(0.2)
+        return {"ok": True, "sent": items, "screen": await self.peek(handle)}
+
     async def close(self, handle: str) -> None:
         s = self._get(handle)
         bg = self._bg.pop(handle, None)
