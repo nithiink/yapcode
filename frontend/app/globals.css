@@ -121,22 +121,52 @@ body {
 /* Conversation panel: cap height so a long live transcript scrolls inside the
    panel instead of growing the page without bound. */
 .conv-scroll { max-height: 80vh; overflow-y: auto; padding-right: 10px; }
-/* Slim, theme-matched scrollbar so it doesn't clash with the dark UI.
-   Firefox: */
-.conv-scroll { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
-/* WebKit/Chromium: a thin track-less bar with a rounded thumb that warms to
-   the accent on hover. */
-.conv-scroll::-webkit-scrollbar { width: 8px; }
-.conv-scroll::-webkit-scrollbar-track { background: transparent; }
-.conv-scroll::-webkit-scrollbar-thumb {
+
+/* Slim, theme-matched scrollbar shared by every main scrollable area so the
+   native browser bar never clashes with the dark UI: transparent track, a
+   rounded pill thumb in --line2 that warms to --mut on hover.
+   Firefox uses scrollbar-width/color; WebKit/Chromium uses ::-webkit-scrollbar. */
+.conv-scroll,
+.logscroll,
+.transcript,
+.tx-modal-body,
+.tc-code {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) transparent;
+}
+.conv-scroll:hover,
+.logscroll:hover,
+.transcript:hover,
+.tx-modal-body:hover,
+.tc-code:hover {
+  scrollbar-color: var(--mut) transparent;
+}
+.conv-scroll::-webkit-scrollbar,
+.logscroll::-webkit-scrollbar,
+.transcript::-webkit-scrollbar,
+.tx-modal-body::-webkit-scrollbar,
+.tc-code::-webkit-scrollbar { width: 8px; height: 8px; }
+.conv-scroll::-webkit-scrollbar-track,
+.logscroll::-webkit-scrollbar-track,
+.transcript::-webkit-scrollbar-track,
+.tx-modal-body::-webkit-scrollbar-track,
+.tc-code::-webkit-scrollbar-track { background: transparent; }
+.conv-scroll::-webkit-scrollbar-thumb,
+.logscroll::-webkit-scrollbar-thumb,
+.transcript::-webkit-scrollbar-thumb,
+.tx-modal-body::-webkit-scrollbar-thumb,
+.tc-code::-webkit-scrollbar-thumb {
   background: var(--line2);
   border-radius: 999px;
   /* inset the thumb from the edge so it reads as a slim pill */
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.conv-scroll::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
-.conv-scroll:hover { scrollbar-color: var(--mut) transparent; }
+.conv-scroll::-webkit-scrollbar-thumb:hover,
+.logscroll::-webkit-scrollbar-thumb:hover,
+.transcript::-webkit-scrollbar-thumb:hover,
+.tx-modal-body::-webkit-scrollbar-thumb:hover,
+.tc-code::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
 .empty { color: var(--dim); font-size: 14px; padding: 6px 2px; }
 
 .bubble { font-size: 15px; line-height: 1.5; }
