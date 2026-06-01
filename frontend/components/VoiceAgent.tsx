@@ -906,7 +906,7 @@ export default function VoiceAgent() {
             Conversation <span className="ct">live</span>
           </h2>
           <div className="rule" />
-          <div className="scroll">
+          <div className="scroll conv-scroll">
             {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
