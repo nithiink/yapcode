@@ -142,23 +142,41 @@ body {
 .bubble { font-size: 15px; line-height: 1.5; }
 .bubble .who { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-bottom: 2px; }
 .bubble.assistant .who { color: var(--mut); }
-/* Tool calls render as expandable <details>: the summary is the one-line row,
-   clicking it reveals the call's full input and output. */
-.toolrow { font-size: 13px; color: var(--mut); }
-.toolrow > summary { display: flex; gap: 6px; align-items: center; cursor: pointer; list-style: none; padding: 2px 0; }
-.toolrow > summary::-webkit-details-marker { display: none; }
-.toolrow > summary .caret { color: var(--dim); font-size: 10px; transition: transform 0.12s ease; }
-.toolrow[open] > summary .caret { transform: rotate(90deg); }
-.toolrow > summary .tname { color: inherit; }
-.toolrow > summary .tok { color: var(--dim); }
-.toolrow > summary:hover .tname { color: var(--ink); }
-.toolrow b { color: var(--ink); }
-.toolrow.err { color: var(--danger); }
-.toolrow.err > summary .tok { color: var(--danger); }
-.tdetail { margin: 4px 0 8px 16px; padding-left: 12px; border-left: 1px solid var(--line2); }
-.tdetail .tlabel { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin: 8px 0 3px; }
-.tdetail .tlabel:first-child { margin-top: 0; }
-.tdetail pre { font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--ink); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
+/* Tool calls are inline "action cards": a tool the voice assistant invoked.
+   Collapsed = status dot · mono name · human summary · chevron. Click to expand
+   structured input/output. */
+.tcall { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; transition: border-color 0.15s ease, background 0.15s ease; }
+.tcall:hover { border-color: var(--line2); }
+.tcall[open] { background: var(--panel2); border-color: var(--line2); }
+.tcall > summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; user-select: none; }
+.tcall > summary::-webkit-details-marker { display: none; }
+
+/* Semantic status dot with a soft halo; the working state gently pulses. */
+.tc-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
+.tc-dot.working { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); animation: tc-pulse 1.4s ease-in-out infinite; }
+.tc-dot.error { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent); }
+@keyframes tc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.tc-name { font-family: var(--mono); font-size: 12.5px; color: var(--ink); flex: none; }
+.tc-summary { font-size: 13px; color: var(--mut); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcall.error .tc-summary { color: var(--danger); }
+.tc-chev { color: var(--dim); flex: none; margin-left: auto; transition: transform 0.18s ease, color 0.15s ease; }
+.tcall[open] .tc-chev { transform: rotate(180deg); }
+.tcall > summary:hover .tc-chev { color: var(--mut); }
+
+.tc-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
+.tcall[open] .tc-body { animation: tc-reveal 0.18s ease both; }
+@keyframes tc-reveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.tc-label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+
+/* Flat args render as an aligned key/value grid — far more legible than JSON. */
+.tc-kv { display: grid; grid-template-columns: minmax(64px, max-content) 1fr; gap: 5px 14px; margin: 0; }
+.tc-kv-row { display: contents; }
+.tc-kv dt { font-family: var(--mono); font-size: 11.5px; color: var(--mut); }
+.tc-kv dd { font-size: 13px; color: var(--ink); margin: 0; word-break: break-word; white-space: pre-wrap; }
+
+.tc-code { font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+.tc-empty { color: var(--dim); font-size: 13px; }
 
 /* ---- sessions ---- */
 .sess { padding: 16px 0; border-bottom: 1px solid var(--line); }

@@ -25,6 +25,107 @@ function fmtPayload(v: unknown): string {
     return String(v);
   }
 }
+
+type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
+
+// A flat object (all primitive values) renders as an aligned key/value grid;
+// anything nested falls back to a JSON code block.
+function isFlatObject(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return Object.values(v as Record<string, unknown>).every(
+    (x) => x === null || ["string", "number", "boolean"].includes(typeof x),
+  );
+}
+
+const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+// Done / working / error — drives the status dot and accent. `working` is the
+// transient state tell_claude & friends return before the real result polls in.
+function toolState(item: ToolItem): "done" | "working" | "error" {
+  if (item.ok === false) return "error";
+  const status = (item.result as { status?: string } | undefined)?.status;
+  if (status === "working") return "working";
+  if (status === "error") return "error";
+  return "done";
+}
+
+// A short, human-readable gloss of what the call actually did, so the row reads
+// like an action ("told Claude to…", "mode → auto") instead of bare jargon.
+function toolSummary(name: string, args: unknown, result: unknown): string {
+  const a = (args ?? {}) as Record<string, any>;
+  const r = (result ?? {}) as Record<string, any>;
+  switch (name) {
+    case "tell_claude":
+      return a.message ? clip(String(a.message)) : "";
+    case "answer_prompt":
+      return a.choice ? `“${clip(String(a.choice), 60)}”` : "";
+    case "run_slash_command":
+      return String(r.sent || `/${a.command ?? ""}${a.args ? " " + a.args : ""}`).trim();
+    case "set_mode":
+      return r.mode || a.mode ? `mode → ${r.mode || a.mode}` : "";
+    case "rename_session":
+      return r.name ? `→ ${r.name}` : a.name || "";
+    case "start_session":
+      return r.name ? `${r.name}${r.project_path ? " · " + String(r.project_path).split("/").pop() : ""}` : "";
+    case "list_sessions":
+      return Array.isArray(r.sessions) ? `${r.sessions.length} session${r.sessions.length === 1 ? "" : "s"}` : "";
+    case "list_projects":
+      return Array.isArray(r.projects) ? `${r.projects.length} projects` : "";
+  }
+  if (typeof r.message === "string") return clip(r.message);
+  if (typeof r.status === "string") return r.status;
+  return "";
+}
+
+function PayloadView({ value }: { value: unknown }) {
+  if (value === undefined || value === null || value === "") return <div className="tc-empty">—</div>;
+  if (isFlatObject(value)) {
+    const entries = Object.entries(value).filter(([, v]) => v !== undefined && v !== "");
+    if (entries.length === 0) return <div className="tc-empty">—</div>;
+    return (
+      <dl className="tc-kv">
+        {entries.map(([k, v]) => (
+          <div className="tc-kv-row" key={k}>
+            <dt>{k}</dt>
+            <dd>{typeof v === "string" ? v : String(v)}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <pre className="tc-code">{fmtPayload(value)}</pre>;
+}
+
+// One tool call as an expandable inline "action card": collapsed shows a status
+// dot, the mono tool name, and a human summary; expanded reveals structured
+// input/output.
+function ToolCall({ item }: { item: ToolItem }) {
+  const state = toolState(item);
+  const summary = toolSummary(item.name, item.args, item.result);
+  return (
+    <details className={`tcall ${state}`}>
+      <summary>
+        <span className={`tc-dot ${state}`} aria-hidden />
+        <span className="tc-name">{item.name}</span>
+        {summary && <span className="tc-summary">{summary}</span>}
+        <svg className="tc-chev" viewBox="0 0 16 16" width="13" height="13" aria-hidden>
+          <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </summary>
+      <div className="tc-body">
+        <section className="tc-sec">
+          <div className="tc-label">Input</div>
+          <PayloadView value={item.args} />
+        </section>
+        <section className="tc-sec">
+          <div className="tc-label">Output</div>
+          <PayloadView value={item.result} />
+        </section>
+      </div>
+    </details>
+  );
+}
 type Sess = {
   handle: string;
   session_id: string | null;
@@ -938,21 +1039,7 @@ export default function VoiceAgent() {
                   {item.text}
                 </div>
               ) : (
-                <details key={`tool-${item.id}`} className={`toolrow ${item.ok === false ? "err" : ""}`}>
-                  <summary>
-                    <span className="caret" aria-hidden>
-                      ▸
-                    </span>
-                    <span className="tname">→ {item.name}</span>
-                    <span className="tok">{item.ok === false ? "✗" : "✓"}</span>
-                  </summary>
-                  <div className="tdetail">
-                    <div className="tlabel">Input</div>
-                    <pre>{fmtPayload(item.args)}</pre>
-                    <div className="tlabel">Output</div>
-                    <pre>{fmtPayload(item.result)}</pre>
-                  </div>
-                </details>
+                <ToolCall key={`tool-${item.id}`} item={item} />
               ),
             )}
           </div>
