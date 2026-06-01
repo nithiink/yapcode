@@ -12,7 +12,19 @@ import LiveTerminal from "./LiveTerminal";
 // tool calls inline with the surrounding turns instead of piling them at the end.
 type TimelineItem =
   | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
-  | { kind: "tool"; name: string; ok?: boolean };
+  | { kind: "tool"; id: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
+
+// Pretty-print a tool call's input/output for the expandable detail view.
+// Strings pass through; objects are JSON-formatted; nullish renders as a dash.
+function fmtPayload(v: unknown): string {
+  if (v === undefined || v === null) return "—";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
 type Sess = {
   handle: string;
   session_id: string | null;
@@ -111,6 +123,9 @@ export default function VoiceAgent() {
   const [muted, setMuted] = useState(false);
   const [status, setStatus] = useState("Tap connect and start talking.");
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  // Monotonic id for tool rows so each expandable <details> keeps its open
+  // state across re-renders even as old timeline items roll off the cap.
+  const toolIdRef = useRef(0);
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [pending, setPending] = useState<Pending>(null);
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
@@ -582,7 +597,13 @@ export default function VoiceAgent() {
         return next.slice(-80);
       });
     } else if (e.type === "tool_call" && e.result !== undefined) {
-      setTimeline((prev) => [...prev, { kind: "tool" as const, name: e.name, ok: e.ok }].slice(-80));
+      const id = ++toolIdRef.current;
+      setTimeline((prev) =>
+        [
+          ...prev,
+          { kind: "tool" as const, id, name: e.name, ok: e.ok, args: e.arguments, result: e.result },
+        ].slice(-80),
+      );
       const res: any = e.result;
       // tell_claude/answer_prompt now return "working" — poll for the real result.
       if (
@@ -917,9 +938,21 @@ export default function VoiceAgent() {
                   {item.text}
                 </div>
               ) : (
-                <div key={i} className={`toolrow ${item.ok === false ? "err" : ""}`}>
-                  → {item.name} {item.ok === false ? "✗" : "✓"}
-                </div>
+                <details key={`tool-${item.id}`} className={`toolrow ${item.ok === false ? "err" : ""}`}>
+                  <summary>
+                    <span className="caret" aria-hidden>
+                      ▸
+                    </span>
+                    <span className="tname">→ {item.name}</span>
+                    <span className="tok">{item.ok === false ? "✗" : "✓"}</span>
+                  </summary>
+                  <div className="tdetail">
+                    <div className="tlabel">Input</div>
+                    <pre>{fmtPayload(item.args)}</pre>
+                    <div className="tlabel">Output</div>
+                    <pre>{fmtPayload(item.result)}</pre>
+                  </div>
+                </details>
               ),
             )}
           </div>

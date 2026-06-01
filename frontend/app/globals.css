@@ -126,9 +126,23 @@ body {
 .bubble { font-size: 15px; line-height: 1.5; }
 .bubble .who { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-bottom: 2px; }
 .bubble.assistant .who { color: var(--mut); }
-.toolrow { font-size: 13px; color: var(--mut); display: flex; gap: 6px; align-items: center; }
+/* Tool calls render as expandable <details>: the summary is the one-line row,
+   clicking it reveals the call's full input and output. */
+.toolrow { font-size: 13px; color: var(--mut); }
+.toolrow > summary { display: flex; gap: 6px; align-items: center; cursor: pointer; list-style: none; padding: 2px 0; }
+.toolrow > summary::-webkit-details-marker { display: none; }
+.toolrow > summary .caret { color: var(--dim); font-size: 10px; transition: transform 0.12s ease; }
+.toolrow[open] > summary .caret { transform: rotate(90deg); }
+.toolrow > summary .tname { color: inherit; }
+.toolrow > summary .tok { color: var(--dim); }
+.toolrow > summary:hover .tname { color: var(--ink); }
 .toolrow b { color: var(--ink); }
 .toolrow.err { color: var(--danger); }
+.toolrow.err > summary .tok { color: var(--danger); }
+.tdetail { margin: 4px 0 8px 16px; padding-left: 12px; border-left: 1px solid var(--line2); }
+.tdetail .tlabel { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin: 8px 0 3px; }
+.tdetail .tlabel:first-child { margin-top: 0; }
+.tdetail pre { font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--ink); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
 
 /* ---- sessions ---- */
 .sess { padding: 16px 0; border-bottom: 1px solid var(--line); }
