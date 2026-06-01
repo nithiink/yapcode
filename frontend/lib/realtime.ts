@@ -18,6 +18,7 @@ import {
   emptyUsage,
   recomputeCost,
 } from "./voice";
+import { authHeaders } from "./auth";
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
@@ -65,14 +66,14 @@ export class RealtimeSession implements VoiceSession {
     const [sessionRes, toolsRes] = await Promise.all([
       fetch("/api/session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           provider: this.opts.provider,
           model: this.opts.model,
           voice: this.opts.voice,
         }),
       }),
-      fetch("/api/tools"),
+      fetch("/api/tools", { headers: authHeaders() }),
     ]);
 
     if (!sessionRes.ok) throw new Error(`Session error: ${await sessionRes.text()}`);
@@ -394,7 +395,7 @@ export class RealtimeSession implements VoiceSession {
     try {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name, arguments: args }),
       });
       const data = await r.json();

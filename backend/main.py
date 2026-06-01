@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import pty
+import re
 import signal
 import struct
 import termios
@@ -24,12 +25,13 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import config
 import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
 from session_manager import cli_pane_for, rehydrate_cli_sessions, shutdown_all
@@ -38,6 +40,25 @@ from tools import TOOL_DEFINITIONS, dispatch_tool
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("voice-claude")
+
+
+class _RedactTokenFilter(logging.Filter):
+    """Strip `token=...` from access-log lines. The shared secret rides the query
+    string on SSE (/debug/stream) and WebSocket (/sessions/.../terminal) connects
+    because those transports can't set headers — keep it out of access logs,
+    which are routinely shipped to stdout / aggregators / shown on screen-shares."""
+    _TOKEN_RE = re.compile(r"(token=)[^&\s\"']+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                self._TOKEN_RE.sub(r"\1[redacted]", a) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactTokenFilter())
 
 # Default provider when the request doesn't specify one. "azure" | "openai" | "gemini"
 VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "azure").lower()
@@ -86,13 +107,84 @@ async def lifespan(_: FastAPI):
 DEBUG_POLLS = os.getenv("VC_DEBUG_POLLS", "0") == "1"
 
 
-app = FastAPI(title="Voice-Claude", lifespan=lifespan)
+# Interactive API docs are disabled: they'd disclose the full route/schema map
+# of a command-executing backend to anyone who can reach the port.
+app = FastAPI(title="Voice-Claude", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+# Origins restricted to the trusted frontend (localhost + private-LAN dev) instead
+# of "*": a malicious web page in the user's browser can no longer read responses
+# from — or make non-simple cross-origin calls to — the backend it can reach at
+# localhost. See config.ALLOWED_ORIGINS / VC_ALLOWED_ORIGINS.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.ALLOWED_ORIGINS,
+    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Hosts treated as "local" when no VC_AUTH_TOKEN is configured.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _token_from(headers, query) -> str | None:
+    """Pull the shared-secret token from an Authorization: Bearer header, an
+    X-VC-Token header, or a ?token= query param (EventSource/WebSocket can't set
+    headers, so they use the query param)."""
+    auth = headers.get("authorization") or ""
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    xt = headers.get("x-vc-token")
+    if xt:
+        return xt.strip()
+    return query.get("token")
+
+
+def _access_ok(client_host: str | None, token: str | None) -> tuple[bool, str]:
+    """Core access decision shared by HTTP and WebSocket paths.
+
+    - If VC_AUTH_TOKEN is configured: a matching token is required from everyone
+      (including loopback — so the same-origin Next proxy can't launder a remote
+      request into a trusted localhost call).
+    - Otherwise: only loopback clients are allowed; remote callers are refused
+      until a token is set.
+    """
+    if config.AUTH_TOKEN:
+        if config.token_matches(token):
+            return True, ""
+        return False, "missing or invalid auth token"
+    if client_host in _LOOPBACK_HOSTS:
+        return True, ""
+    return False, "remote access requires VC_AUTH_TOKEN to be set on the server"
+
+
+async def require_auth(request: Request) -> None:
+    """FastAPI dependency guarding every sensitive HTTP endpoint."""
+    # Origin allowlist, enforced in-app (not just via CORS response headers). A
+    # cross-origin POST is still delivered to the app even when CORS hides the
+    # response — and FastAPI parses a JSON body regardless of Content-Type — so a
+    # malicious page could otherwise fire a side-effecting "simple" request from
+    # a loopback-trusted browser. The same-origin Next proxy and native clients
+    # send no Origin; only real cross-origin browser requests carry one.
+    origin = request.headers.get("origin")
+    if origin and not config.origin_allowed(origin):
+        raise HTTPException(status_code=403, detail="origin not allowed")
+    token = _token_from(request.headers, request.query_params)
+    ok, reason = _access_ok(request.client.host if request.client else None, token)
+    if not ok:
+        raise HTTPException(status_code=401 if config.AUTH_TOKEN else 403, detail=reason)
+
+
+def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
+    """Authorize a WebSocket handshake (CORS middleware does not apply to WS).
+    Returns (ok, close_code). Enforces the Origin allowlist for browser clients
+    and the same token/loopback rule as HTTP."""
+    origin = ws.headers.get("origin")
+    if origin and not config.origin_allowed(origin):
+        return False, 4403  # forbidden origin
+    token = _token_from(ws.headers, ws.query_params)
+    ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
+    return (True, 0) if ok else (False, 4401)  # unauthorized
 
 
 class SessionRequest(BaseModel):
@@ -129,7 +221,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/tools")
+@app.get("/tools", dependencies=[Depends(require_auth)])
 async def list_tools() -> dict[str, Any]:
     return {"tools": TOOL_DEFINITIONS}
 
@@ -201,7 +293,7 @@ def _mint_gemini_token(model: str) -> str:
     return token.name
 
 
-@app.post("/session")
+@app.post("/session", dependencies=[Depends(require_auth)])
 async def create_session(req: SessionRequest) -> dict[str, Any]:
     """Mint a realtime ephemeral token for the chosen provider. The provider key
     is read from the server environment and never reaches the browser; the browser
@@ -261,6 +353,13 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
     Bridges a PTY running `tmux attach-session` to the WebSocket: pane output ->
     ws bytes; ws text -> keystrokes; a {"__resize":{cols,rows}} message resizes.
     Closing the socket detaches the tmux client without killing the session."""
+    # Authorize the handshake BEFORE accepting: this socket injects raw keystrokes
+    # into the live Claude TUI, so an unauthenticated/cross-origin client must not
+    # reach the PTY. Rejecting before accept() denies the handshake outright.
+    ok, close_code = _ws_access_ok(ws)
+    if not ok:
+        await ws.close(code=close_code)
+        return
     await ws.accept()
     pane = cli_pane_for(handle)
     if not pane:
@@ -321,7 +420,7 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
             pass
 
 
-@app.post("/cost/log")
+@app.post("/cost/log", dependencies=[Depends(require_auth)])
 async def log_cost(req: CostLogRequest) -> dict[str, Any]:
     """Append one cost record to the JSONL log. The UI calls this on connection
     start, periodically while connected, and on disconnect."""
@@ -329,14 +428,14 @@ async def log_cost(req: CostLogRequest) -> dict[str, Any]:
     return {"ok": True, "path": str(COST_LOG_PATH)}
 
 
-@app.get("/debug/recent")
+@app.get("/debug/recent", dependencies=[Depends(require_auth)])
 async def debug_recent(limit: int = 500) -> dict[str, Any]:
     """Snapshot of the most recent pipeline events (ring buffer). Fallback for
     clients that can't hold an SSE connection."""
     return {"events": event_log.recent(limit)}
 
 
-@app.post("/debug/log")
+@app.post("/debug/log", dependencies=[Depends(require_auth)])
 async def debug_log(req: DebugLogRequest) -> dict[str, str]:
     """Ingest a browser-only event into the unified bus so it lands in the file
     and streams to every other connected panel alongside the backend events."""
@@ -345,7 +444,7 @@ async def debug_log(req: DebugLogRequest) -> dict[str, str]:
     return {"ok": "true"}
 
 
-@app.get("/debug/stream")
+@app.get("/debug/stream", dependencies=[Depends(require_auth)])
 async def debug_stream(limit: int = 200) -> StreamingResponse:
     """Server-Sent Events stream of the full pipeline. Replays the last `limit`
     buffered events on connect (so the panel isn't empty), then live-streams new
@@ -372,7 +471,7 @@ async def debug_stream(limit: int = 200) -> StreamingResponse:
     )
 
 
-@app.post("/tools/execute")
+@app.post("/tools/execute", dependencies=[Depends(require_auth)])
 async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     """Run a function call dispatched from the voice session."""
     start = time.monotonic()

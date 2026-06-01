@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { forwardAuth } from "@/lib/proxyAuth";
 
 const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -6,7 +7,7 @@ export async function POST(req: NextRequest) {
   const body = await req.text();
   const resp = await fetch(`${BACKEND}/session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: forwardAuth(req, { "Content-Type": "application/json" }),
     body,
   });
   const text = await resp.text();
