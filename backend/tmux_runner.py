@@ -538,11 +538,17 @@ class TmuxClaudeRunner(ClaudeRunner):
             await self._answer_multi(s, options, c)
             return more
 
-        idx = next(
-            (i for i, o in enumerate(options)
-             if o.strip().lower() == c or (c and c in o.strip().lower())),
-            -1,
-        )
+        # The spoken prompt numbers the options, so the user may answer by
+        # ordinal ("two", transcribed as "2" / "option 2"). Map a bare 1-based
+        # index to its row before falling back to text matching.
+        m = re.fullmatch(r"(?:option\s*)?(\d+)\.?", c)
+        idx = int(m.group(1)) - 1 if m else -1
+        if not (0 <= idx < len(options)):
+            idx = next(
+                (i for i, o in enumerate(options)
+                 if o.strip().lower() == c or (c and c in o.strip().lower())),
+                -1,
+            )
         if idx >= 0:
             await self._select_row(s, idx)
             return more

@@ -30,6 +30,11 @@ import {
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
 
+// If nothing has been sent on the socket for this long (e.g. the mic is muted,
+// or the user is silently waiting on a long Claude turn), send a short burst of
+// silence so the server doesn't treat the stream as idle and drop the session.
+const KEEPALIVE_MS = 10000;
+
 // AudioWorklet that converts mic Float32 frames to 16-bit PCM and reports RMS
 // (used to drive the "hearing" orb state). Loaded via a Blob URL so we don't
 // ship a separate static asset.
@@ -141,6 +146,11 @@ export class GeminiSession implements VoiceSession {
   private resumeHandle?: string;    // latest handle from sessionResumptionUpdate
   private connectVoice?: string;
   private onSetupComplete?: () => void;
+  private keepaliveTimer?: ReturnType<typeof setInterval>;
+  private lastSend = 0;             // ms timestamp of the last frame sent
+  // An update that arrived while the socket was down (latest wins). Flushed on
+  // reconnect so a Claude result completed during an outage isn't lost.
+  private bufferedInject?: string;
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -194,6 +204,7 @@ export class GeminiSession implements VoiceSession {
 
   stop(): void {
     this.stopped = true;  // user-initiated: the close handler must NOT reconnect
+    this.stopKeepalive();
     try {
       this.ws?.close();
     } catch {
@@ -216,6 +227,7 @@ export class GeminiSession implements VoiceSession {
   private onClose(ev: CloseEvent): void {
     // Intentional disconnect, or a reconnect attempt already in flight: ignore.
     if (this.stopped || this.reconnecting) return;
+    this.stopKeepalive();
     this.setupDone = false;
     this.opts.onEvent({ type: "status", status: `Connection lost (${ev.code}) — reconnecting…` });
     this.opts.onEvent({ type: "state", state: "connecting" });
@@ -268,12 +280,26 @@ export class GeminiSession implements VoiceSession {
   private notifyReconnected(): void {
     this.opts.onEvent({ type: "status", status: "Reconnected." });
     this.opts.onEvent({ type: "state", state: "listening" });
-    // "Reconnect but notify": have the agent briefly tell the user it's back.
-    // The resumption handle restored the prior context, so it can continue.
-    this.injectUpdate(
-      "[connection] You briefly lost the voice connection and just reconnected. " +
-        "In one short sentence, let the user know you're back, then continue where you left off.",
-    );
+    const buffered = this.bufferedInject;
+    this.bufferedInject = undefined;
+    if (buffered) {
+      // A Claude update landed while the socket was down. Deliver the freshest
+      // one now so the user hears the real current state — not a stale echo.
+      this.injectUpdate(
+        "[connection] You briefly lost the voice connection and just reconnected. " +
+          "Tell the user in a few words that you're back, then relay this update:\n" +
+          buffered,
+      );
+    } else {
+      // Nothing happened during the gap. Announce the reconnect, but do NOT
+      // re-narrate the prior turn — replaying a now-stale question (sometimes
+      // minutes old) just confuses the user.
+      this.injectUpdate(
+        "[connection] You briefly lost the voice connection and just reconnected. In one " +
+          "short sentence let the user know you're back, then wait for them — do NOT repeat " +
+          "your previous question or message unless they ask.",
+      );
+    }
   }
 
   // --- audio setup --------------------------------------------------------
@@ -319,10 +345,16 @@ export class GeminiSession implements VoiceSession {
         },
       }),
     );
+    this.lastSend = Date.now();
   }
 
   injectUpdate(text: string): void {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    // Socket down (e.g. mid-reconnect): hold the latest update and flush it once
+    // we're back, so a result that completed during the outage isn't dropped.
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      this.bufferedInject = text;
+      return;
+    }
     // A complete user turn nudges the model to respond about the update.
     this.ws.send(
       JSON.stringify({
@@ -332,6 +364,35 @@ export class GeminiSession implements VoiceSession {
         },
       }),
     );
+    this.lastSend = Date.now();
+  }
+
+  // --- keepalive ----------------------------------------------------------
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.lastSend = Date.now();
+    this.keepaliveTimer = setInterval(() => {
+      if (this.ws?.readyState !== WebSocket.OPEN || !this.setupDone) return;
+      if (Date.now() - this.lastSend < KEEPALIVE_MS) return;
+      // 100 ms of zeroes — pure silence, so server VAD won't read it as a turn,
+      // but it keeps the audio stream from idling out.
+      const silence = new Int16Array(INPUT_RATE / 10);
+      this.ws.send(
+        JSON.stringify({
+          realtimeInput: {
+            audio: { data: b64encode(silence.buffer), mimeType: `audio/pcm;rate=${INPUT_RATE}` },
+          },
+        }),
+      );
+      this.lastSend = Date.now();
+    }, KEEPALIVE_MS);
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = undefined;
+    }
   }
 
   // --- protocol -----------------------------------------------------------
@@ -379,6 +440,7 @@ export class GeminiSession implements VoiceSession {
 
     if (msg.setupComplete) {
       this.setupDone = true;
+      this.startKeepalive();
       this.onSetupComplete?.();  // unblocks a reconnect attempt waiting on setup
       emit({ type: "status", status: "Connected — start talking." });
       emit({ type: "state", state: "listening" });

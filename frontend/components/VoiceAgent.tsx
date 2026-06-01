@@ -293,10 +293,15 @@ export default function VoiceAgent() {
         text: res.prompt.text,
         options: res.prompt.options || [],
       });
-      const opts = (res.prompt.options || []).join(", ");
+      // Number the options and separate them with semicolons. The raw option
+      // strings can themselves contain commas and arrows (e.g. '"Train-Us" →
+      // "Train"'), so a bare comma-join renders them ambiguously when spoken.
+      const opts = (res.prompt.options || [])
+        .map((o: string, i: number) => `(${i + 1}) ${o}`)
+        .join("; ");
       const msg =
         res.prompt.kind === "choice"
-          ? `[Claude update] Claude is asking${forReq}: ${res.prompt.text}${opts ? ` Options: ${opts}.` : ""} Read this to the user and get their choice.`
+          ? `[Claude update] Claude is asking${forReq}: ${res.prompt.text}${opts ? ` The options are: ${opts}.` : ""} Read the options to the user and get their choice.`
           : `[Claude update] Claude needs permission${forReq} to ${res.prompt.text}. Ask the user to approve or deny.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
