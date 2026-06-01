@@ -93,6 +93,50 @@ cd frontend && npm ci && npm run dev
 Open <http://localhost:3000>, allow the mic, and start talking. Try:
 *"start a session in <one of your projects> and add a hello world file."*
 
+## Windows? Run it under WSL2
+
+voice-claude needs a Unix environment (it drives Claude through **tmux**, which
+doesn't run on native Windows). The fix is **WSL2** — a real Ubuntu Linux inside
+Windows. WSL2 forwards `localhost` to your Windows browser, so the app and the
+mic work exactly like on Mac. Everything below runs **inside the Ubuntu
+terminal**, not PowerShell.
+
+**1. Install WSL2** — in **PowerShell (Run as administrator)**:
+
+```powershell
+wsl --install
+```
+
+Reboot, then launch **Ubuntu** from the Start menu and set up a username/password.
+
+**2. Install the toolchain** (in the Ubuntu terminal):
+
+```bash
+sudo apt update && sudo apt install -y tmux git python3 python3-venv
+# Node 20+ via nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+exec $SHELL
+nvm install 20
+```
+
+**3. Install Claude Code *inside WSL* and log in** — it must live on the Linux
+side. Install per <https://claude.com/claude-code>, then run `claude` once and
+sign in.
+
+**4. Now follow the normal steps above, all inside Ubuntu:** Phase 1 (generate
+the SSH key — your `~/.ssh` is the Linux home), Phase 2 (clone), and Phase 4
+(venv, `.env`, `./run.sh`, `npm ci && npm run dev`).
+
+**WSL-specific gotchas:**
+
+- **Clone into your Linux home** (e.g. `~/voice-claude`), **not** `/mnt/c/...` —
+  the Windows-mounted drive is slow and breaks file watching.
+- Set `ALLOWED_PROJECT_ROOTS` to a **Linux path** (e.g.
+  `/home/YOUR_NAME/projects`), and keep the projects you want Claude to edit on
+  the Linux side too.
+- Open **`http://localhost:3000` in your Windows browser** (Chrome/Edge) — WSL2
+  forwards localhost, and the mic works because it's localhost.
+
 ## Using it from your phone (optional)
 
 Localhost is laptop-only. To use it from your phone you'd run network mode
