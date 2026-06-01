@@ -211,7 +211,10 @@ def list_projects() -> dict:
 
 
 def _under_root(p: str, roots: list[str]) -> bool:
-    return (not roots) or any(p == r or p.startswith(r + os.sep) for r in roots)
+    # Fail closed: with no roots configured nothing is "under root". The directory
+    # sandbox is mandatory (see resolve_project_path), so this never returns True
+    # for an unconfigured server.
+    return bool(roots) and any(p == r or p.startswith(r + os.sep) for r in roots)
 
 
 def resolve_project_path(name: str) -> str:
@@ -220,9 +223,33 @@ def resolve_project_path(name: str) -> str:
     Handles: absolute paths, '~', a bare folder name matching a root or one of
     its subdirectories (case-insensitive), and an empty/vague value (defaults to
     the first allowed root). Raises ValueError listing real options on failure.
+
+    SECURITY: every candidate path — including the fuzzy-match branches — is
+    realpath-normalized and checked for containment under an allowed root via
+    `_contained()` before it can be returned, so inputs like ".." (which
+    `os.path.basename` collapses) cannot escape ALLOWED_PROJECT_ROOTS. Roots are
+    themselves realpath'd so symlinked roots compare correctly.
+
+    The directory sandbox is MANDATORY: if ALLOWED_PROJECT_ROOTS is not
+    configured this raises rather than letting a session start anywhere on the
+    filesystem (fail closed — defense in depth alongside the backend's auth).
     """
-    roots = _allowed_roots()
+    roots = [os.path.realpath(r) for r in _allowed_roots()]
+    if not roots:
+        raise ValueError(
+            "No project directories are configured, so I can't start a session. "
+            "Set ALLOWED_PROJECT_ROOTS in backend/.env (e.g. "
+            "ALLOWED_PROJECT_ROOTS=/Users/you/Development) and restart the backend."
+        )
     name = (name or "").strip()
+
+    def _contained(p: str) -> str | None:
+        """Realpath `p`; return it iff it's an existing directory under an
+        allowed root. Otherwise None."""
+        real = os.path.realpath(os.path.abspath(os.path.expanduser(p)))
+        if not os.path.isdir(real):
+            return None
+        return real if _under_root(real, roots) else None
 
     # Vague / empty -> default to the primary project root.
     if not name or name.lower() in {"anywhere", "any", "home", "default"}:
@@ -230,22 +257,24 @@ def resolve_project_path(name: str) -> str:
             return roots[0]
 
     # 1. Direct absolute / ~ path that exists and is allowed.
-    direct = os.path.abspath(os.path.expanduser(name))
-    if os.path.isdir(direct) and _under_root(direct, roots):
-        return direct
+    hit = _contained(name)
+    if hit:
+        return hit
 
     # 2. Fuzzy match against roots and their subdirectories (case-insensitive).
     low = name.lower().strip("/").split("/")[-1]
     for r in roots:
         if os.path.basename(r).lower() == low:
-            return r
-        cand = os.path.join(r, os.path.basename(name))
-        if os.path.isdir(cand):
-            return cand
+            return r  # the root itself is inherently contained
+        hit = _contained(os.path.join(r, os.path.basename(name)))
+        if hit:
+            return hit
         if os.path.isdir(r):
             for sub in os.listdir(r):
-                if sub.lower() == low and os.path.isdir(os.path.join(r, sub)):
-                    return os.path.join(r, sub)
+                if sub.lower() == low:
+                    hit = _contained(os.path.join(r, sub))
+                    if hit:
+                        return hit
 
     info = list_projects()
     names = [p["name"] for p in info["projects"]][:25]

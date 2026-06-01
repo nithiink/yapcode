@@ -5,6 +5,7 @@ import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
+import { authHeaders, withAuthParam } from "@/lib/auth";
 import LiveTerminal from "./LiveTerminal";
 
 // One ordered list of bubbles + tool rows so the live "Conversation" panel renders
@@ -201,7 +202,7 @@ export default function VoiceAgent() {
     try {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: "read_transcript", arguments: { session_id: handle } }),
       });
       const d = await r.json();
@@ -329,7 +330,7 @@ export default function VoiceAgent() {
       try {
         const r = await fetch("/api/tools/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({ name: "poll_session", arguments: { session_id: sessionId } }),
         });
         const data = await r.json();
@@ -372,7 +373,7 @@ export default function VoiceAgent() {
     try {
       fetch("/api/cost/log", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ record }),
         keepalive: true, // lets the request survive a tab-close on the disconnect path
       }).catch(() => undefined);
@@ -430,7 +431,7 @@ export default function VoiceAgent() {
     try {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: "list_sessions", arguments: {} }),
       });
       const data = await r.json();
@@ -472,7 +473,7 @@ export default function VoiceAgent() {
     try {
       fetch(`${backendBase()}/debug/log`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ source, dest, kind, summary, detail }),
         keepalive: true,
       }).catch(() => undefined);
@@ -484,7 +485,7 @@ export default function VoiceAgent() {
   // Subscribe to the unified pipeline stream. EventSource auto-reconnects; we
   // drop replayed events by monotonic seq so a reconnect doesn't duplicate.
   useEffect(() => {
-    const es = new EventSource(`${backendBase()}/debug/stream?limit=300`);
+    const es = new EventSource(withAuthParam(`${backendBase()}/debug/stream?limit=300`));
     esRef.current = es;
     es.onmessage = (e) => {
       try {
@@ -702,7 +703,7 @@ export default function VoiceAgent() {
     try {
       await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: "set_mode", arguments: { session_id: handle, mode } }),
       });
     } finally {
@@ -727,7 +728,7 @@ export default function VoiceAgent() {
     try {
       await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           name: "rename_session",
           arguments: { session_id: handle, name },
@@ -745,7 +746,7 @@ export default function VoiceAgent() {
     setPending(null);
     await fetch("/api/tools/execute", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         name: "answer_prompt",
         arguments: { session_id: p.sessionId, choice },

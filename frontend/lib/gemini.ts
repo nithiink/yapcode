@@ -26,6 +26,7 @@ import {
   emptyUsage,
   recomputeCost,
 } from "./voice";
+import { authHeaders } from "./auth";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -160,7 +161,7 @@ export class GeminiSession implements VoiceSession {
     const emit = this.opts.onEvent;
     emit({ type: "status", status: "Minting token..." });
 
-    const toolsRes = await fetch("/api/tools");
+    const toolsRes = await fetch("/api/tools", { headers: authHeaders() });
     if (toolsRes.ok) this.tools = (await toolsRes.json()).tools || [];
 
     // Prepare audio graph before the socket opens so we can stream immediately.
@@ -175,7 +176,7 @@ export class GeminiSession implements VoiceSession {
     const emit = this.opts.onEvent;
     const sessionRes = await fetch("/api/session", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         provider: "gemini",
         model: this.opts.model,
@@ -527,7 +528,7 @@ export class GeminiSession implements VoiceSession {
     try {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: fc.name, arguments: args }),
       });
       const out = await r.json();

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { withAuthParam } from "@/lib/auth";
 
 // Streams the live interactive Claude TUI (CLI backend) by bridging the
 // backend's PTY-over-WebSocket terminal endpoint into an xterm.js instance.
@@ -43,7 +44,11 @@ export default function LiveTerminal({ handle }: { handle: string }) {
     // browser blocks it as mixed content. Plain http (localhost) uses ws.
     const host = window.location.hostname || "localhost";
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${host}:8000/sessions/${handle}/terminal`);
+    // Append the shared-secret token (when configured) so the backend authorizes
+    // this keystroke-injecting socket; no-op on localhost (loopback-trusted).
+    const ws = new WebSocket(
+      withAuthParam(`${proto}://${host}:8000/sessions/${handle}/terminal`),
+    );
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
