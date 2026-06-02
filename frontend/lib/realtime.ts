@@ -40,6 +40,14 @@ export class RealtimeSession implements VoiceSession {
   // and drain when the current response ends.
   private responseActive = false;
   private pendingInjections: string[] = [];
+  // call_ids we've already dispatched to /api/tools/execute. Realtime can
+  // surface the same function_call twice — streamed via response.output_item.done
+  // AND again in response.done's output[]. Dedupe so we run each call once.
+  private dispatchedCalls = new Set<string>();
+  // A tool result has been submitted and the model owes us a follow-up response,
+  // but a response was still active when we tried to ask for it. Fire the
+  // response.create as soon as the active response ends (response.done).
+  private awaitingContinuation = false;
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -196,8 +204,24 @@ export class RealtimeSession implements VoiceSession {
       return;
     }
     const emit = this.opts.onEvent;
+    // Trace every inbound event type — invaluable for diagnosing provider
+    // differences (e.g. where Azure surfaces function calls vs OpenAI direct).
+    console.debug("[realtime] evt:", evt.type);
 
     switch (evt.type) {
+      // Function calls can be streamed here as soon as their arguments finish,
+      // before response.done. Dispatch immediately (deduped by call_id) so the
+      // model never waits on a tool result we failed to send. Some providers
+      // (notably Azure) rely on this path and ship a response.done whose
+      // output[] omits the call.
+      case "response.output_item.done": {
+        const item = evt.item;
+        if (item?.type === "function_call" && item.call_id) {
+          emit({ type: "state", state: "thinking" });
+          await this.runFunctionCall(item);
+        }
+        break;
+      }
       // --- voice-state signals (drive the orb) ---
       case "input_audio_buffer.speech_started":
         emit({ type: "state", state: "hearing" });
@@ -248,26 +272,30 @@ export class RealtimeSession implements VoiceSession {
         emit({ type: "transcript", role: "assistant", text, final: true });
         break;
       }
-      // function calls: GA emits them inside response.done output[]
+      // GA emits function calls inside response.done output[] too. The response
+      // that just finished is no longer active — clear the flag first so any
+      // continuation we now request actually fires.
       case "response.done": {
         this.accumulateUsage(evt.response?.usage);
+        this.responseActive = false;
         const out = evt.response?.output || [];
-        let hadCall = false;
+        // Dispatch any calls not already run via response.output_item.done.
+        // runFunctionCall dedupes on call_id and, since no response is active,
+        // requestContinuation will fire the follow-up response.create.
         for (const item of out) {
-          if (item.type === "function_call") {
-            hadCall = true;
-            await this.runFunctionCall(item);
-          }
+          if (item.type === "function_call") await this.runFunctionCall(item);
         }
-        // The response that just finished is no longer active. runFunctionCall
-        // may have started a new one (sets responseActive=true via its own
-        // response.create); if not, drain any [Claude update] system messages
-        // that were queued while this response was speaking.
-        if (!hadCall) {
-          this.responseActive = false;
+        // A tool ran via the streaming path and its continuation was deferred
+        // until this response ended — fire it now.
+        if (this.awaitingContinuation) this.requestContinuation();
+        if (this.responseActive) {
+          // A continuation (or tool follow-up) is in flight.
+          emit({ type: "state", state: "thinking" });
+        } else {
+          // Nothing pending — drain any queued [Claude update] system messages.
           this.drainPendingInjections();
+          emit({ type: "state", state: "listening" });
         }
-        emit({ type: "state", state: hadCall ? "thinking" : "listening" });
         break;
       }
       // The server reports remaining tokens/requests after each response. Surface
@@ -306,11 +334,13 @@ export class RealtimeSession implements VoiceSession {
         // Any non-racy error means the response.create we fired won't produce a
         // response.done — so responseActive would stick true and every later
         // [Claude update] would queue silently and never narrate (the current
-        // prompt then looks "still processing" forever). Clear the flag and try
-        // to drain so updates keep flowing. If a response really was still
-        // active, the drain's response.create just races and is handled above.
+        // prompt then looks "still processing" forever). Clear the flag, then
+        // either fire a pending tool continuation or drain queued updates so the
+        // conversation keeps flowing. If a response really was still active, the
+        // resulting response.create just races and is handled above.
         this.responseActive = false;
-        this.drainPendingInjections();
+        if (this.awaitingContinuation) this.requestContinuation();
+        else this.drainPendingInjections();
         const rate = e.code === "rate_limit_exceeded" || /rate limit/i.test(e.message || "");
         emit({
           type: "error",
@@ -340,9 +370,27 @@ export class RealtimeSession implements VoiceSession {
     this.opts.onEvent({ type: "usage", usage: { ...acc } });
   }
 
+  // Ask the model to produce its follow-up response after a tool result. Only
+  // valid when no response is active — otherwise the API rejects it with
+  // 'conversation_already_has_active_response'. If one is active, defer until
+  // response.done clears responseActive.
+  private requestContinuation() {
+    if (this.responseActive) {
+      this.awaitingContinuation = true;
+      return;
+    }
+    this.awaitingContinuation = false;
+    this.responseActive = true;
+    this.send({ type: "response.create" });
+  }
+
   private async runFunctionCall(item: any) {
     const name: string = item.name;
     const callId: string = item.call_id;
+    // Each function_call can surface on both the streaming and response.done
+    // paths — run it exactly once.
+    if (callId && this.dispatchedCalls.has(callId)) return;
+    if (callId) this.dispatchedCalls.add(callId);
     let args: any = {};
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
@@ -374,8 +422,9 @@ export class RealtimeSession implements VoiceSession {
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output: JSON.stringify(result) },
     });
-    // The model needs to respond to the tool result; this is a fresh response.
-    this.responseActive = true;
-    this.send({ type: "response.create" });
+    // The model needs to respond to the tool result. Fire now if idle, else
+    // defer until the active response finishes (avoids a racy reject that would
+    // strand the result and leave the orb stuck "thinking").
+    this.requestContinuation();
   }
 }
