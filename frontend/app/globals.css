@@ -121,6 +121,12 @@ body {
 /* Conversation panel: cap height so a long live transcript scrolls inside the
    panel instead of growing the page without bound. */
 .conv-scroll { max-height: 80vh; overflow-y: auto; padding-right: 10px; }
+/* Keep items at their natural height and let the panel scroll. Without this, a
+   max-height flex column shrinks its children to fit: tool-call cards set
+   overflow:hidden, which makes their flex auto-min-height 0, so as the
+   conversation grows flexbox compresses them to a sliver ("horizontal line").
+   flex-shrink: 0 pins each child's height and scrolls the container instead. */
+.conv-scroll > * { flex-shrink: 0; }
 
 /* Slim, theme-matched scrollbar shared by every main scrollable area so the
    native browser bar never clashes with the dark UI: transparent track, a
