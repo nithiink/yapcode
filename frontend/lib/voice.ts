@@ -55,6 +55,7 @@ export type RealtimeOptions = {
   onEvent: (e: RealtimeEvent) => void;
   onRemoteStream?: (stream: MediaStream) => void; // drives the orb analyser
   onLocalStream?: (stream: MediaStream) => void; // drives the orb analyser from the user's mic
+  onDebug?: (msg: string) => void; // low-level transport trace (tool-call lifecycle)
 };
 
 export interface VoiceSession {

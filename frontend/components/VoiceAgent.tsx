@@ -923,6 +923,7 @@ export default function VoiceAgent() {
       instructions: INSTRUCTIONS,
       backend,
       onEvent,
+      onDebug: (msg) => logDebug("info", `transport: ${msg}`, undefined, "voice", "backend"),
       onRemoteStream: (s) => attachStream(s, "remote"),
       onLocalStream: (s) => attachStream(s, "mic"),
     };

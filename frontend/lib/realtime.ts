@@ -53,6 +53,11 @@ export class RealtimeSession implements VoiceSession {
     this.opts = opts;
   }
 
+  private trace(msg: string) {
+    console.debug("[realtime]", msg);
+    this.opts.onDebug?.(msg);
+  }
+
   async start(audioEl: HTMLAudioElement): Promise<void> {
     this.audioEl = audioEl;
     const emit = this.opts.onEvent;
@@ -204,9 +209,6 @@ export class RealtimeSession implements VoiceSession {
       return;
     }
     const emit = this.opts.onEvent;
-    // Trace every inbound event type — invaluable for diagnosing provider
-    // differences (e.g. where Azure surfaces function calls vs OpenAI direct).
-    console.debug("[realtime] evt:", evt.type);
 
     switch (evt.type) {
       // Function calls can be streamed here as soon as their arguments finish,
@@ -217,6 +219,7 @@ export class RealtimeSession implements VoiceSession {
       case "response.output_item.done": {
         const item = evt.item;
         if (item?.type === "function_call" && item.call_id) {
+          this.trace(`output_item.done → function_call ${item.name}`);
           emit({ type: "state", state: "thinking" });
           await this.runFunctionCall(item);
         }
@@ -279,6 +282,9 @@ export class RealtimeSession implements VoiceSession {
         this.accumulateUsage(evt.response?.usage);
         this.responseActive = false;
         const out = evt.response?.output || [];
+        this.trace(
+          `response.done status=${evt.response?.status} output=[${out.map((i: any) => i.type).join(",") || "∅"}]`,
+        );
         // Dispatch any calls not already run via response.output_item.done.
         // runFunctionCall dedupes on call_id and, since no response is active,
         // requestContinuation will fire the follow-up response.create.
@@ -377,10 +383,12 @@ export class RealtimeSession implements VoiceSession {
   private requestContinuation() {
     if (this.responseActive) {
       this.awaitingContinuation = true;
+      this.trace("continuation deferred (response still active)");
       return;
     }
     this.awaitingContinuation = false;
     this.responseActive = true;
+    this.trace("continuation → response.create");
     this.send({ type: "response.create" });
   }
 
@@ -391,6 +399,7 @@ export class RealtimeSession implements VoiceSession {
     // paths — run it exactly once.
     if (callId && this.dispatchedCalls.has(callId)) return;
     if (callId) this.dispatchedCalls.add(callId);
+    this.trace(`dispatch tool ${name} (call_id=${callId})`);
     let args: any = {};
     try {
       args = item.arguments ? JSON.parse(item.arguments) : {};
@@ -416,6 +425,7 @@ export class RealtimeSession implements VoiceSession {
       ok = false;
       result = { error: e?.message || String(e) };
     }
+    this.trace(`tool ${name} result ok=${ok}; sending function_call_output`);
     this.opts.onEvent({ type: "tool_call", name, arguments: args, result, ok });
 
     this.send({
