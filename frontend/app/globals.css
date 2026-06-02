@@ -76,9 +76,8 @@ body {
 .orb.idle { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; }
 .orb.connecting { animation: breathe 1.3s ease-in-out infinite; }
 .orb.listening { animation: breathe 5s ease-in-out infinite; }
-.orb.hearing { background: radial-gradient(circle at 40% 36%, #e7d0bf, #e0a07a 55%, #8a5232 100%); }
-.orb.thinking { background: radial-gradient(circle at 40% 36%, #f0dcb3, var(--warn) 55%, #8a6a30 100%); }
-.orb.speaking { box-shadow: 0 26px 70px -22px rgba(221,138,106,0.8); }
+/* While connected the orb keeps one stable warm color — only its scale reacts to
+   volume. (hearing/thinking/speaking no longer recolor the orb.) */
 .orb.muted { filter: grayscale(0.6); opacity: 0.55; }
 /* Gentle baseline pulse for idle-ish states; kept subtle (1.02) so the
    volume-driven scale clearly dominates and the two don't visibly fight. */
