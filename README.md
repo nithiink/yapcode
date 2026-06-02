@@ -75,6 +75,27 @@ cd frontend && npm run dev:network     # https://0.0.0.0:3000
   `https://<host>:3000/#vc_token=<your VC_AUTH_TOKEN>` — the browser stores the
   token and strips it from the URL.
 
+## Use it alongside your terminal (live shared session)
+
+You can drive one Claude session by **voice and keyboard at the same time** — talk to the voice
+agent while you keep typing in your terminal, all on the same live `claude` process. This works
+because voice-claude runs each session in a tmux session (`vc_<id>`), and tmux lets multiple
+clients (the browser live-terminal, the voice agent, and your own `tmux attach`) drive one pane
+at once — single process, single transcript, no conflicts.
+
+Install the Claude Code plugin in [`integrations/claude-code-plugin/`](integrations/claude-code-plugin/),
+then:
+
+- **Start voice-ready:** run `voice-claude` (the plugin's launcher) instead of `claude`. Work
+  normally; type `/voice-handoff` to switch voice on — no restart, keep typing, open the app to
+  talk.
+- **From a plain `claude` session:** type `/voice-handoff`; voice-claude reopens the session
+  under management and prints a `tmux attach -t vc_…` command — press Ctrl-D, run it, and you're
+  co-driving with full features.
+
+When co-driving, take turns — don't type and talk in the exact same instant (both share one
+terminal). See the plugin README for install/config.
+
 ## Configuration
 
 All backend config lives in `backend/.env` (copy from `.env.example`). Key

@@ -137,6 +137,15 @@ the SSH key — your `~/.ssh` is the Linux home), Phase 2 (clone), and Phase 4
 - Open **`http://localhost:3000` in your Windows browser** (Chrome/Edge) — WSL2
   forwards localhost, and the mic works because it's localhost.
 
+## Voice + terminal at the same time (optional)
+
+You can talk to the voice agent **and** keep typing in your terminal on the same live session.
+Install the Claude Code plugin in `integrations/claude-code-plugin/` (see its README), then
+either start sessions with the `voice-claude` launcher (instead of `claude`) and type
+`/voice-handoff` to flip voice on with no restart, or run `/voice-handoff` in a plain `claude`
+session and follow the printed `tmux attach` command. Take turns — don't type and talk in the
+exact same instant.
+
 ## Using it from your phone (optional)
 
 Localhost is laptop-only. To use it from your phone you'd run network mode
