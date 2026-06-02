@@ -11,6 +11,7 @@ from typing import Any
 
 from session_manager import (
     backend_of,
+    cli_pane_for,
     close_session,
     default_name_for,
     get_runner,
@@ -200,7 +201,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "get_handoff",
-        "description": "Get the exact terminal command to take over a Claude session by keyboard (cd into its project and resume it). Speak it or note it when the user wants to continue in their terminal.",
+        "description": "Get the terminal command(s) to take a Claude session over by keyboard. Returns two options: attach_command (`tmux attach …`) to co-drive the SAME live session — the user types while you keep talking, both at once — and resume_command (`claude --resume …`) to take it over solo in a separate terminal. Offer attach_command when the user wants to type alongside voice; resume_command when they want to leave voice and continue by keyboard only.",
         "parameters": {
             "type": "object",
             "properties": {"session_id": {"type": "string"}},
@@ -362,8 +363,18 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
         if not sess:
             raise KeyError(f"unknown session: {sid}")
-        cmd = handoff_command(sess["cwd"], sess["session_id"])
-        return {"session_id": sid, "name": sess.get("name"), "cwd": sess["cwd"], "command": cmd}
+        resume_cmd = handoff_command(sess["cwd"], sess["session_id"])
+        pane = cli_pane_for(sid)
+        attach_cmd = f"tmux attach -t {pane}" if pane else None
+        return {
+            "session_id": sid, "name": sess.get("name"), "cwd": sess["cwd"],
+            # Live co-drive: join the SAME running process — keyboard + voice both
+            # drive it at once (CLI/tmux sessions only).
+            "attach_command": attach_cmd,
+            # Solo takeover: resume in a SEPARATE process (use after voice stops).
+            "resume_command": resume_cmd,
+            "command": resume_cmd,  # backward-compat alias
+        }
 
     if name == "send_keys":
         sid = resolve_session(args["session_id"])

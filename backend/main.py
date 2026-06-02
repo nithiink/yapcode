@@ -34,7 +34,17 @@ from pydantic import BaseModel, Field
 import config
 import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
-from session_manager import cli_pane_for, rehydrate_cli_sessions, shutdown_all
+from session_manager import (
+    cli_pane_for,
+    default_name_for,
+    get_runner,
+    list_all_sessions,
+    register_owner,
+    rehydrate_cli_sessions,
+    resolve_project_path,
+    set_session_name,
+    shutdown_all,
+)
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
 load_dotenv()
@@ -216,6 +226,16 @@ class DebugLogRequest(BaseModel):
     detail: dict[str, Any] | None = None
 
 
+class HandoffRequest(BaseModel):
+    # Terminal -> voice handoff: a Claude Code session the user is running in
+    # their own terminal asks voice-claude to take it over (the /voice-handoff
+    # plugin command POSTs this).
+    session_id: str
+    cwd: str
+    tmux: str | None = None     # the $TMUX env of the caller (informational)
+    name: str | None = None
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -337,6 +357,44 @@ async def create_session(req: SessionRequest) -> dict[str, Any]:
     data["model"] = model
     data["transport"] = "webrtc"
     return data
+
+
+@app.post("/session/handoff", dependencies=[Depends(require_auth)])
+async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
+    """Adopt a Claude Code session the user started in their own terminal so the
+    voice agent can co-drive it. If the id is already a live voice-claude session
+    (e.g. started via the `voice-claude` launcher), this is a no-op that just hands
+    back the attach target. Otherwise the session is reopened in a hooked tmux pane
+    via `claude --resume` — the caller should then exit the original process and
+    `tmux attach` to the returned target (single writer per session)."""
+    sid = (req.session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    # Already a live vc_ session (seamless launcher path) — nothing to reopen.
+    pane = cli_pane_for(sid)
+    if pane:
+        sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
+        name = (sess or {}).get("name")
+        attach = f"tmux attach -t {pane}"
+        return {"session_id": sid, "name": name, "attach": attach,
+                "message": f"Voice is live on this session. Keep typing here, or attach "
+                           f"another terminal with: {attach}"}
+
+    # Bare session — reopen it under voice-claude. resolve_project_path realpath +
+    # containment-checks the absolute cwd against ALLOWED_PROJECT_ROOTS (fail closed).
+    try:
+        cwd = resolve_project_path(req.cwd)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    runner = get_runner("cli")
+    handle = await runner.resume(sid, cwd, None, "default", req.name)
+    register_owner(handle, "cli")
+    name = set_session_name(handle, req.name or default_name_for(cwd))
+    attach = f"tmux attach -t {cli_pane_for(handle) or 'vc_' + handle[:8]}"
+    return {"session_id": handle, "name": name, "cwd": cwd, "attach": attach,
+            "message": f"Reopened '{name}' under voice-claude. Exit your old session "
+                       f"(Ctrl-D), then run: {attach}"}
 
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
