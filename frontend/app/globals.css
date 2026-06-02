@@ -140,11 +140,12 @@ body {
    flex-shrink: 0 pins each child's height and scrolls the container instead. */
 .conv-scroll > * { flex-shrink: 0; }
 
-/* Slim, theme-matched scrollbar shared by every main scrollable area so the
+/* Slim, theme-matched scrollbar shared by the secondary scroll areas so the
    native browser bar never clashes with the dark UI: transparent track, a
    rounded pill thumb in --line2 that warms to --mut on hover.
-   Firefox uses scrollbar-width/color; WebKit/Chromium uses ::-webkit-scrollbar. */
-.conv-scroll,
+   Firefox uses scrollbar-width/color; WebKit/Chromium uses ::-webkit-scrollbar.
+   The Conversation panel is deliberately excluded — it uses the OS-native
+   scrollbar (appears on scroll, auto-hides) plus a top fade instead. */
 .logscroll,
 .transcript,
 .tx-modal-body,
@@ -152,24 +153,20 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line2) transparent;
 }
-.conv-scroll:hover,
 .logscroll:hover,
 .transcript:hover,
 .tx-modal-body:hover,
 .tc-code:hover {
   scrollbar-color: var(--mut) transparent;
 }
-.conv-scroll::-webkit-scrollbar,
 .logscroll::-webkit-scrollbar,
 .transcript::-webkit-scrollbar,
 .tx-modal-body::-webkit-scrollbar,
 .tc-code::-webkit-scrollbar { width: 8px; height: 8px; }
-.conv-scroll::-webkit-scrollbar-track,
 .logscroll::-webkit-scrollbar-track,
 .transcript::-webkit-scrollbar-track,
 .tx-modal-body::-webkit-scrollbar-track,
 .tc-code::-webkit-scrollbar-track { background: transparent; }
-.conv-scroll::-webkit-scrollbar-thumb,
 .logscroll::-webkit-scrollbar-thumb,
 .transcript::-webkit-scrollbar-thumb,
 .tx-modal-body::-webkit-scrollbar-thumb,
@@ -180,32 +177,19 @@ body {
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.conv-scroll::-webkit-scrollbar-thumb:hover,
 .logscroll::-webkit-scrollbar-thumb:hover,
 .transcript::-webkit-scrollbar-thumb:hover,
 .tx-modal-body::-webkit-scrollbar-thumb:hover,
 .tc-code::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
 
-/* Conversation history (Option C): the panel always shows the latest messages
-   (auto-scrolled to the bottom). A thick, prominent fade at the top softens the
-   cut-off older messages so it reads as "more above", and the scrollbar is
-   hidden by default — revealed only when the user toggles it on. Wheel/trackpad
-   scrolling works in both modes; the shared slim-bar rules above style the
-   .showbar state (they out-specify the base .conv-scroll selector). */
+/* Conversation history (Option C): the panel always auto-scrolls to the latest
+   message. A thick, prominent fade at the top softens the cut-off older messages
+   so it reads as "more above". The scrollbar is left to the OS — it appears
+   while scrolling and hides otherwise — so nothing persistent clutters the view. */
 .conv-scroll.fade {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 36px, #000 84px);
-  mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 36px, #000 84px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
+  mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
 }
-.conv-scroll.hidebar { scrollbar-width: none; }
-.conv-scroll.hidebar::-webkit-scrollbar { width: 0; height: 0; }
-
-/* Conversation header toolbar: scrollbar toggle + jump-to-latest. */
-.convtools { display: inline-flex; align-items: center; gap: 8px; }
-.convbtn { font: inherit; font-size: 12px; color: var(--mut); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: color 0.12s, border-color 0.12s; }
-.convbtn:hover { color: var(--ink); border-color: var(--line2); }
-.convbtn.on { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); }
-.convjump { font: inherit; font-size: 11.5px; letter-spacing: 0.04em; color: var(--dim); background: transparent; border: 0; cursor: pointer; padding: 4px 2px; transition: color 0.12s; }
-.convjump:hover { color: var(--acc); }
 
 .empty { color: var(--dim); font-size: 14px; padding: 6px 2px; }
 

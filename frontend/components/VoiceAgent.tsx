@@ -347,12 +347,9 @@ export default function VoiceAgent() {
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
-  // Conversation panel shows only the latest messages with the scrollbar hidden
-  // by default; the user can reveal the slim scrollbar on demand to review older
-  // history. convAtBottomRef tracks whether new messages should auto-scroll.
-  const [showScrollbar, setShowScrollbar] = useState(false);
+  // Conversation panel always auto-scrolls to the latest message; the OS-native
+  // scrollbar (appears on scroll, hides otherwise) lets the user review history.
   const convScrollRef = useRef<HTMLDivElement | null>(null);
-  const convAtBottomRef = useRef(true);
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
@@ -779,10 +776,9 @@ export default function VoiceAgent() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
 
-  // Conversation: keep the panel pinned to the latest message unless the user
-  // has scrolled up to read older history.
+  // Conversation: always auto-scroll to the latest message. The OS scrollbar
+  // (appears on scroll, hides otherwise) lets the user scroll up to review.
   useEffect(() => {
-    if (!convAtBottomRef.current) return;
     const el = convScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [timeline]);
@@ -1246,39 +1242,10 @@ export default function VoiceAgent() {
       <div className="panels">
         <div className="panel">
           <h2>
-            Conversation
-            <span className="convtools">
-              <button
-                className={`convbtn ${showScrollbar ? "on" : ""}`}
-                onClick={() => setShowScrollbar((v) => !v)}
-                title={showScrollbar ? "Hide the scrollbar" : "Show the scrollbar to review older messages"}
-              >
-                ▥ Scrollbar
-              </button>
-              <button
-                className="convjump"
-                onClick={() => {
-                  const el = convScrollRef.current;
-                  if (el) {
-                    el.scrollTop = el.scrollHeight;
-                    convAtBottomRef.current = true;
-                  }
-                }}
-                title="Jump to the latest message"
-              >
-                ↓ Latest
-              </button>
-            </span>
+            Conversation <span className="ct">live</span>
           </h2>
           <div className="rule" />
-          <div
-            ref={convScrollRef}
-            onScroll={() => {
-              const el = convScrollRef.current;
-              if (el) convAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-            }}
-            className={`scroll conv-scroll fade ${showScrollbar ? "showbar" : "hidebar"}`}
-          >
+          <div ref={convScrollRef} className="scroll conv-scroll fade">
             {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
