@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude Sessions — redesign options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1917; --panel: #211f1d; --panel2: #272421;
+    --ink: #e9e3d8; --mut: #928c81; --dim: #6f6a61;
+    --acc: #dd8a6a; --acc-ink: #241813;
+    --line: #322f2b; --line2: #3c3833;
+    --good: #9cc7a4; --warn: #d8b07a; --danger: #d98a8a; --plan: #93a6c9;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --disp: "Anton", "Arial Narrow", sans-serif;
+    --body: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); margin: 0; padding: 40px 28px 90px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1240px; margin: 0 auto; }
+  a { color: var(--acc); }
+
+  .pagehead { border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 26px; }
+  .pagehead h1 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 32px; letter-spacing: 0.02em; margin: 0 0 8px; }
+  .pagehead p { color: var(--mut); margin: 0; font-size: 14px; max-width: 78ch; }
+  .pagehead code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 5px; color: var(--ink); }
+
+  /* glossary */
+  .glossary { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin-bottom: 40px; }
+  .glossary h3 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 16px; letter-spacing: .03em; margin: 0 0 14px; }
+  table.gloss { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.gloss th { text-align: left; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 600; padding: 0 14px 8px 0; border-bottom: 1px solid var(--line); }
+  table.gloss td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--mut); }
+  table.gloss td.old { color: var(--dim); text-decoration: line-through; white-space: nowrap; }
+  table.gloss td.new { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  table.gloss td.new .sub { display: block; font-weight: 400; font-size: 11px; color: var(--mut); }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 38px; }
+  @media (max-width: 1180px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; max-width: 460px; } }
+  .col { min-width: 0; }
+  .optlabel { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 16px; letter-spacing: .03em; color: var(--ink); margin: 0 0 3px; }
+  .optlabel .tag { color: var(--acc); }
+  .optnote { color: var(--mut); font-size: 12.5px; margin: 0 0 16px; min-height: 58px; }
+  .frame { border: 1px dashed var(--line2); border-radius: 14px; padding: 18px 16px; }
+
+  h2.panelh { font-family: var(--disp); text-transform: uppercase; font-size: 16px; letter-spacing: .02em; font-weight: 400; margin: 0 0 6px; display: flex; justify-content: space-between; align-items: baseline; }
+  h2.panelh .ct { font-family: var(--body); font-size: 12px; color: var(--mut); }
+  .rule { height: 1px; background: var(--line); margin-bottom: 16px; }
+
+  /* ---------- shared atoms ---------- */
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.ready { background: var(--good); }
+  .dot.working { background: var(--acc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent); animation: pulse 1.3s ease-in-out infinite; }
+  .dot.attn { background: var(--warn); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .statustxt { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  .statustxt.ready { color: var(--good); }
+  .statustxt.working { color: var(--acc); }
+  .statustxt.attn { color: var(--warn); }
+
+  .iconbtn { background: transparent; border: 1px solid var(--line); color: var(--mut); font: inherit; font-size: 11.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .iconbtn:hover { color: var(--ink); border-color: var(--line2); }
+  .iconbtn.primary { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); }
+  .iconbtn.primary:hover { background: color-mix(in srgb, var(--acc) 12%, transparent); }
+  .iconbtn .gl { font-size: 12px; }
+
+  .meta { font-size: 12.5px; color: var(--mut); }
+  .meta .sep { color: var(--dim); margin: 0 6px; }
+  .modelbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+
+  /* mode segmented (shared) */
+  .modeseg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+  .modeseg button { font: inherit; font-size: 12px; font-weight: 500; padding: 4px 11px; border-radius: 999px; border: 0; background: transparent; color: var(--mut); cursor: pointer; white-space: nowrap; }
+  .modeseg button:hover { color: var(--ink); }
+  .modeseg button.on { background: var(--acc); color: var(--acc-ink); font-weight: 600; }
+
+  /* "Continue in your terminal" disclosure (shared) — the reframed handoff */
+  details.handoff { margin-top: 13px; border-top: 1px solid var(--line); padding-top: 11px; }
+  details.handoff > summary { list-style: none; cursor: pointer; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--dim); display: inline-flex; align-items: center; gap: 7px; }
+  details.handoff > summary::-webkit-details-marker { display: none; }
+  details.handoff > summary .chev { transition: transform .15s ease; font-size: 9px; }
+  details.handoff[open] > summary .chev { transform: rotate(90deg); }
+  details.handoff:hover > summary { color: var(--mut); }
+  .hopt { margin-top: 12px; }
+  .hopt .htitle { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+  .hopt .hwhy { font-size: 11.5px; color: var(--mut); margin: 1px 0 6px; }
+  .hcmd { display: flex; align-items: center; gap: 8px; }
+  .hcmd code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; background: var(--panel); border: 1px solid var(--line); padding: 7px 9px; border-radius: 8px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .copybtn { background: var(--panel); border: 1px solid var(--line); color: var(--mut); cursor: pointer; font-size: 12px; padding: 6px 9px; border-radius: 8px; line-height: 1; flex: none; }
+  .copybtn:hover { color: var(--acc); border-color: var(--line2); }
+
+  /* ============ A — Quiet ============ */
+  .a .sess { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .a .sess:first-of-type { padding-top: 4px; }
+  .a .head { display: flex; align-items: center; gap: 10px; }
+  .a .title { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; }
+  .a .name { font-family: var(--disp); text-transform: uppercase; font-size: 19px; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .a .actions { display: flex; gap: 6px; flex: none; }
+  .a .meta { margin: 9px 0 13px; }
+  .a .moderow { display: flex; align-items: center; gap: 10px; }
+
+  /* ============ B — Contained cards ============ */
+  .b .stack { display: flex; flex-direction: column; gap: 14px; }
+  .b .card { border: 1px solid var(--line); border-radius: 13px; background: var(--panel); overflow: hidden; }
+  .b .chead { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px 11px; }
+  .b .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .b .sub { font-size: 12px; color: var(--mut); margin-top: 3px; }
+  .b .grow { flex: 1; min-width: 0; }
+  .b .statepill { font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; flex: none; }
+  .b .statepill.ready { color: var(--good); } .b .statepill.working { color: var(--acc); }
+  .b .cdiv { height: 1px; background: var(--line); }
+  .b .crow { display: flex; align-items: center; gap: 10px; padding: 11px 15px; flex-wrap: wrap; }
+  .b .crow .spacer { flex: 1; }
+  .b .cfoot { padding: 4px 15px 13px; }
+  .b .cfoot details.handoff { border-top: 0; padding-top: 6px; margin-top: 0; }
+
+  /* ============ C — Collapsible list ============ */
+  .c .list { display: flex; flex-direction: column; }
+  .c details.row { border-bottom: 1px solid var(--line); }
+  .c details.row > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 13px 2px; }
+  .c details.row > summary::-webkit-details-marker { display: none; }
+  .c .name { font-family: var(--disp); text-transform: uppercase; font-size: 16px; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .c .rmeta { font-size: 11px; color: var(--mut); flex: none; display: flex; align-items: center; gap: 7px; }
+  .c .rmode { color: var(--acc); }
+  .c .rchev { color: var(--dim); font-size: 10px; transition: transform .15s ease; flex: none; }
+  .c details.row[open] .rchev { transform: rotate(90deg); }
+  .c .body { padding: 2px 2px 16px; }
+  .c .body .meta { margin: 0 0 12px; }
+  .c .moderow { display: flex; align-items: center; gap: 10px; }
+  .c .rowactions { display: flex; gap: 6px; margin: 12px 0 0; }
+
+  /* ============ D — Action-forward (teaches the capabilities) ============ */
+  .d .sess { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .d .sess:first-of-type { padding-top: 4px; }
+  .d .top { display: flex; align-items: center; gap: 9px; }
+  .d .name { font-family: var(--disp); text-transform: uppercase; font-size: 19px; letter-spacing: .01em; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d .meta { margin: 8px 0 12px; }
+  .d .moderow { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+  .d .doactions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ============ E — Tabbed ============ */
+  .e .card { border: 1px solid var(--line); border-radius: 13px; background: var(--panel); overflow: hidden; }
+  .e .ehead { display: flex; align-items: center; gap: 9px; padding: 13px 15px 0; }
+  .e .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; letter-spacing: .01em; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .e .sub { font-size: 12px; color: var(--mut); padding: 4px 15px 0; }
+  .e .tabs { display: flex; gap: 2px; padding: 12px 12px 0; }
+  .e .tabs label { font-size: 12px; color: var(--mut); padding: 7px 13px; border-radius: 8px 8px 0 0; cursor: pointer; border-bottom: 2px solid transparent; }
+  .e .tabs label:hover { color: var(--ink); }
+  .e input[name="etab"] { display: none; }
+  .e .tabbody { border-top: 1px solid var(--line); padding: 14px 15px; }
+  .e .pane { display: none; }
+  /* tab wiring */
+  .e #etab-ov:checked ~ .tabs label[for="etab-ov"],
+  .e #etab-live:checked ~ .tabs label[for="etab-live"],
+  .e #etab-tx:checked ~ .tabs label[for="etab-tx"] { color: var(--ink); border-bottom-color: var(--acc); }
+  .e #etab-ov:checked ~ .tabbody .pane.ov,
+  .e #etab-live:checked ~ .tabbody .pane.live,
+  .e #etab-tx:checked ~ .tabbody .pane.tx { display: block; }
+  .e .moderow { display: flex; align-items: center; gap: 10px; }
+  .e .termmock { font-family: var(--mono); font-size: 11.5px; color: #b7d0b0; background: #14130f; border: 1px solid var(--line); border-radius: 9px; padding: 11px; height: 132px; overflow: hidden; line-height: 1.5; }
+  .e .termmock .c1 { color: var(--acc); } .e .termmock .cd { color: var(--dim); }
+  .e .txmock { font-size: 12.5px; display: flex; flex-direction: column; gap: 7px; }
+  .e .txmock .who { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mut); margin-right: 6px; }
+
+  /* ============ F — Status-forward ============ */
+  .f .sess { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .f .sess:first-of-type { padding-top: 4px; }
+  .f .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; letter-spacing: .01em; }
+  .f .statusline { display: flex; align-items: center; gap: 9px; margin: 9px 0 4px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .f .statusline .lead { font-size: 12px; font-weight: 600; }
+  .f .statusline.working .lead { color: var(--acc); }
+  .f .statusline.ready .lead { color: var(--good); }
+  .f .statusline .task { font-size: 12.5px; color: var(--mut); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .f .meta { margin: 10px 0 12px; }
+  .f .botrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .f .botrow .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pagehead">
+    <h1>Claude Sessions — redesign options</h1>
+    <p>Six directions. The point isn't only to declutter — it's that the controls should <b>tell the user what they can do</b>. Most people won't guess that they can watch the live CLI inside the browser, or carry the same session into their own terminal. Every option below uses the renamed, value-led labels in the glossary, shows the mode <b>once</b>, uses a calm status dot, abbreviates the home dir to <code>~</code>, and drops the always-<code>$0.0000</code> subscription cost.</p>
+  </div>
+
+  <div class="glossary">
+    <h3>Naming — what it is, why it's there, what to call it</h3>
+    <table class="gloss">
+      <thead><tr><th>Today</th><th>What it actually does &amp; why it matters</th><th>Proposed</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="old">Live</td>
+          <td>Streams the <b>real interactive Claude CLI</b> into the browser — you watch it work in real time, and can even type into it. This is a flagship capability most users never discover.</td>
+          <td class="new">Watch live<span class="sub">open → “Stop”</span></td>
+        </tr>
+        <tr>
+          <td class="old">Transcript</td>
+          <td>The readable conversation history — your prompts, Claude's replies, and tool calls — without scrolling the raw terminal.</td>
+          <td class="new">Transcript<span class="sub">(or “History”)</span></td>
+        </tr>
+        <tr>
+          <td class="old">⛶</td>
+          <td>Fullscreen the live view or transcript.</td>
+          <td class="new">Expand</td>
+        </tr>
+        <tr>
+          <td class="old">attach<br/><code>tmux attach…</code></td>
+          <td>Jump into the <b>same running session</b> from your own terminal and take the keyboard — full TUI, no browser limits. (CLI sessions, while live.)</td>
+          <td class="new">Take the keyboard<span class="sub">under “Continue in your terminal”</span></td>
+        </tr>
+        <tr>
+          <td class="old">resume<br/><code>claude --resume…</code></td>
+          <td>Reopen this session's history in a <b>fresh terminal</b>, any time, on any machine — even after the app stops.</td>
+          <td class="new">Reopen anywhere<span class="sub">under “Continue in your terminal”</span></td>
+        </tr>
+        <tr>
+          <td class="old">completed</td>
+          <td>The last turn finished; the session is idle and waiting for you. “Completed” reads like it's over — it isn't.</td>
+          <td class="new">Ready</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+
+    <!-- ===== A ===== -->
+    <div class="col a">
+      <div class="optlabel"><span class="tag">A.</span> Quiet</div>
+      <p class="optnote">Closest to today. Clean title row (status dot · name · right-aligned actions), quiet meta line, mode control, handoff collapsed. Lowest-risk.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="sess">
+          <div class="head">
+            <div class="title"><span class="dot working"></span><span class="name">Front end changes to voice cloud</span></div>
+            <div class="actions"><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+          </div>
+          <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development<span class="sep">·</span><span class="statustxt working">working</span></div>
+          <div class="moderow"><span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div></div>
+          <details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+            <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+            <div class="hopt"><div class="htitle">Reopen anywhere</div><div class="hwhy">Start a fresh terminal from this session's history.</div><div class="hcmd"><code>cd ~/Development &amp;&amp; claude --resume bdd20ddf-e7fa-46ba-af28</code><button class="copybtn">⧉</button></div></div>
+          </details>
+        </div>
+        <div class="sess">
+          <div class="head">
+            <div class="title"><span class="dot ready"></span><span class="name">voice_claude</span></div>
+            <div class="actions"><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+          </div>
+          <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development<span class="sep">·</span><span class="statustxt ready">ready</span></div>
+          <div class="moderow"><span class="modelbl">Mode</span><div class="modeseg"><button class="on">Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button>Auto</button></div></div>
+          <details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+            <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_c9d205c7</code><button class="copybtn">⧉</button></div></div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== B ===== -->
+    <div class="col b">
+      <div class="optlabel"><span class="tag">B.</span> Contained cards</div>
+      <p class="optnote">Each session is a bordered card with sections (header · mode · footer). Strong separation between sessions; status reads as a pill.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="stack">
+          <div class="card">
+            <div class="chead"><span class="dot working" style="margin-top:6px"></span><div class="grow"><div class="name">Front end changes to voice cloud</div><div class="sub">CLI · opus · ~/Development</div></div><span class="statepill working">working</span></div>
+            <div class="cdiv"></div>
+            <div class="crow"><span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div><span class="spacer"></span><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+            <div class="cdiv"></div>
+            <div class="cfoot"><details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+              <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+              <div class="hopt"><div class="htitle">Reopen anywhere</div><div class="hwhy">Start a fresh terminal from this session's history.</div><div class="hcmd"><code>cd ~/Development &amp;&amp; claude --resume bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+            </details></div>
+          </div>
+          <div class="card">
+            <div class="chead"><span class="dot ready" style="margin-top:6px"></span><div class="grow"><div class="name">voice_claude</div><div class="sub">CLI · opus · ~/Development</div></div><span class="statepill ready">ready</span></div>
+            <div class="cdiv"></div>
+            <div class="crow"><span class="modelbl">Mode</span><div class="modeseg"><button class="on">Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button>Auto</button></div><span class="spacer"></span><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== C ===== -->
+    <div class="col c">
+      <div class="optlabel"><span class="tag">C.</span> Collapsible list</div>
+      <p class="optnote">One tidy row per session (dot · name · mode · status) that expands for the mode control, actions, and handoff. Scales best to many sessions.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="list">
+          <details class="row" open>
+            <summary><span class="dot working"></span><span class="name">Front end changes to voice cloud</span><span class="rmeta"><span class="rmode">Auto</span> · <span class="statustxt working">working</span></span><span class="rchev">▶</span></summary>
+            <div class="body">
+              <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development</div>
+              <div class="moderow"><span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div></div>
+              <div class="rowactions"><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+              <details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+                <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+                <div class="hopt"><div class="htitle">Reopen anywhere</div><div class="hwhy">Fresh terminal from this session's history.</div><div class="hcmd"><code>cd ~/Development &amp;&amp; claude --resume bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+              </details>
+            </div>
+          </details>
+          <details class="row">
+            <summary><span class="dot ready"></span><span class="name">voice_claude</span><span class="rmeta"><span class="rmode" style="color:var(--mut)">Normal</span> · <span class="statustxt ready">ready</span></span><span class="rchev">▶</span></summary>
+            <div class="body"><div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development</div></div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== D ===== -->
+    <div class="col d">
+      <div class="optlabel"><span class="tag">D.</span> Action-forward</div>
+      <p class="optnote">Teaches the capabilities. Big, clearly-labeled action buttons sit on their own row — “Watch live” and a “Continue in terminal” that explains taking over vs reopening. Most discoverable.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="sess">
+          <div class="top"><span class="dot working"></span><span class="name">Front end changes to voice cloud</span><span class="statustxt working">working</span></div>
+          <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development</div>
+          <div class="moderow"><span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div></div>
+          <div class="doactions">
+            <button class="iconbtn primary"><span class="gl">▷</span> Watch it work live</button>
+            <button class="iconbtn">≡ Transcript</button>
+          </div>
+          <details class="handoff"><summary><span class="chev">▶</span> Continue in your own terminal</summary>
+            <div class="hopt"><div class="htitle">⌨ Take the keyboard</div><div class="hwhy">Open this exact live session in your terminal and drive it yourself.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+            <div class="hopt"><div class="htitle">↗ Reopen anywhere</div><div class="hwhy">Pick this work back up in a fresh terminal, any time or machine.</div><div class="hcmd"><code>cd ~/Development &amp;&amp; claude --resume bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== E ===== -->
+    <div class="col e">
+      <div class="optlabel"><span class="tag">E.</span> Tabbed</div>
+      <p class="optnote">“Watch live” and “Transcript” become first-class <b>tabs</b> inside the card, so the capability is impossible to miss. The body swaps in place — no separate expanding boxes.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="card e-card">
+          <input type="radio" name="etab" id="etab-ov" checked />
+          <input type="radio" name="etab" id="etab-live" />
+          <input type="radio" name="etab" id="etab-tx" />
+          <div class="ehead"><span class="dot working"></span><span class="name">Front end changes to voice cloud</span><span class="statustxt working">working</span></div>
+          <div class="sub">CLI · opus · ~/Development</div>
+          <div class="tabs"><label for="etab-ov">Overview</label><label for="etab-live">▷ Watch live</label><label for="etab-tx">Transcript</label></div>
+          <div class="tabbody">
+            <div class="pane ov">
+              <div class="moderow"><span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div></div>
+              <details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+                <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+                <div class="hopt"><div class="htitle">Reopen anywhere</div><div class="hwhy">Fresh terminal from this session's history.</div><div class="hcmd"><code>cd ~/Development &amp;&amp; claude --resume bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+              </details>
+            </div>
+            <div class="pane live"><div class="termmock"><span class="c1">⏺</span> Editing globals.css…<br/>&nbsp;&nbsp;<span class="cd">⎿ added .conv-scroll &gt; * { flex-shrink: 0 }</span><br/><span class="c1">⏺</span> Running tsc --noEmit…<br/>&nbsp;&nbsp;<span class="cd">⎿ no errors</span><br/>✶ Deciphering… <span class="cd">(12s)</span></div></div>
+            <div class="pane tx"><div class="txmock"><div><span class="who">You→Claude</span>Increase the panel height past 60vh.</div><div><span class="who">Claude</span>Bumped .conv-scroll to 80vh and committed.</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== F ===== -->
+    <div class="col f">
+      <div class="optlabel"><span class="tag">F.</span> Status-forward</div>
+      <p class="optnote">Answers “what is it doing right now?” first — a prominent status strip shows the current task — with views and handoff secondary. Best when you run long background work.</p>
+      <div class="frame">
+        <h2 class="panelh">Claude sessions <span class="ct">2 active</span></h2><div class="rule"></div>
+        <div class="sess">
+          <div class="name">Front end changes to voice cloud</div>
+          <div class="statusline working"><span class="dot working"></span><span class="lead">Working</span><span class="task">“Increase the conversation panel height past 60vh”</span></div>
+          <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development</div>
+          <div class="botrow">
+            <span class="modelbl">Mode</span><div class="modeseg"><button>Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button class="on">Auto</button></div>
+            <span class="spacer"></span>
+            <button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button>
+          </div>
+          <details class="handoff"><summary><span class="chev">▶</span> Continue in your terminal</summary>
+            <div class="hopt"><div class="htitle">Take the keyboard</div><div class="hwhy">Jump into this live session in your terminal.</div><div class="hcmd"><code>tmux attach -t vc_bdd20ddf</code><button class="copybtn">⧉</button></div></div>
+          </details>
+        </div>
+        <div class="sess">
+          <div class="name">voice_claude</div>
+          <div class="statusline ready"><span class="dot ready"></span><span class="lead">Ready</span><span class="task">Waiting for your next instruction</span></div>
+          <div class="meta">CLI<span class="sep">·</span>opus<span class="sep">·</span>~/Development</div>
+          <div class="botrow"><span class="modelbl">Mode</span><div class="modeseg"><button class="on">Normal</button><button>Plan</button><button>Accept&nbsp;Edits</button><button>Auto</button></div><span class="spacer"></span><button class="iconbtn primary"><span class="gl">▷</span> Watch live</button><button class="iconbtn">Transcript</button></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".copybtn").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      const txt = b.previousElementSibling?.textContent || "";
+      navigator.clipboard?.writeText(txt).catch(() => {});
+      const old = b.textContent; b.textContent = "✓"; b.style.color = "var(--good)";
+      setTimeout(() => { b.textContent = old; b.style.color = ""; }, 1100);
+    });
+  });
+</script>
+</body>
+</html>
