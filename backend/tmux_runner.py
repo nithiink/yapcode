@@ -132,7 +132,7 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     # --- lifecycle --------------------------------------------------------
 
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+    def _preflight(self, cwd: str) -> str:
         if shutil.which("tmux") is None:
             raise ValueError("tmux is not installed (brew install tmux) — required for the CLI backend")
         if shutil.which("claude") is None:
@@ -140,10 +140,12 @@ class TmuxClaudeRunner(ClaudeRunner):
         cwd = os.path.realpath(os.path.expanduser(cwd))
         if not os.path.isdir(cwd):
             raise ValueError(f"not a directory: {cwd}")
+        return cwd
 
-        handle = str(uuid4())
-        s = _TmuxSession(handle, cwd, model or self._default_model)
-        s.mode = normalize_mode(mode)
+    async def _spawn(self, s: _TmuxSession, claude_id_arg: str) -> None:
+        """Create the detached tmux pane running `claude` (with our hooks wired via
+        --settings) and start tracking it. `claude_id_arg` is either
+        `--session-id <new uuid>` (fresh start) or `--resume <existing id>`."""
         os.makedirs(os.path.join(s.ctrl, "decisions"), exist_ok=True)
         self._write_settings(s)
         self._write_meta(s)
@@ -152,21 +154,52 @@ class TmuxClaudeRunner(ClaudeRunner):
         chrome = "--chrome " if ENABLE_CHROME else ""
         inner = (
             f"VC_CTRL={shlex.quote(s.ctrl)} "
-            f"claude --session-id {handle} --model {shlex.quote(s.model)} "
+            f"claude {claude_id_arg} --model {shlex.quote(s.model)} "
             f"--permission-mode {shlex.quote(s.mode)} "
             f"{chrome}--settings {shlex.quote(os.path.join(s.ctrl, 'settings.json'))}"
         )
         rc, out = await self._tmux(
-            "new-session", "-d", "-s", s.pane, "-c", cwd, "-x", "220", "-y", "50", inner
+            "new-session", "-d", "-s", s.pane, "-c", s.cwd, "-x", "220", "-y", "50", inner
         )
         if rc != 0:
             raise ValueError(f"failed to start tmux session: {out.strip()}")
 
-        self._sessions[handle] = s
+        # The session can be co-driven by a human `tmux attach` alongside the
+        # browser live-terminal. Size the window to the LARGEST attached client
+        # (not the default smallest) so a small terminal doesn't shrink the pane
+        # for everyone. Best-effort; ignore rc.
+        await self._tmux("set-option", "-t", s.pane, "window-size", "largest")
+        await self._tmux("set-window-option", "-t", s.pane, "aggressive-resize", "on")
+
+        self._sessions[s.handle] = s
         s._tail = asyncio.create_task(self._tail_events(s))
         await self._await_ready(s)
+
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+        cwd = self._preflight(cwd)
+        handle = str(uuid4())
+        s = _TmuxSession(handle, cwd, model or self._default_model)
+        s.mode = normalize_mode(mode)
+        await self._spawn(s, f"--session-id {handle}")
         log.info("tmux session %s started in %s (chrome=%s)", handle, cwd, ENABLE_CHROME)
         return handle
+
+    async def resume(self, session_id: str, cwd: str, model: str | None = None,
+                     mode: str = "default", name: str | None = None) -> str:
+        """Adopt an EXISTING Claude Code session (e.g. one a user started in their
+        own terminal) by reopening it in a hooked tmux pane via `claude --resume`.
+        Reuses the real session id as our handle, so it slots into the same
+        pane-naming / control-dir / rehydration machinery. Caller must ensure the
+        original process has exited (single writer per session)."""
+        if session_id in self._sessions:
+            return session_id  # already adopted/running — no duplicate pane
+        cwd = self._preflight(cwd)
+        s = _TmuxSession(session_id, cwd, model or self._default_model)
+        s.mode = normalize_mode(mode)
+        s.name = name
+        await self._spawn(s, f"--resume {shlex.quote(session_id)}")
+        log.info("tmux session %s resumed in %s (chrome=%s)", session_id, cwd, ENABLE_CHROME)
+        return session_id
 
     def _write_settings(self, s: _TmuxSession) -> None:
         py = shlex.quote(sys.executable)

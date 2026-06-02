@@ -125,6 +125,12 @@ class ClaudeRunner(ABC):
     async def send_keys(self, handle: str, items: list[dict]) -> dict[str, Any]:
         raise NotImplementedError("send_keys requires the CLI (tmux) backend")
 
+    # Reopen an existing Claude Code session in a hooked tmux pane (terminal →
+    # voice handoff). CLI-only; the SDK has no tmux pane to attach to.
+    async def resume(self, session_id: str, cwd: str, model: str | None = None,
+                     mode: str = "default", name: str | None = None) -> str:
+        raise NotImplementedError("resume requires the CLI (tmux) backend")
+
 
 class _Session:
     def __init__(self, handle: str, cwd: str, model: str):
