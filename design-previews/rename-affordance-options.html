@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Session rename affordance — options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1917; --panel: #211f1d; --panel2: #272421;
+    --ink: #e9e3d8; --mut: #928c81; --dim: #6f6a61;
+    --acc: #dd8a6a; --acc-ink: #241813;
+    --line: #322f2b; --line2: #3c3833;
+    --disp: "Anton", "Arial Narrow", sans-serif;
+    --body: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); margin: 0; padding: 44px 28px 90px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 30px; letter-spacing: .02em; margin: 0 0 6px; }
+  .sub { color: var(--mut); font-size: 14px; margin: 0 0 8px; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 0 0 30px; }
+
+  .opt { border: 1px solid var(--line2); border-radius: 14px; padding: 18px 18px 16px; margin-bottom: 18px; background: transparent; }
+  .opt .lbl { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 14px; letter-spacing: .03em; margin: 0 0 2px; }
+  .opt .lbl .tag { color: var(--acc); }
+  .opt .desc { color: var(--mut); font-size: 12px; margin: 0 0 14px; }
+
+  /* the session name base */
+  .namebtn { background: transparent; border: 0; padding: 0; margin: 0; color: var(--ink); cursor: pointer; font-family: var(--disp); text-transform: uppercase; font-size: 20px; letter-spacing: .01em; display: inline-flex; align-items: center; gap: 9px; line-height: 1; }
+  .penicon { display: inline-flex; align-items: center; color: var(--dim); }
+  .penicon svg { display: block; }
+
+  /* ---- A: click-to-edit, dotted underline on hover (no icon) ---- */
+  .a .namebtn { border-bottom: 1px dashed transparent; padding-bottom: 2px; transition: border-color .12s, color .12s; }
+  .a .namebtn:hover { border-bottom-color: var(--line2); color: var(--ink); }
+  .a .tip { font-size: 11px; color: var(--dim); margin-left: 10px; opacity: 0; transition: opacity .12s; letter-spacing: .04em; }
+  .a .namebtn:hover + .tip { opacity: 1; }
+
+  /* ---- B: hover-reveal pencil, thin stroke ---- */
+  .b .penicon { opacity: 0; transition: opacity .14s, color .12s; }
+  .b .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
+
+  /* ---- C: separated ghost icon-button (always visible) ---- */
+  .c .row { display: inline-flex; align-items: center; gap: 12px; }
+  .c .title { font-family: var(--disp); text-transform: uppercase; font-size: 20px; letter-spacing: .01em; line-height: 1; }
+  .c .iconbtn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel); color: var(--mut); display: inline-grid; place-items: center; cursor: pointer; transition: color .12s, border-color .12s, background .12s; }
+  .c .iconbtn:hover { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); background: color-mix(in srgb, var(--acc) 10%, transparent); }
+
+  /* ---- D: pencil-underline glyph, always faint, accent on hover ---- */
+  .d .penicon { opacity: .45; transition: opacity .12s, color .12s; }
+  .d .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
+
+  /* ---- E: "rename" text link on hover ---- */
+  .e .row { display: inline-flex; align-items: baseline; gap: 11px; }
+  .e .title { font-family: var(--disp); text-transform: uppercase; font-size: 20px; letter-spacing: .01em; line-height: 1; }
+  .e .renamelink { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); cursor: pointer; opacity: 0; transition: opacity .12s, color .12s; }
+  .e .row:hover .renamelink { opacity: 1; }
+  .e .renamelink:hover { color: var(--acc); }
+
+  /* ---- F: framed/box pencil, hover-reveal ---- */
+  .f .penicon { opacity: 0; transition: opacity .14s, color .12s; }
+  .f .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Session rename — affordance options</h1>
+  <p class="sub">How to signal “click to rename this session”. Hover each name to see the interaction.</p>
+  <p class="hint">Each is shown on the outlined session card, with the real Anton title. The whole name stays clickable to start renaming.</p>
+
+  <!-- A -->
+  <div class="opt a">
+    <div class="lbl"><span class="tag">A.</span> No icon — underline on hover</div>
+    <div class="desc">Cleanest. No glyph competing with the title; on hover the name gets a dashed underline and a tiny “click to rename” hint. The whole title is the target.</div>
+    <button class="namebtn">Front end changes to voice cloud</button><span class="tip">click to rename</span>
+  </div>
+
+  <!-- B -->
+  <div class="opt b">
+    <div class="lbl"><span class="tag">B.</span> Pencil on hover (thin)</div>
+    <div class="desc">A light pencil fades in only when you hover the name — no persistent clutter. Thinner stroke so it sits better next to the heavy caps.</div>
+    <button class="namebtn">Front end changes to voice cloud
+      <span class="penicon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>
+    </button>
+  </div>
+
+  <!-- C -->
+  <div class="opt c">
+    <div class="lbl"><span class="tag">C.</span> Separated icon button</div>
+    <div class="desc">A distinct, always-visible little button set apart from the title — unambiguously a control, never crowding the text. Clearest target, slightly more UI.</div>
+    <span class="row">
+      <span class="title">Front end changes to voice cloud</span>
+      <button class="iconbtn" title="Rename"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    </span>
+  </div>
+
+  <!-- D -->
+  <div class="opt d">
+    <div class="lbl"><span class="tag">D.</span> Pencil-line glyph, always faint</div>
+    <div class="desc">Like today but a different icon (pencil-with-line) that reads better at small size, kept faint by default and brightening on hover. Discoverable without a hover.</div>
+    <button class="namebtn">Front end changes to voice cloud
+      <span class="penicon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
+    </button>
+  </div>
+
+  <!-- E -->
+  <div class="opt e">
+    <div class="lbl"><span class="tag">E.</span> “Rename” text on hover</div>
+    <div class="desc">No icon at all — a small uppercase “rename” word appears beside the title on hover. Explicit and unmistakable; uses a word instead of a glyph.</div>
+    <span class="row">
+      <span class="title">Front end changes to voice cloud</span>
+      <span class="renamelink">rename</span>
+    </span>
+  </div>
+
+  <!-- F -->
+  <div class="opt f">
+    <div class="lbl"><span class="tag">F.</span> Framed pencil on hover</div>
+    <div class="desc">A boxed “edit document” icon that fades in on hover — heavier, more literal “edit” metaphor than the bare pencil.</div>
+    <button class="namebtn">Front end changes to voice cloud
+      <span class="penicon"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></span>
+    </button>
+  </div>
+
+</div>
+</body>
+</html>
