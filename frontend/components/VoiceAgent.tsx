@@ -311,15 +311,6 @@ const BACKEND_LABEL: Record<ClaudeBackend, string> = {
   sdk: "SDK",
 };
 
-const STATE_LABEL: Record<VoiceState, string> = {
-  idle: "Offline",
-  connecting: "Connecting",
-  listening: "Listening",
-  hearing: "Hearing you",
-  thinking: "Thinking",
-  speaking: "Speaking",
-};
-
 // A calm, coarse caption for the orb. The orb's volume animation conveys the
 // moment-to-moment activity, so we deliberately collapse listening/hearing/
 // speaking into one steady "Listening" label instead of churning the words.
@@ -380,6 +371,10 @@ export default function VoiceAgent() {
     new Map(),
   );
   const smoothedRef = useRef(0);
+  // Mirror `connected` into a ref so the rAF orb loop (a stable closure) can gate
+  // volume scaling without re-subscribing — the orb stays still until fully
+  // connected, even though the mic analyser attaches during the handshake.
+  const connectedRef = useRef(false);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Cost-log connection identity & snapshot timer. connectionId persists for one
@@ -778,6 +773,11 @@ export default function VoiceAgent() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
 
+  // Keep the orb-loop's connection gate current.
+  useEffect(() => {
+    connectedRef.current = connected;
+  }, [connected]);
+
   // Drive the orb's size from live audio volume. Both the user's mic and the
   // assistant's speech feed analysers on ONE shared AudioContext; each frame we
   // take the LOUDER of the two as the instantaneous target, then envelope-smooth
@@ -785,15 +785,19 @@ export default function VoiceAgent() {
   // instead of twitching frame-to-frame.
   const orbLoop = () => {
     let target = 0;
-    for (const { analyser, buf } of analysersRef.current.values()) {
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
+    // Only react to audio once fully connected; while connecting the analyser is
+    // already live (mic acquired) but the orb should stay at rest (target 0).
+    if (connectedRef.current) {
+      for (const { analyser, buf } of analysersRef.current.values()) {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
+        if (rms > target) target = rms; // loudest source wins
       }
-      const rms = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
-      if (rms > target) target = rms; // loudest source wins
     }
     // Envelope: snap up quickly, ease down slowly.
     const k = target > smoothedRef.current ? 0.35 : 0.08;
@@ -1060,7 +1064,10 @@ export default function VoiceAgent() {
           <span className="logo">Voice<span className="sep">·</span>Claude</span>
         </div>
         <div className="topmeta">
-          {connected ? STATE_LABEL[vstate] : "Offline"} · {PROVIDER_LABEL[provider]}
+          {/* Stable label: don't churn through listening/hearing/thinking/speaking —
+              the orb conveys live activity. Just connected / connecting / offline. */}
+          {connected ? "Listening" : vstate === "connecting" ? "Connecting" : "Offline"} ·{" "}
+          {PROVIDER_LABEL[provider]}
           {modelLabel ? ` · ${modelLabel}` : ""} · {BACKEND_LABEL[backend]}
           {backend === "cli" ? " · chrome" : ""}
           <br />
