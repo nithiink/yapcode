@@ -17,7 +17,6 @@
 // hand to onRemoteStream — the orb analyser then works unchanged.
 
 import {
-  COST_SAVER_BREVITY,
   RealtimeEvent,
   RealtimeOptions,
   ToolDef,
@@ -398,16 +397,13 @@ export class GeminiSession implements VoiceSession {
 
   // --- protocol -----------------------------------------------------------
   private sendSetup(model: string, voice: string, resumeHandle?: string) {
-    const cost = !!this.opts.costSaver;
-    const instructions = this.opts.instructions + (cost ? COST_SAVER_BREVITY : "");
     const setup: Record<string, unknown> = {
       model: model.startsWith("models/") ? model : `models/${model}`,
       generationConfig: {
         responseModalities: ["AUDIO"],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-        ...(cost ? { maxOutputTokens: 250 } : {}),
       },
-      systemInstruction: { parts: [{ text: instructions }] },
+      systemInstruction: { parts: [{ text: this.opts.instructions }] },
       tools: toGeminiTools(this.tools),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
@@ -419,7 +415,7 @@ export class GeminiSession implements VoiceSession {
       contextWindowCompression: { slidingWindow: {} },
     };
     const fnCount = (toGeminiTools(this.tools)[0] as any)?.functionDeclarations?.length || 0;
-    console.log(`[gemini] setup model=${setup.model} tools=${fnCount} costSaver=${cost}`);
+    console.log(`[gemini] setup model=${setup.model} tools=${fnCount}`);
     this.ws?.send(JSON.stringify({ setup }));
     this.opts.onEvent({ type: "status", status: "Setting up..." });
   }

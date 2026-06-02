@@ -90,13 +90,17 @@ body {
 .segbtn { font-family: var(--body); font-weight: 500; font-size: 14px; background: transparent; color: var(--mut); border: 0; padding: 8px 18px; border-radius: 999px; cursor: pointer; }
 .segbtn.on { background: var(--panel2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
 .segbtn:disabled { cursor: default; }
-.switch { display: inline-flex; align-items: center; gap: 9px; font-family: var(--body); font-weight: 500; font-size: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 9px 18px; cursor: pointer; }
-.switch .knob { width: 30px; height: 18px; border-radius: 999px; background: var(--dim); position: relative; transition: background 0.15s; }
-.switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink); transition: transform 0.15s; }
-.switch.on .knob { background: var(--acc); }
-.switch.on .knob::after { transform: translateX(12px); background: var(--acc-ink); }
-.switch:disabled { cursor: default; }
+/* Model picker: a labeled, segmented pill ("Model │ value ⌄") sized to match
+   the provider/backend toggle groups beside it. */
+.modelpick { display: inline-flex; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding-left: 16px; transition: border-color 0.15s ease; }
+.modelpick:hover, .modelpick:focus-within { border-color: var(--line2); }
+.modelpick.locked { opacity: 0.6; }
+.modelpick.locked .modelsel { cursor: default; }
+.modelpick-lab { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mut); white-space: nowrap; pointer-events: none; }
+.modelsel { font-family: var(--body); font-weight: 500; font-size: 14px; color: var(--ink); background-color: transparent; border: 0; border-left: 1px solid var(--line); margin-left: 14px; padding: 12px 34px 12px 15px; cursor: pointer; appearance: none; -webkit-appearance: none; outline: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23928c81' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
+.modelsel option { background: var(--panel2); color: var(--ink); }
 .togglehint { font-size: 11px; color: var(--dim); padding-top: 10px; }
+.togglehint.warn { color: var(--warn); }
 
 /* ---- permission card ---- */
 .permcard { margin: 26px 0 0; border: 1px solid rgba(216,176,122,0.4); border-radius: 14px; padding: 16px 18px; background: rgba(216,176,122,0.05); }

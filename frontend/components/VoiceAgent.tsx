@@ -202,6 +202,43 @@ type Sess = {
   queue?: { text: string; state: "running" | "queued" }[];
 };
 
+// Abbreviate the user's home dir to ~ for a compact path display.
+function abbrevHome(path: string): string {
+  return path.replace(/^\/(Users|home)\/[^/]+/, "~");
+}
+
+// Headline status for a session's status strip: a dot/accent class, a one-word
+// lead, and the current-task line — derived from the live work-pipeline so the
+// panel answers "what is it doing right now?" at a glance.
+function sessionStatus(s: Sess): { cls: string; lead: string; task: string } {
+  const running = s.queue?.find((q) => q.state === "running")?.text;
+  if (s.status === "needs_permission" || s.status === "needs_choice")
+    return { cls: "attn", lead: "Needs you", task: "Waiting for your approval" };
+  if (s.status === "error")
+    return { cls: "error", lead: "Error", task: "The last turn ran into an error" };
+  if (s.running)
+    return { cls: "working", lead: "Working", task: running || "Running a task…" };
+  return { cls: "ready", lead: "Ready", task: "Waiting for your next instruction" };
+}
+
+// Small copy-to-clipboard button with transient ✓ feedback.
+function CopyBtn({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className="copybtn"
+      title="Copy"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).catch(() => undefined);
+        setDone(true);
+        setTimeout(() => setDone(false), 1100);
+      }}
+    >
+      {done ? "✓" : "⧉"}
+    </button>
+  );
+}
+
 // One event on the unified pipeline bus (backend /debug/stream + browser posts).
 type DebugEvent = {
   seq: number;
@@ -228,23 +265,39 @@ type TxEvent =
   | { kind: "tool"; name: string; summary: string; risky: boolean }
   | { kind: "tool_result"; ok: boolean; text: string };
 
-// Per-provider connection params.
-function connectionParams(provider: VoiceProvider): Partial<RealtimeOptions> {
+// Realtime models the user can pick per provider, best/most-capable first.
+// Azure has none: its model is the server-side deployment (AZURE_OPENAI_DEPLOYMENT),
+// not a client choice — so no dropdown is shown for it.
+const MODEL_OPTIONS: Record<VoiceProvider, { value: string; label: string }[]> = {
+  azure: [],
+  openai: [
+    { value: "gpt-realtime-2", label: "gpt-realtime-2 · most capable" },
+    { value: "gpt-realtime-1.5", label: "gpt-realtime-1.5 · best audio" },
+    { value: "gpt-realtime-mini", label: "gpt-realtime-mini · economy" },
+  ],
+  gemini: [
+    { value: "gemini-3.1-flash-live-preview", label: "Gemini 3.1 Flash Live · best" },
+    { value: "gemini-2.5-flash-native-audio-preview-12-2025", label: "Gemini 2.5 Native Audio · economy" },
+  ],
+};
+
+// The default (first) model for a provider, or "" when it isn't client-selectable.
+const defaultModelFor = (provider: VoiceProvider): string =>
+  MODEL_OPTIONS[provider][0]?.value ?? "";
+
+// Per-provider connection params. `model` is the user's dropdown choice; for
+// Azure it's ignored (the deployment name is set server-side).
+function connectionParams(provider: VoiceProvider, model: string): Partial<RealtimeOptions> {
   if (provider === "gemini") {
-    return {
-      provider: "gemini",
-      model: "gemini-2.5-flash-native-audio-preview-12-2025",
-      voice: "Kore",
-    };
+    return { provider: "gemini", model, voice: "Kore" };
   }
   if (provider === "azure") {
     // Azure-hosted OpenAI realtime. The model is the Azure *deployment* name set
-    // server-side (AZURE_OPENAI_DEPLOYMENT) — point that at your gpt-realtime-mini
-    // deployment.
+    // server-side (AZURE_OPENAI_DEPLOYMENT), so the client doesn't pick one.
     return { provider: "azure", voice: "marin" };
   }
   // OpenAI direct — the "native" option, kept switchable alongside Azure.
-  return { provider: "openai", model: "gpt-realtime-mini", voice: "marin" };
+  return { provider: "openai", model, voice: "marin" };
 }
 
 const PROVIDER_LABEL: Record<VoiceProvider, string> = {
@@ -271,6 +324,11 @@ export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("azure");
   const [backend, setBackend] = useState<ClaudeBackend>("cli");
+  // The user's chosen model per provider; falls back to that provider's default.
+  const [modelByProvider, setModelByProvider] = useState<Partial<Record<VoiceProvider, string>>>({});
+  // Set true when the user tries to change the model while connected, so the UI
+  // can prompt them to disconnect first.
+  const [modelLockHint, setModelLockHint] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
   const [vstate, setVstate] = useState<VoiceState>("idle");
   const [muted, setMuted] = useState(false);
@@ -320,6 +378,16 @@ export default function VoiceAgent() {
   const costLogTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
+
+  // The model to connect with for the current provider. Validate the stored
+  // choice against the current option list so a model id that's since been
+  // removed from the API (or a stale localStorage value) falls back to the
+  // provider's default instead of leaving the select on a dead value.
+  const modelOptions = MODEL_OPTIONS[provider];
+  const storedModel = modelByProvider[provider];
+  const model = modelOptions.some((o) => o.value === storedModel)
+    ? (storedModel as string)
+    : defaultModelFor(provider);
 
   const filteredLog = debugEvents.filter((ev) => {
     if (logErrorsOnly && ev.kind !== "error") return false;
@@ -521,6 +589,15 @@ export default function VoiceAgent() {
     if (p === "azure" || p === "openai" || p === "gemini") setProvider(p);
     const b = localStorage.getItem("vc_backend");
     if (b === "cli" || b === "sdk") setBackend(b);
+    const m = localStorage.getItem("vc_models");
+    if (m) {
+      try {
+        const parsed = JSON.parse(m);
+        if (parsed && typeof parsed === "object") setModelByProvider(parsed);
+      } catch {
+        /* ignore malformed pref */
+      }
+    }
   }, []);
   useEffect(() => {
     localStorage.setItem("vc_provider", provider);
@@ -528,6 +605,13 @@ export default function VoiceAgent() {
   useEffect(() => {
     localStorage.setItem("vc_backend", backend);
   }, [backend]);
+  useEffect(() => {
+    localStorage.setItem("vc_models", JSON.stringify(modelByProvider));
+  }, [modelByProvider]);
+  // Clear the "disconnect to change model" prompt once the user disconnects.
+  useEffect(() => {
+    if (!connected) setModelLockHint(false);
+  }, [connected]);
 
   // Append one cost-log record to the backend's JSONL. Fire-and-forget — UI
   // never blocks on it and a failure here must not break the session.
@@ -772,7 +856,7 @@ export default function VoiceAgent() {
 
   const connect = async () => {
     setVstate("connecting");
-    const params = connectionParams(provider);
+    const params = connectionParams(provider, model);
     const opts: RealtimeOptions = {
       ...params,
       instructions: INSTRUCTIONS,
@@ -785,11 +869,11 @@ export default function VoiceAgent() {
     sessionRef.current = s;
     try {
       await s.start(audioRef.current!);
-      const model = s.activeModel || params.model || PROVIDER_LABEL[provider];
-      setModelLabel(model);
+      const activeModel = s.activeModel || params.model || PROVIDER_LABEL[provider];
+      setModelLabel(activeModel);
       setConnected(true);
       setMuted(false);
-      logDebug("info", `voice connected (${provider} · ${model})`, { provider, model, backend }, "voice", "user");
+      logDebug("info", `voice connected (${provider} · ${activeModel})`, { provider, model: activeModel, backend }, "voice", "user");
       refreshSessions();
       // Start the cost-log lifecycle: emit a connection_start record, hold a
       // context object updated by the voiceUsage/sessions effects, then snapshot
@@ -803,7 +887,7 @@ export default function VoiceAgent() {
         startedAt: Date.now(),
         provider,
         backend,
-        model,
+        model: activeModel,
         voiceUsage: null,
         sessions: [],
       };
@@ -811,7 +895,7 @@ export default function VoiceAgent() {
         kind: "connection_start",
         connectionId,
         provider,
-        model,
+        model: activeModel,
         backend,
       });
       if (costLogTimerRef.current) clearInterval(costLogTimerRef.current);
@@ -1014,9 +1098,47 @@ export default function VoiceAgent() {
               </button>
             ))}
           </div>
+          {modelOptions.length > 0 && (
+            <div
+              className={`modelpick ${connected ? "locked" : ""}`}
+              title={connected ? "Disconnect to change the model" : "Voice model"}
+            >
+              <span className="modelpick-lab">Model</span>
+              <select
+                className="modelsel"
+                aria-label="Model"
+                value={model}
+                // Locked once connected: block the open and prompt to disconnect.
+                onMouseDown={(e) => {
+                  if (connected) {
+                    e.preventDefault();
+                    setModelLockHint(true);
+                  }
+                }}
+                // Belt-and-suspenders for keyboard changes while focused + connected.
+                onChange={(e) => {
+                  if (connected) {
+                    setModelLockHint(true);
+                    return; // controlled value reverts; selection is rejected
+                  }
+                  setModelByProvider((prev) => ({ ...prev, [provider]: e.target.value }));
+                }}
+              >
+                {modelOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       {connected && (
-        <div className="togglehint">Disconnect to change provider or backend.</div>
+        <div className={`togglehint ${modelLockHint ? "warn" : ""}`}>
+          {modelLockHint
+            ? "You’re connected — disconnect first, then change the model."
+            : "Disconnect to change provider, backend, or model."}
+        </div>
       )}
 
       {pending && (
@@ -1080,9 +1202,11 @@ export default function VoiceAgent() {
               const cmd = s.session_id ? `cd ${s.cwd} && claude --resume ${s.session_id}` : null;
               const tmuxCmd = s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
               const open = openSession === s.handle;
+              const st = sessionStatus(s);
+              const queuedTurns = (s.queue || []).filter((q) => q.state === "queued");
               return (
                 <div key={s.handle} className="sess">
-                  <div className="head">
+                  <div className="shead">
                     {editing === s.handle ? (
                       <input
                         className="nameedit"
@@ -1104,30 +1228,69 @@ export default function VoiceAgent() {
                         {s.name || s.cwd.split("/").pop()} <span className="penicon">✎</span>
                       </button>
                     )}
-                    {s.backend && <span className="bk">{s.backend.toUpperCase()}</span>}
-                    <span className={`modechip ${s.mode || "default"}`}>
-                      {MODE_LABEL[s.mode || "default"] || "Normal"}
-                    </span>
-                    {s.running && (
-                      <span className="qchip run" title="A turn is executing right now">
-                        <span className="qdot" />
-                        working
-                      </span>
-                    )}
+                  </div>
+
+                  {/* Status strip — what the session is doing right now. */}
+                  <div className={`statusline ${st.cls}`}>
+                    <span className={`sdot ${st.cls}`} />
+                    <span className="lead">{st.lead}</span>
+                    <span className="task">{st.task}</span>
                     {(s.queued ?? 0) > 0 && (
-                      <span className="qchip queued" title="Turns waiting behind the current one">
-                        {s.queued} queued
+                      <span className="qmore" title="Turns waiting behind the current one">
+                        +{s.queued} queued
                       </span>
                     )}
                     {(s.pending ?? 0) > 0 && (
-                      <span className="qchip pending" title="Finished turns not yet narrated by the voice agent">
+                      <span className="qmore" title="Finished turns not yet narrated by the voice agent">
                         {s.pending} unread
                       </span>
                     )}
-                    <span className={`badge ${s.status}`}>{s.status}</span>
+                  </div>
+
+                  {queuedTurns.length > 0 && (
+                    <div className="queuelist">
+                      {queuedTurns.map((q, i) => (
+                        <div key={i} className="qitem queued">
+                          <span className="qmark">⋯ queued</span>
+                          <span className="qtext">{q.text || "(turn)"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {liveSession === s.handle && !liveFullscreen && (
+                    <div className="liveterm-box">
+                      <LiveTerminal handle={s.handle} />
+                    </div>
+                  )}
+
+                  <div className="path">
+                    {s.backend?.toUpperCase()} · {s.model}
+                    {s.cost_usd && s.cost_usd > 0 ? ` · $${s.cost_usd.toFixed(4)}` : ""} · {abbrevHome(s.cwd)}
+                  </div>
+
+                  {open && <div className="transcript">{renderTimeline(transcript)}</div>}
+
+                  <div className="botrow">
+                    <span className="modelbl">Mode</span>
+                    <div className="modeseg" role="group" aria-label="Permission mode">
+                      {MODES.map((m) => (
+                        <button
+                          key={m.id}
+                          className={(s.mode || "default") === m.id ? "on" : ""}
+                          title={m.title}
+                          disabled={modeBusy === s.handle}
+                          onClick={() => switchMode(s.handle, m.id)}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="spacer" />
                     {s.backend === "cli" && (
                       <button
-                        className="txtoggle"
+                        className={`txtoggle ${liveSession === s.handle ? "" : "primary"}`}
+                        title="Watch the live CLI in your browser"
                         onClick={() => {
                           if (liveSession === s.handle) {
                             setLiveSession(null);
@@ -1137,11 +1300,11 @@ export default function VoiceAgent() {
                           }
                         }}
                       >
-                        {liveSession === s.handle ? "Close" : "Live"}
+                        {liveSession === s.handle ? "Stop" : "▷ Watch live"}
                       </button>
                     )}
                     {liveSession === s.handle && (
-                      <button className="txtoggle" title="Fullscreen" onClick={() => setLiveFullscreen(true)}>
+                      <button className="txtoggle" title="Expand" onClick={() => setLiveFullscreen(true)}>
                         ⛶
                       </button>
                     )}
@@ -1149,57 +1312,38 @@ export default function VoiceAgent() {
                       {open ? "Hide" : "Transcript"}
                     </button>
                     {open && (
-                      <button className="txtoggle" title="Fullscreen" onClick={() => setFullscreen(true)}>
+                      <button className="txtoggle" title="Expand" onClick={() => setFullscreen(true)}>
                         ⛶
                       </button>
                     )}
                   </div>
-                  {liveSession === s.handle && !liveFullscreen && (
-                    <div className="liveterm-box">
-                      <LiveTerminal handle={s.handle} />
-                    </div>
-                  )}
-                  <div className="path">
-                    {s.model} · ${(s.cost_usd || 0).toFixed(4)} · {s.cwd}
-                  </div>
-                  {(s.queue?.length ?? 0) > 0 && (
-                    <div className="queuelist">
-                      {s.queue!.map((q, i) => (
-                        <div key={i} className={`qitem ${q.state}`}>
-                          <span className="qmark">{q.state === "running" ? "▶ now" : "⋯ queued"}</span>
-                          <span className="qtext">{q.text || "(turn)"}</span>
+
+                  {(tmuxCmd || cmd) && (
+                    <details className="handoff">
+                      <summary>
+                        <span className="chev">▶</span> Continue in your terminal
+                      </summary>
+                      {tmuxCmd && (
+                        <div className="hopt">
+                          <div className="htitle">Take the keyboard</div>
+                          <div className="hwhy">Jump into this live session in your own terminal.</div>
+                          <div className="hcmd">
+                            <code>{tmuxCmd}</code>
+                            <CopyBtn text={tmuxCmd} />
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="modebar" role="group" aria-label="Permission mode">
-                    <span className="modelbl">Mode</span>
-                    {MODES.map((m) => (
-                      <button
-                        key={m.id}
-                        className={`modepill ${(s.mode || "default") === m.id ? "on" : ""}`}
-                        title={m.title}
-                        disabled={modeBusy === s.handle}
-                        onClick={() => switchMode(s.handle, m.id)}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                  {open && <div className="transcript">{renderTimeline(transcript)}</div>}
-                  {tmuxCmd && (
-                    <div className="handoff">
-                      <span className="hlabel">attach</span>
-                      <code>{tmuxCmd}</code>
-                      <button onClick={() => navigator.clipboard.writeText(tmuxCmd)}>Copy</button>
-                    </div>
-                  )}
-                  {cmd && (
-                    <div className="handoff">
-                      <span className="hlabel">resume</span>
-                      <code>{cmd}</code>
-                      <button onClick={() => navigator.clipboard.writeText(cmd)}>Copy</button>
-                    </div>
+                      )}
+                      {cmd && (
+                        <div className="hopt">
+                          <div className="htitle">Reopen anywhere</div>
+                          <div className="hwhy">Start a fresh terminal from this session&apos;s history.</div>
+                          <div className="hcmd">
+                            <code>{cmd}</code>
+                            <CopyBtn text={cmd} />
+                          </div>
+                        </div>
+                      )}
+                    </details>
                   )}
                 </div>
               );

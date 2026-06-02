@@ -51,7 +51,6 @@ export type RealtimeOptions = {
   model?: string; // undefined => backend default for the provider
   voice?: string;
   instructions: string;
-  costSaver?: boolean;
   backend?: ClaudeBackend; // injected into start_session tool calls
   onEvent: (e: RealtimeEvent) => void;
   onRemoteStream?: (stream: MediaStream) => void; // drives the orb analyser
@@ -98,11 +97,6 @@ export function ratesFor(model?: string): Rates {
   if (model) for (const { match, rates } of RATE_TABLE) if (match.test(model)) return rates;
   return OPENAI_MINI_RATES;
 }
-
-// Appended to instructions when cost-saver is on (both providers).
-export const COST_SAVER_BREVITY =
-  "\n\nBREVITY MODE: keep every spoken reply to one or two short sentences. " +
-  "Never recite code or long lists aloud — summarize in a phrase. Be terse.";
 
 export function emptyUsage(): VoiceUsage {
   return {

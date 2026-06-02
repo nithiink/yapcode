@@ -9,7 +9,6 @@
 //     function_call_output item and ask the model to continue.
 
 import {
-  COST_SAVER_BREVITY,
   RealtimeEvent,
   RealtimeOptions,
   ToolDef,
@@ -22,16 +21,6 @@ import { authHeaders } from "./auth";
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
-// Cost-saver knobs. The dominant realtime cost is audio tokens, and the whole
-// conversation is re-sent every turn — so we cap response length, tighten VAD
-// to avoid spurious responses, and prune old turns to bound the re-billing.
-const COST_SAVER_MAX_OUTPUT_TOKENS = 200;
-// Was 6 — that's ~3 turns and dropped both prior user requests and the
-// [Claude update] system messages, making the model "forget" what was just
-// discussed and babble about stale Claude output. 30 keeps a useful window
-// without unbounded growth.
-const COST_SAVER_KEEP_ITEMS = 30;
-
 export class RealtimeSession implements VoiceSession {
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
@@ -43,8 +32,6 @@ export class RealtimeSession implements VoiceSession {
   private assistantText = new Map<string, string>();
   private userText = new Map<string, string>();
   private usage: VoiceUsage = emptyUsage();
-  // Ordered conversation item ids, for cost-saver context pruning.
-  private itemIds: string[] = [];
   // A response is in flight from response.created until response.done /
   // response.completed. injectUpdate fires response.create which errors with
   // "conversation_already_has_active_response" while one is active — the
@@ -184,40 +171,20 @@ export class RealtimeSession implements VoiceSession {
   }
 
   private configureSession() {
-    const cost = !!this.opts.costSaver;
-    // Tighter turn detection in cost mode: longer required silence + higher
-    // threshold => fewer spurious responses (each response costs audio tokens).
-    const turnDetection = cost
-      ? { type: "server_vad", threshold: 0.6, silence_duration_ms: 700 }
-      : { type: "server_vad" };
-
-    const instructions = this.opts.instructions + (cost ? COST_SAVER_BREVITY : "");
-
     const session: Record<string, unknown> = {
       type: "realtime",
-      instructions,
+      instructions: this.opts.instructions,
       tools: this.tools,
       tool_choice: "auto",
       audio: {
         // Input transcription stays off to avoid the separate per-minute
         // transcription charge — the model understands speech directly.
-        input: { turn_detection: turnDetection },
+        input: { turn_detection: { type: "server_vad" } },
         output: { voice: this.opts.voice },
       },
     };
-    if (cost) session.max_output_tokens = COST_SAVER_MAX_OUTPUT_TOKENS;
 
     this.send({ type: "session.update", session });
-  }
-
-  // Cost-saver: keep only the most recent items so the per-turn re-sent audio
-  // context (and its token bill) stays bounded instead of growing every turn.
-  private pruneContext() {
-    if (!this.opts.costSaver) return;
-    while (this.itemIds.length > COST_SAVER_KEEP_ITEMS) {
-      const id = this.itemIds.shift();
-      if (id) this.send({ type: "conversation.item.delete", item_id: id });
-    }
   }
 
   private async handleEvent(raw: string) {
@@ -230,10 +197,6 @@ export class RealtimeSession implements VoiceSession {
     const emit = this.opts.onEvent;
 
     switch (evt.type) {
-      case "conversation.item.created":
-        if (evt.item?.id) this.itemIds.push(evt.item.id);
-        break;
-
       // --- voice-state signals (drive the orb) ---
       case "input_audio_buffer.speech_started":
         emit({ type: "state", state: "hearing" });
@@ -295,7 +258,6 @@ export class RealtimeSession implements VoiceSession {
             await this.runFunctionCall(item);
           }
         }
-        this.pruneContext();
         // The response that just finished is no longer active. runFunctionCall
         // may have started a new one (sets responseActive=true via its own
         // response.create); if not, drain any [Claude update] system messages

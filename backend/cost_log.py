@@ -13,7 +13,7 @@ Record shapes (all wrapped in `{"ts": iso, ...}` by `append_cost_event`):
 
   {"kind": "connection_start",
    "connectionId": "...", "provider": "...", "model": "...",
-   "backend": "cli|sdk", "costSaver": bool}
+   "backend": "cli|sdk"}
 
   {"kind": "snapshot",
    "connectionId": "...", "provider": "...", "model": "...",
