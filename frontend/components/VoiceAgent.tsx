@@ -1312,7 +1312,31 @@ export default function VoiceAgent() {
 
                   {liveSession === s.handle && !liveFullscreen && (
                     <div className="liveterm-box">
-                      <LiveTerminal handle={s.handle} />
+                      <div className="liveterm-bar">
+                        <button
+                          className="ltbtn"
+                          title="Hide the live view (the session keeps running)"
+                          aria-label="Minimize live view"
+                          onClick={() => {
+                            setLiveSession(null);
+                            setLiveFullscreen(false);
+                          }}
+                        >
+                          ✕
+                        </button>
+                        <span className="ltbar-title">Live CLI</span>
+                        <button
+                          className="ltbtn right"
+                          title="Full screen"
+                          aria-label="Full screen live view"
+                          onClick={() => setLiveFullscreen(true)}
+                        >
+                          ⛶
+                        </button>
+                      </div>
+                      <div className="liveterm-inner">
+                        <LiveTerminal handle={s.handle} />
+                      </div>
                     </div>
                   )}
 
@@ -1341,29 +1365,13 @@ export default function VoiceAgent() {
                   </div>
 
                   <div className="actionrow">
-                    {s.backend === "cli" && (
+                    {s.backend === "cli" && liveSession !== s.handle && (
                       <button
-                        className={`txtoggle ${liveSession === s.handle ? "" : "primary"}`}
-                        title={
-                          liveSession === s.handle
-                            ? "Hide the live view (the session keeps running)"
-                            : "Watch the live CLI in your browser"
-                        }
-                        onClick={() => {
-                          if (liveSession === s.handle) {
-                            setLiveSession(null);
-                            setLiveFullscreen(false);
-                          } else {
-                            setLiveSession(s.handle);
-                          }
-                        }}
+                        className="txtoggle primary"
+                        title="Watch the live CLI in your browser"
+                        onClick={() => setLiveSession(s.handle)}
                       >
-                        {liveSession === s.handle ? "▾ Minimize" : "▷ Watch live"}
-                      </button>
-                    )}
-                    {liveSession === s.handle && (
-                      <button className="txtoggle" title="Expand" onClick={() => setLiveFullscreen(true)}>
-                        ⛶
+                        ▷ Watch live
                       </button>
                     )}
                     <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>

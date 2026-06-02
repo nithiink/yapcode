@@ -382,7 +382,15 @@ details.handoff:hover > summary { color: var(--mut); }
 .term-scrollbtns button { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--line2); background: rgba(33,31,29,0.85); color: var(--mut); font-size: 15px; line-height: 1; cursor: pointer; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 .term-scrollbtns button:hover { color: var(--ink); border-color: var(--acc); }
 .term-scrollbtns button:active { background: rgba(45,43,40,0.95); }
-.liveterm-box { height: 320px; margin: 11px 0; padding: 6px; background: #14130f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+/* Embedded live terminal: a header bar sits flush on top of the CLI (✕ close on
+   the left, ⛶ full screen on the right), with the terminal filling the rest. */
+.liveterm-box { height: 320px; margin: 11px 0; background: #14130f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.liveterm-bar { display: flex; align-items: center; gap: 9px; flex: none; padding: 5px 7px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); }
+.liveterm-bar .ltbar-title { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.ltbtn { background: transparent; border: 0; color: var(--mut); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 7px; border-radius: 6px; display: inline-grid; place-items: center; transition: color 0.12s, background 0.12s; }
+.ltbtn:hover { color: var(--ink); background: rgba(255,255,255,0.07); }
+.ltbtn.right { margin-left: auto; }
+.liveterm-inner { flex: 1; min-height: 0; padding: 6px; }
 
 /* ---- fullscreen overlay ---- */
 .tx-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(12,11,9,0.78); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; }
