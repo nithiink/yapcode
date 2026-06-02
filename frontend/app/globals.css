@@ -62,14 +62,15 @@ body {
 /* ---- orb ---- */
 .orbwrap { display: grid; place-items: center; }
 .orbinner { display: grid; place-items: center; }
-.orb-glow { position: absolute; width: 180px; height: 180px; border-radius: 50%; filter: blur(40px); opacity: 0.45; background: var(--acc); transform: scale(calc(1 + var(--amp, 0) * 0.5)); transition: transform 0.1s linear; }
+.orb-glow { position: absolute; width: 180px; height: 180px; border-radius: 50%; filter: blur(40px); opacity: 0.45; background: var(--acc); transform: scale(calc(1 + var(--amp, 0) * 0.5)); transition: transform 0.14s ease-out; }
 .orb {
   --amp: 0;
   position: relative; width: 180px; height: 180px; border-radius: 50%;
   background: radial-gradient(circle at 40% 36%, #f3d9c6, var(--acc) 55%, #8f4e36 100%);
   box-shadow: 0 26px 60px -26px rgba(221,138,106,0.6);
-  transform: scale(calc(1 + var(--amp, 0) * 0.28));
-  transition: transform 0.08s linear, filter 0.4s ease, opacity 0.4s ease;
+  transform: scale(calc(1 + var(--amp, 0) * 0.34));
+  /* Eased scale so volume changes glide; background cross-fades on state change. */
+  transition: transform 0.14s cubic-bezier(.22,.61,.36,1), background 0.5s ease, filter 0.4s ease, opacity 0.4s ease;
 }
 .orb::after { content: ""; position: absolute; inset: -20px; border-radius: 50%; border: 1px solid var(--line2); }
 .orb.idle { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; }
@@ -79,8 +80,10 @@ body {
 .orb.thinking { background: radial-gradient(circle at 40% 36%, #f0dcb3, var(--warn) 55%, #8a6a30 100%); }
 .orb.speaking { box-shadow: 0 26px 70px -22px rgba(221,138,106,0.8); }
 .orb.muted { filter: grayscale(0.6); opacity: 0.55; }
-@keyframes breathe { 0%, 100% { transform: scale(calc(1 + var(--amp, 0) * 0.28)); } 50% { transform: scale(calc(1.04 + var(--amp, 0) * 0.28)); } }
-.orbcap { text-align: center; margin-top: 30px; font-size: 14px; color: var(--mut); max-width: 26ch; }
+/* Gentle baseline pulse for idle-ish states; kept subtle (1.02) so the
+   volume-driven scale clearly dominates and the two don't visibly fight. */
+@keyframes breathe { 0%, 100% { transform: scale(calc(1 + var(--amp, 0) * 0.34)); } 50% { transform: scale(calc(1.02 + var(--amp, 0) * 0.34)); } }
+.orbcap { text-align: center; margin-top: 30px; font-size: 14px; color: var(--mut); max-width: 26ch; transition: opacity 0.3s ease, color 0.3s ease; }
 
 /* ---- controls row ---- */
 .controls-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end; padding: 24px 0; border-bottom: 1px solid var(--line); }

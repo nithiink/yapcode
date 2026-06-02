@@ -320,6 +320,17 @@ const STATE_LABEL: Record<VoiceState, string> = {
   speaking: "Speaking",
 };
 
+// A calm, coarse caption for the orb. The orb's volume animation conveys the
+// moment-to-moment activity, so we deliberately collapse listening/hearing/
+// speaking into one steady "Listening" label instead of churning the words.
+function orbCaption(connected: boolean, muted: boolean, vstate: VoiceState): string {
+  if (!connected || vstate === "idle") return "Offline";
+  if (muted) return "Muted";
+  if (vstate === "connecting") return "Connecting…";
+  if (vstate === "thinking") return "Thinking…"; // keep this one — it's a genuine longer pause
+  return "Listening";
+}
+
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("azure");
@@ -362,6 +373,13 @@ export default function VoiceAgent() {
   const glowRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  // Per-stream analysers feeding ONE smoothed --amp: keyed by source so the
+  // mic and the assistant audio can both drive the orb without clobbering
+  // each other. smoothed holds the envelope state across rAF frames.
+  const analysersRef = useRef<Map<"mic" | "remote", { analyser: AnalyserNode; buf: Uint8Array }>>(
+    new Map(),
+  );
+  const smoothedRef = useRef(0);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Cost-log connection identity & snapshot timer. connectionId persists for one
@@ -760,29 +778,49 @@ export default function VoiceAgent() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
 
-  // Drive the orb's size from the assistant audio amplitude.
-  const startAnalyser = (stream: MediaStream) => {
+  // Drive the orb's size from live audio volume. Both the user's mic and the
+  // assistant's speech feed analysers on ONE shared AudioContext; each frame we
+  // take the LOUDER of the two as the instantaneous target, then envelope-smooth
+  // it (fast attack, slow release) so the orb rises lively and falls gently
+  // instead of twitching frame-to-frame.
+  const orbLoop = () => {
+    let target = 0;
+    for (const { analyser, buf } of analysersRef.current.values()) {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
+      if (rms > target) target = rms; // loudest source wins
+    }
+    // Envelope: snap up quickly, ease down slowly.
+    const k = target > smoothedRef.current ? 0.35 : 0.08;
+    smoothedRef.current += (target - smoothedRef.current) * k;
+    const amp = smoothedRef.current.toFixed(3);
+    orbRef.current?.style.setProperty("--amp", amp);
+    glowRef.current?.style.setProperty("--amp", amp);
+    rafRef.current = requestAnimationFrame(orbLoop);
+  };
+
+  // Attach a stream (mic or remote) to the shared analyser graph. The context is
+  // created lazily on first attach and reused, so a second stream never clobbers
+  // the first. The rAF loop starts once and reads whatever analysers are present.
+  const attachStream = (stream: MediaStream, kind: "mic" | "remote") => {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
+      let ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === "closed") {
+        ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioCtxRef.current = ctx;
+      }
       const src = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       src.connect(analyser);
       const buf = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) {
-          const v = (buf[i] - 128) / 128;
-          sum += v * v;
-        }
-        const amp = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
-        orbRef.current?.style.setProperty("--amp", amp.toFixed(3));
-        glowRef.current?.style.setProperty("--amp", amp.toFixed(3));
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
+      analysersRef.current.set(kind, { analyser, buf });
+      if (rafRef.current == null) rafRef.current = requestAnimationFrame(orbLoop);
     } catch {
       /* analyser optional */
     }
@@ -791,6 +829,15 @@ export default function VoiceAgent() {
   const stopAnalyser = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
+    for (const { analyser } of analysersRef.current.values()) {
+      try {
+        analyser.disconnect();
+      } catch {
+        /* already gone */
+      }
+    }
+    analysersRef.current.clear();
+    smoothedRef.current = 0;
     audioCtxRef.current?.close().catch(() => undefined);
     audioCtxRef.current = null;
     orbRef.current?.style.setProperty("--amp", "0");
@@ -862,7 +909,8 @@ export default function VoiceAgent() {
       instructions: INSTRUCTIONS,
       backend,
       onEvent,
-      onRemoteStream: startAnalyser,
+      onRemoteStream: (s) => attachStream(s, "remote"),
+      onLocalStream: (s) => attachStream(s, "mic"),
     };
     const s: VoiceSession =
       provider === "gemini" ? new GeminiSession(opts) : new RealtimeSession(opts);
@@ -1068,7 +1116,7 @@ export default function VoiceAgent() {
             <div ref={glowRef} className="orb-glow" />
             <div ref={orbRef} className={`orb ${vstate} ${muted ? "muted" : ""}`} />
           </div>
-          <div className="orbcap">{muted ? "Muted" : STATE_LABEL[vstate]}</div>
+          <div className="orbcap">{orbCaption(connected, muted, vstate)}</div>
         </div>
       </section>
 

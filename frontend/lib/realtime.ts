@@ -89,6 +89,7 @@ export class RealtimeSession implements VoiceSession {
     };
 
     this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    this.opts.onLocalStream?.(this.localStream); // feed the user's mic to the orb analyser
     for (const track of this.localStream.getTracks()) pc.addTrack(track, this.localStream);
 
     const dc = pc.createDataChannel("oai-events");

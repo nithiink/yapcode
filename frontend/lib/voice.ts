@@ -54,6 +54,7 @@ export type RealtimeOptions = {
   backend?: ClaudeBackend; // injected into start_session tool calls
   onEvent: (e: RealtimeEvent) => void;
   onRemoteStream?: (stream: MediaStream) => void; // drives the orb analyser
+  onLocalStream?: (stream: MediaStream) => void; // drives the orb analyser from the user's mic
 };
 
 export interface VoiceSession {

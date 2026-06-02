@@ -305,6 +305,7 @@ export class GeminiSession implements VoiceSession {
   // --- audio setup --------------------------------------------------------
   private async initAudio() {
     this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    this.opts.onLocalStream?.(this.micStream); // feed the user's mic to the orb analyser
 
     this.inCtx = new AudioContext({ sampleRate: INPUT_RATE });
     const blobUrl = URL.createObjectURL(
