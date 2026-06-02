@@ -233,7 +233,10 @@ body {
 .tc-empty { color: var(--dim); font-size: 13px; }
 
 /* ---- sessions ---- */
-.sess { padding: 16px 0; border-bottom: 1px solid var(--line); }
+/* Each session is an outlined card so they're easy to tell apart (no more
+   hairline-divider runs). Transparent fill + a brighter hairline border; the
+   inner status strip keeps its --panel fill, so it reads inside the card. */
+.sess { background: transparent; border: 1px solid var(--line2); border-radius: 14px; padding: 15px 16px; }
 .sess .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .sess .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; }
 .sess .namebtn { background: transparent; border: 0; padding: 0; color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; letter-spacing: inherit; }
