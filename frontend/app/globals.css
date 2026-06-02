@@ -240,7 +240,7 @@ body {
 .sess .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .sess .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; }
 .sess .namebtn { background: transparent; border: 0; padding: 0; color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; letter-spacing: inherit; }
-.sess .namebtn .penicon { display: inline-flex; align-items: center; color: var(--dim); opacity: 0.4; transition: opacity 0.12s, color 0.12s; }
+.sess .namebtn .penicon { display: inline-flex; align-items: center; color: var(--dim); opacity: 0; transition: opacity 0.14s, color 0.12s; }
 .sess .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
 .sess .nameedit { font-family: var(--disp); text-transform: uppercase; font-size: 18px; color: var(--ink); background: var(--panel); border: 1px solid var(--acc); border-radius: 8px; padding: 2px 9px; outline: none; max-width: 240px; }
 .bk { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--mut); }

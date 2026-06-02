@@ -1227,9 +1227,10 @@ export default function VoiceAgent() {
                       >
                         {s.name || s.cwd.split("/").pop()}
                         <span className="penicon" aria-hidden>
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
-                            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+                            stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
                           </svg>
                         </span>
                       </button>
