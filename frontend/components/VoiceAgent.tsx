@@ -347,6 +347,12 @@ export default function VoiceAgent() {
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
+  // Conversation panel shows only the latest messages with the scrollbar hidden
+  // by default; the user can reveal the slim scrollbar on demand to review older
+  // history. convAtBottomRef tracks whether new messages should auto-scroll.
+  const [showScrollbar, setShowScrollbar] = useState(false);
+  const convScrollRef = useRef<HTMLDivElement | null>(null);
+  const convAtBottomRef = useRef(true);
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
@@ -772,6 +778,14 @@ export default function VoiceAgent() {
     const el = logScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
+
+  // Conversation: keep the panel pinned to the latest message unless the user
+  // has scrolled up to read older history.
+  useEffect(() => {
+    if (!convAtBottomRef.current) return;
+    const el = convScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [timeline]);
 
   // Keep the orb-loop's connection gate current.
   useEffect(() => {
@@ -1232,10 +1246,39 @@ export default function VoiceAgent() {
       <div className="panels">
         <div className="panel">
           <h2>
-            Conversation <span className="ct">live</span>
+            Conversation
+            <span className="convtools">
+              <button
+                className={`convbtn ${showScrollbar ? "on" : ""}`}
+                onClick={() => setShowScrollbar((v) => !v)}
+                title={showScrollbar ? "Hide the scrollbar" : "Show the scrollbar to review older messages"}
+              >
+                ▥ Scrollbar
+              </button>
+              <button
+                className="convjump"
+                onClick={() => {
+                  const el = convScrollRef.current;
+                  if (el) {
+                    el.scrollTop = el.scrollHeight;
+                    convAtBottomRef.current = true;
+                  }
+                }}
+                title="Jump to the latest message"
+              >
+                ↓ Latest
+              </button>
+            </span>
           </h2>
           <div className="rule" />
-          <div className="scroll conv-scroll">
+          <div
+            ref={convScrollRef}
+            onScroll={() => {
+              const el = convScrollRef.current;
+              if (el) convAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }}
+            className={`scroll conv-scroll fade ${showScrollbar ? "showbar" : "hidebar"}`}
+          >
             {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
