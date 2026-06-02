@@ -1225,7 +1225,13 @@ export default function VoiceAgent() {
                         title="Rename session"
                         onClick={() => startRename(s.handle, s.name || (s.cwd.split("/").pop() ?? ""))}
                       >
-                        {s.name || s.cwd.split("/").pop()} <span className="penicon">✎</span>
+                        {s.name || s.cwd.split("/").pop()}
+                        <span className="penicon" aria-hidden>
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+                            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                          </svg>
+                        </span>
                       </button>
                     )}
                   </div>
@@ -1271,7 +1277,7 @@ export default function VoiceAgent() {
 
                   {open && <div className="transcript">{renderTimeline(transcript)}</div>}
 
-                  <div className="botrow">
+                  <div className="moderow">
                     <span className="modelbl">Mode</span>
                     <div className="modeseg" role="group" aria-label="Permission mode">
                       {MODES.map((m) => (
@@ -1286,7 +1292,9 @@ export default function VoiceAgent() {
                         </button>
                       ))}
                     </div>
-                    <span className="spacer" />
+                  </div>
+
+                  <div className="actionrow">
                     {s.backend === "cli" && (
                       <button
                         className={`txtoggle ${liveSession === s.handle ? "" : "primary"}`}

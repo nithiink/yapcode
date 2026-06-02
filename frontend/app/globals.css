@@ -240,8 +240,8 @@ body {
 .sess .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .sess .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; }
 .sess .namebtn { background: transparent; border: 0; padding: 0; color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; letter-spacing: inherit; }
-.sess .namebtn .penicon { font-size: 12px; color: var(--dim); opacity: 0; transition: opacity 0.12s; }
-.sess .namebtn:hover .penicon { opacity: 1; }
+.sess .namebtn .penicon { display: inline-flex; align-items: center; color: var(--dim); opacity: 0.4; transition: opacity 0.12s, color 0.12s; }
+.sess .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
 .sess .nameedit { font-family: var(--disp); text-transform: uppercase; font-size: 18px; color: var(--ink); background: var(--panel); border: 1px solid var(--acc); border-radius: 8px; padding: 2px 9px; outline: none; max-width: 240px; }
 .bk { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--mut); }
 .badge { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--mut); margin-left: auto; }
@@ -266,9 +266,9 @@ body {
 .statusline .task { font-size: 12.5px; color: var(--mut); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusline .qmore { font-size: 10.5px; letter-spacing: 0.03em; color: var(--dim); flex: none; white-space: nowrap; }
 
-/* bottom row: mode control + spacer-pushed actions */
-.botrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.botrow .spacer { flex: 1; }
+/* mode control on its own row; session actions on a separate row below */
+.moderow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.actionrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
 /* segmented permission-mode control (single source of truth for mode) */
 .modeseg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
