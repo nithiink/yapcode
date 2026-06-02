@@ -170,7 +170,7 @@ function renderConversation(items: TimelineItem[]): ReactElement[] {
       i++;
     }
     if (run.length === 1) {
-      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" defaultOpen />);
+      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" />);
     } else {
       nodes.push(
         <div key={`tgroup-${run[0].id}`} className="tcall-group">
@@ -228,23 +228,19 @@ type TxEvent =
   | { kind: "tool"; name: string; summary: string; risky: boolean }
   | { kind: "tool_result"; ok: boolean; text: string };
 
-// Per-provider connection params. For OpenAI, cost-saver is applied via session
-// config (brevity/cap/pruning) rather than a different model; for Gemini it also
-// drops to the cheaper native-audio model.
-function connectionParams(provider: VoiceProvider, costSaver: boolean): Partial<RealtimeOptions> {
+// Per-provider connection params.
+function connectionParams(provider: VoiceProvider): Partial<RealtimeOptions> {
   if (provider === "gemini") {
     return {
       provider: "gemini",
-      model: costSaver
-        ? "gemini-2.5-flash-native-audio-preview-12-2025"
-        : "gemini-3.1-flash-live-preview",
+      model: "gemini-2.5-flash-native-audio-preview-12-2025",
       voice: "Kore",
     };
   }
   if (provider === "azure") {
     // Azure-hosted OpenAI realtime. The model is the Azure *deployment* name set
     // server-side (AZURE_OPENAI_DEPLOYMENT) — point that at your gpt-realtime-mini
-    // deployment. Cost-saver is applied via session config, not a model swap.
+    // deployment.
     return { provider: "azure", voice: "marin" };
   }
   // OpenAI direct — the "native" option, kept switchable alongside Azure.
@@ -275,7 +271,6 @@ export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("azure");
   const [backend, setBackend] = useState<ClaudeBackend>("cli");
-  const [costSaver, setCostSaver] = useState(true);
   const [modelLabel, setModelLabel] = useState("");
   const [vstate, setVstate] = useState<VoiceState>("idle");
   const [muted, setMuted] = useState(false);
@@ -319,7 +314,6 @@ export default function VoiceAgent() {
     provider: VoiceProvider;
     backend: ClaudeBackend;
     model: string;
-    costSaver: boolean;
     voiceUsage: VoiceUsage | null;
     sessions: Sess[];
   } | null>(null);
@@ -525,8 +519,6 @@ export default function VoiceAgent() {
   useEffect(() => {
     const p = localStorage.getItem("vc_provider");
     if (p === "azure" || p === "openai" || p === "gemini") setProvider(p);
-    const c = localStorage.getItem("vc_cost_saver");
-    if (c != null) setCostSaver(c === "1");
     const b = localStorage.getItem("vc_backend");
     if (b === "cli" || b === "sdk") setBackend(b);
   }, []);
@@ -536,9 +528,6 @@ export default function VoiceAgent() {
   useEffect(() => {
     localStorage.setItem("vc_backend", backend);
   }, [backend]);
-  useEffect(() => {
-    localStorage.setItem("vc_cost_saver", costSaver ? "1" : "0");
-  }, [costSaver]);
 
   // Append one cost-log record to the backend's JSONL. Fire-and-forget — UI
   // never blocks on it and a failure here must not break the session.
@@ -578,7 +567,6 @@ export default function VoiceAgent() {
       provider: ctx.provider,
       model: ctx.model,
       backend: ctx.backend,
-      costSaver: ctx.costSaver,
       voice: u
         ? {
             costUsd: u.costUsd,
@@ -784,11 +772,10 @@ export default function VoiceAgent() {
 
   const connect = async () => {
     setVstate("connecting");
-    const params = connectionParams(provider, costSaver);
+    const params = connectionParams(provider);
     const opts: RealtimeOptions = {
       ...params,
       instructions: INSTRUCTIONS,
-      costSaver,
       backend,
       onEvent,
       onRemoteStream: startAnalyser,
@@ -817,7 +804,6 @@ export default function VoiceAgent() {
         provider,
         backend,
         model,
-        costSaver,
         voiceUsage: null,
         sessions: [],
       };
@@ -827,7 +813,6 @@ export default function VoiceAgent() {
         provider,
         model,
         backend,
-        costSaver,
       });
       if (costLogTimerRef.current) clearInterval(costLogTimerRef.current);
       costLogTimerRef.current = setInterval(() => {
@@ -1029,18 +1014,9 @@ export default function VoiceAgent() {
               </button>
             ))}
           </div>
-          <button
-            className={`switch ${costSaver ? "on" : ""}`}
-            disabled={connected}
-            aria-pressed={costSaver}
-            onClick={() => setCostSaver((v) => !v)}
-          >
-            <span className="knob" />
-            Cost saver {costSaver ? "on" : "off"}
-          </button>
         </div>
       {connected && (
-        <div className="togglehint">Disconnect to change provider, backend, or cost saver.</div>
+        <div className="togglehint">Disconnect to change provider or backend.</div>
       )}
 
       {pending && (
