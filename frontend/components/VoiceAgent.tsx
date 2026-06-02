@@ -99,11 +99,26 @@ function PayloadView({ value }: { value: unknown }) {
 // One tool call as an expandable inline "action card": collapsed shows a status
 // dot, the mono tool name, and a human summary; expanded reveals structured
 // input/output.
-function ToolCall({ item, variant = "card" }: { item: ToolItem; variant?: "card" | "line" }) {
+function ToolCall({
+  item,
+  variant = "card",
+  defaultOpen = false,
+}: {
+  item: ToolItem;
+  variant?: "card" | "line";
+  defaultOpen?: boolean;
+}) {
   const state = toolState(item);
   const summary = toolSummary(item.name, item.args, item.result);
+  // Isolated calls open by default so their input/output is visible at a glance
+  // (controlled so the user can still collapse them and it survives re-renders).
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <details className={`tcall ${variant} ${state}`}>
+    <details
+      className={`tcall ${variant} ${state}`}
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary>
         <span className={`tc-dot ${state}`} aria-hidden />
         <span className="tc-name">{item.name}</span>
@@ -155,7 +170,7 @@ function renderConversation(items: TimelineItem[]): ReactElement[] {
       i++;
     }
     if (run.length === 1) {
-      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" />);
+      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" defaultOpen />);
     } else {
       nodes.push(
         <div key={`tgroup-${run[0].id}`} className="tcall-group">
