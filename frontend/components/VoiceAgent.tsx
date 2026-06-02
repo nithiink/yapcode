@@ -1098,9 +1098,6 @@ export default function VoiceAgent() {
                 {muted ? "🔇 Unmute" : "🎙 Mute"}
               </button>
             )}
-            <button className="textbtn" onClick={refreshSessions}>
-              Refresh
-            </button>
             <button
               className={`textbtn ${showDebug ? "on" : ""}`}
               onClick={() => setShowDebug((v) => !v)}
