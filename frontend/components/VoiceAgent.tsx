@@ -1344,7 +1344,11 @@ export default function VoiceAgent() {
                     {s.backend === "cli" && (
                       <button
                         className={`txtoggle ${liveSession === s.handle ? "" : "primary"}`}
-                        title="Watch the live CLI in your browser"
+                        title={
+                          liveSession === s.handle
+                            ? "Hide the live view (the session keeps running)"
+                            : "Watch the live CLI in your browser"
+                        }
                         onClick={() => {
                           if (liveSession === s.handle) {
                             setLiveSession(null);
@@ -1354,7 +1358,7 @@ export default function VoiceAgent() {
                           }
                         }}
                       >
-                        {liveSession === s.handle ? "Stop" : "▷ Watch live"}
+                        {liveSession === s.handle ? "▾ Minimize" : "▷ Watch live"}
                       </button>
                     )}
                     {liveSession === s.handle && (
