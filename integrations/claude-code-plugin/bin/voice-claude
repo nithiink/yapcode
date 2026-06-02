@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# voice-claude — start a Claude Code session that is VOICE-READY from the start,
+# then attach your terminal to it. Use this instead of `claude` when you want the
+# voice agent to be able to co-drive the session.
+#
+# Why a launcher: voice-claude's hooks (permission prompts, turn-complete signals)
+# can only be installed when `claude` is launched. Starting the session through the
+# backend wires those hooks in; this script then drops you into the same tmux
+# session so you type normally — and /voice-handoff can later flip voice on with no
+# restart.
+#
+# Config (env): VOICE_CLAUDE_URL (default http://localhost:8000), VOICE_CLAUDE_TOKEN.
+# Usage: voice-claude [project_dir]   (defaults to the current directory)
+set -euo pipefail
+
+URL="${VOICE_CLAUDE_URL:-http://localhost:8000}"
+CWD="${1:-$(pwd)}"
+
+hdr=(-H "Content-Type: application/json")
+[ -n "${VOICE_CLAUDE_TOKEN:-}" ] && hdr+=(-H "X-VC-Token: ${VOICE_CLAUDE_TOKEN}")
+
+resp="$(curl -fsS -X POST "$URL/tools/execute" "${hdr[@]}" \
+  -d "{\"name\":\"start_session\",\"arguments\":{\"project_path\":\"$CWD\"}}")" || {
+  echo "voice-claude: couldn't reach the backend at $URL (is it running?)" >&2
+  exit 1
+}
+
+sid="$(printf '%s' "$resp" | python3 -c \
+  'import sys,json; d=json.load(sys.stdin); r=d.get("result",d); print(r.get("session_id",""))' \
+  2>/dev/null || true)"
+
+if [ -z "$sid" ]; then
+  echo "voice-claude: failed to start session: $resp" >&2
+  exit 1
+fi
+
+pane="vc_${sid:0:8}"
+echo "voice-claude: session ready ($pane). Open the voice app to talk; attaching now…" >&2
+exec tmux attach -t "$pane"
