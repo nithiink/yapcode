@@ -26,6 +26,24 @@ function fmtPayload(v: unknown): string {
   }
 }
 
+// The backend stamps activity-log timestamps as UTC ISO strings ("…Z"). Show
+// them in the viewer's own timezone: parse to a Date and format a compact local
+// clock (HH:MM:SS.mmm). Falls back to the raw UTC time slice if unparseable.
+function fmtLogTime(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts.slice(11, 23);
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+// Full local date-time (incl. timezone) for the timestamp's hover title, so the
+// date — omitted from the compact row — is still available on demand.
+function fmtLogTimeTitle(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" });
+}
+
 type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
 // A flat object (all primitive values) renders as an aligned key/value grid;
@@ -1519,7 +1537,7 @@ export default function VoiceAgent() {
                 className={`logrow k-${ev.kind}`}
                 title={ev.detail ? JSON.stringify(ev.detail).slice(0, 800) : undefined}
               >
-                <span className="lt">{ev.ts.slice(11, 23)}</span>
+                <span className="lt" title={fmtLogTimeTitle(ev.ts)}>{fmtLogTime(ev.ts)}</span>
                 <span className="lhop">
                   <span className={`htag ${ev.source}`}>{ev.source}</span>
                   <span className="harr">→</span>
