@@ -54,6 +54,65 @@ def _slabel(s: "_TmuxSession") -> str:
     return s.name or s.handle[:8]
 
 
+# tmux's canonical key names. `tmux send-keys <name>` (without -l) emits the key's
+# control sequence ONLY for names it recognizes; ANY unrecognized argument is
+# silently typed as literal text. So `send-keys Backspace` types the word
+# "Backspace" instead of erasing — the exact failure mode behind the send_keys
+# bug. We normalize model-supplied names against the canonical set + an alias
+# table, and reject clearly-bad names so they can't slip through as literal text.
+_TMUX_KEYS = {
+    "Up", "Down", "Left", "Right", "Escape", "Enter", "Space", "Tab", "BTab",
+    "BSpace", "Home", "End", "PageUp", "PageDown", "PPage", "NPage", "Insert",
+    "IC", "Delete", "DC",
+    *(f"F{n}" for n in range(1, 13)),
+}
+# Case-insensitive aliases → canonical tmux name. Covers the DOM/natural names
+# the model tends to emit (verified-literal in tmux 3.6: Backspace, ArrowUp, Esc,
+# Return all type verbatim without this map).
+_KEY_ALIASES = {
+    "esc": "Escape", "escape": "Escape",
+    "return": "Enter", "ret": "Enter", "cr": "Enter", "newline": "Enter",
+    "backspace": "BSpace", "bs": "BSpace", "back": "BSpace",
+    "arrowup": "Up", "arrowdown": "Down", "arrowleft": "Left", "arrowright": "Right",
+    "uparrow": "Up", "downarrow": "Down", "leftarrow": "Left", "rightarrow": "Right",
+    "spacebar": "Space", "spc": "Space",
+    "pgup": "PageUp", "pgdn": "PageDown", "pagedown": "PageDown", "pageup": "PageUp",
+    "delete": "Delete", "del": "Delete", "ins": "Insert", "insert": "Insert",
+    "home": "Home", "end": "End",
+    "tab": "Tab", "backtab": "BTab", "shifttab": "BTab", "shift-tab": "BTab", "btab": "BTab",
+}
+# A modifier chord (C-c, M-x, S-Up, C-M-Left) or function key — pass through as-is.
+_CHORD_RE = re.compile(r"^[CMS](-[CMS])*-\S+$")
+
+
+def _normalize_key(key: str) -> str:
+    """Map a model-supplied key name to a tmux key tmux will actually interpret.
+
+    Raises ValueError for names tmux would silently type as literal text, so the
+    caller surfaces an error instead of garbage landing in the terminal. Chords
+    (C-c, S-Up, ...) and single characters pass through untouched."""
+    k = key.strip()
+    if not k:
+        raise ValueError("empty key name")
+    if len(k) == 1 or _CHORD_RE.match(k):
+        return k  # single char or modifier chord — tmux handles directly
+    if k in _TMUX_KEYS:
+        return k  # already canonical
+    low = k.lower()
+    if low in _KEY_ALIASES:
+        return _KEY_ALIASES[low]
+    # Tolerate canonical names given in the wrong case (e.g. "escape", "up").
+    for canon in _TMUX_KEYS:
+        if canon.lower() == low:
+            return canon
+    raise ValueError(
+        f"unknown key name {key!r} — tmux would type it as literal text. "
+        f"Use a tmux key name (e.g. Escape, Enter, Up/Down/Left/Right, BSpace, "
+        f"Tab, BTab, Space, Delete, PageUp) or a chord (C-c), "
+        f"or pass it as {{\"text\": {key!r}}} to type it literally."
+    )
+
+
 def _task_label(t: asyncio.Task) -> str:
     """The message text a queued/running turn carries (set via task.set_name at
     enqueue). Empty for an unlabeled task (asyncio's default "Task-N")."""
@@ -675,6 +734,17 @@ class TmuxClaudeRunner(ClaudeRunner):
         s = self._get(handle)
         if not await self._alive(s):
             return {"ok": False, "error": "session is not running"}
+        # Resolve every {"key": ...} to a name tmux will actually interpret BEFORE
+        # sending anything — otherwise an unknown name (e.g. "Backspace") gets typed
+        # as literal text, and a mid-sequence failure leaves the pane half-driven.
+        try:
+            normalized = [
+                {**it, "key": _normalize_key(it["key"])} if it.get("key") else it
+                for it in items
+            ]
+        except ValueError as e:
+            return {"ok": False, "error": str(e), "screen": await self.peek(handle)}
+        items = normalized
         summary = " ".join(
             it["key"] if it.get("key") else f"type:{it.get('text', '')!r}"
             for it in items
