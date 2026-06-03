@@ -236,6 +236,17 @@ gated by two independent layers:
    The browser supplies the token once via
    `https://<host>:3000/#vc_token=<token>` (persisted to `localStorage`); the
    Next `/api/*` routes forward it; the WebSocket/SSE pass it as a query param.
+
+   The frontend dev server (`npm run dev`) binds **loopback only**
+   (`-H 127.0.0.1`), so in the zero-config localhost mode the `/api/*` proxy is
+   not reachable from the LAN and cannot relay a remote caller into the
+   loopback-trusted backend. LAN/phone access uses `npm run dev:network`, which
+   binds `0.0.0.0` and pairs with `run-network.sh`'s mandatory token. The
+   `/api/*` routes also reject **cross-site** requests (`Sec-Fetch-Site`, with an
+   `Origin`/`Host` fallback), so a malicious page open in your browser can't
+   drive the backend via the proxy (drive-by CSRF) — the proxy is the boundary a
+   browser reaches, and it enforces same-origin there.
+
    Generate a token with:
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(32))"

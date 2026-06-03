@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { forwardAuth } from "@/lib/proxyAuth";
+import { forwardAuth, blockCrossSite } from "@/lib/proxyAuth";
 
 const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -7,6 +7,8 @@ const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 export const maxDuration = 800;
 
 export async function POST(req: NextRequest) {
+  const blocked = blockCrossSite(req);
+  if (blocked) return blocked;
   const body = await req.text();
   const resp = await fetch(`${BACKEND}/tools/execute`, {
     method: "POST",
