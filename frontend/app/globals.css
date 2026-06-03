@@ -211,11 +211,13 @@ body {
 .conv-wrap.more-below::after { opacity: 1; }
 
 /* The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
-   the thumb is transparent at rest and only paints in --line2/--mut while the
-   user is scrolling. A JS scroll handler toggles the .scrolling class, then
-   removes it after a short idle, so the bar appears on scroll and fades out. */
+   the thumb is transparent at rest and only paints in --line2/--mut when the
+   conversation section is hovered, or while the user is actively scrolling (a JS
+   handler toggles the .scrolling class, then clears it after a short idle). So
+   the bar appears on hover/scroll and fades out otherwise. */
 .conv-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 0.3s ease; }
-.conv-scroll.scrolling { scrollbar-color: var(--line2) transparent; }
+.conv-scroll.scrolling,
+.conv-scroll:hover { scrollbar-color: var(--line2) transparent; }
 .conv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .conv-scroll::-webkit-scrollbar-track { background: transparent; }
 .conv-scroll::-webkit-scrollbar-thumb {
@@ -225,8 +227,9 @@ body {
   background-clip: padding-box;
   transition: background 0.3s ease;
 }
-.conv-scroll.scrolling::-webkit-scrollbar-thumb { background: var(--line2); background-clip: padding-box; }
-.conv-scroll.scrolling:hover::-webkit-scrollbar-thumb { background: var(--mut); background-clip: padding-box; }
+.conv-scroll.scrolling::-webkit-scrollbar-thumb,
+.conv-scroll:hover::-webkit-scrollbar-thumb { background: var(--line2); background-clip: padding-box; }
+.conv-scroll::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
 
 .empty { color: var(--dim); font-size: 14px; padding: 6px 2px; }
 
