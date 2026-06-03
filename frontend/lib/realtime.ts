@@ -61,6 +61,7 @@ export class RealtimeSession implements VoiceSession {
   async start(audioEl: HTMLAudioElement): Promise<void> {
     this.audioEl = audioEl;
     const emit = this.opts.onEvent;
+    this.trace(`start provider=${this.opts.provider} model=${this.opts.model}`);
     emit({ type: "status", status: "Minting token..." });
 
     const [sessionRes, toolsRes] = await Promise.all([
@@ -209,6 +210,9 @@ export class RealtimeSession implements VoiceSession {
       return;
     }
     const emit = this.opts.onEvent;
+    // Trace every inbound event type so the Azure flow is fully visible. Skip
+    // the high-frequency delta events to keep the feed readable.
+    if (!/\.delta$/.test(evt.type)) this.trace(`evt ${evt.type}`);
 
     switch (evt.type) {
       // Function calls can be streamed here as soon as their arguments finish,
