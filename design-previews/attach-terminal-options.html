@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Attach-to-terminal — UI options while watching live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1917; --panel: #211f1d; --panel2: #272421;
+    --ink: #e9e3d8; --mut: #928c81; --dim: #6f6a61;
+    --acc: #dd8a6a; --acc-ink: #241813;
+    --line: #322f2b; --line2: #3c3833;
+    --good: #9cc7a4;
+    --term: #14130f;
+    --disp: "Anton", "Arial Narrow", sans-serif;
+    --body: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); margin: 0; padding: 46px 28px 110px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 32px; letter-spacing: .02em; margin: 0 0 8px; }
+  .sub { color: var(--mut); font-size: 14px; margin: 0 0 4px; line-height: 1.5; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 0 0 14px; line-height: 1.5; }
+  .ctx { color: var(--dim); font-size: 12.5px; margin: 0 0 34px; line-height: 1.6; border-left: 2px solid var(--line2); padding: 4px 0 4px 14px; }
+  .ctx code { font-family: var(--mono); color: var(--mut); font-size: 12px; }
+
+  .opt { border: 1px solid var(--line2); border-radius: 16px; padding: 22px 22px 24px; margin-bottom: 26px; background: color-mix(in srgb, var(--panel) 55%, transparent); }
+  .opt > .lbl { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 16px; letter-spacing: .03em; margin: 0 0 3px; }
+  .opt > .lbl .tag { color: var(--acc); }
+  .opt > .desc { color: var(--mut); font-size: 13px; margin: 0 0 18px; line-height: 1.55; max-width: 70ch; }
+  .opt .pros { color: var(--dim); font-size: 12px; margin: 14px 0 0; line-height: 1.5; }
+  .opt .pros b { color: var(--mut); font-weight: 600; }
+
+  .modetag { display: inline-block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line2); border-radius: 999px; padding: 2px 9px; margin-left: 8px; vertical-align: middle; }
+
+  /* ---------- shared replicas of the real components ---------- */
+
+  /* inline live box (matches .liveterm-box) */
+  .liveterm-box { width: 100%; max-width: 560px; height: 300px; background: var(--term); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .liveterm-bar { display: flex; align-items: center; gap: 9px; flex: none; padding: 5px 7px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); }
+  .liveterm-bar .ltbar-title { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  .ltbtn { background: transparent; border: 0; color: var(--mut); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 7px; border-radius: 6px; display: inline-grid; place-items: center; transition: color 0.12s, background 0.12s; font-family: inherit; }
+  .ltbtn:hover { color: var(--ink); background: rgba(255,255,255,0.07); }
+  .ltbtn.right { margin-left: auto; }
+  .liveterm-inner { flex: 1; min-height: 0; padding: 10px 12px; overflow: hidden; position: relative; }
+
+  /* faux terminal text */
+  .term-text { font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: #c7d0c2; white-space: pre; }
+  .term-text .dim { color: #5f6b5c; }
+  .term-text .acc { color: var(--acc); }
+  .term-text .cur { background: #c7d0c2; color: var(--term); }
+
+  /* command chip used in several options (matches .hcmd) */
+  .cmdrow { display: flex; align-items: center; gap: 8px; }
+  .cmdrow code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; background: var(--panel); border: 1px solid var(--line); padding: 7px 9px; border-radius: 8px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .copybtn { display: inline-grid; place-items: center; background: var(--panel); border: 1px solid var(--line); color: var(--mut); cursor: pointer; padding: 7px; border-radius: 8px; line-height: 0; flex: none; transition: color 0.12s, border-color 0.12s; }
+  .copybtn svg { display: block; }
+  .copybtn:hover { color: var(--acc); border-color: var(--line2); }
+  .copybtn.done { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+
+  /* fullscreen modal replica (matches .tx-modal, scaled down) */
+  .modal { width: 100%; max-width: 640px; height: 360px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); overflow: hidden; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-family: var(--disp); text-transform: uppercase; font-size: 13px; letter-spacing: 0.04em; color: var(--mut); }
+  .modal-head .right { display: flex; align-items: center; gap: 10px; }
+  .modal-body { flex: 1; overflow: hidden; padding: 10px 12px; background: var(--term); position: relative; }
+  .txtoggle { background: transparent; border: 1px solid var(--line); color: var(--mut); font: inherit; font-size: 11.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; font-family: var(--body); }
+  .txtoggle:hover { color: var(--ink); border-color: var(--line2); }
+
+  /* generic accent button used across ideas */
+  .attachbtn { display: inline-flex; align-items: center; gap: 7px; background: color-mix(in srgb, var(--acc) 13%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 55%, var(--line)); color: var(--acc); font-family: var(--body); font-size: 11.5px; letter-spacing: .02em; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; transition: background 0.12s, border-color 0.12s; }
+  .attachbtn:hover { background: color-mix(in srgb, var(--acc) 22%, transparent); }
+  .attachbtn .kbd { font-size: 13px; line-height: 1; }
+  .attachbtn.small { font-size: 10.5px; padding: 3px 9px; gap: 5px; }
+
+  /* ===== A: header-bar attach pill ===== */
+  .a .liveterm-bar { gap: 7px; }
+
+  /* popover (shared, A/F/C) */
+  .pop { margin-top: 12px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 14px; max-width: 460px; }
+  .pop .pt { font-size: 12.5px; color: var(--ink); font-weight: 600; margin: 0 0 2px; }
+  .pop .pw { font-size: 11.5px; color: var(--mut); margin: 0 0 10px; line-height: 1.5; }
+
+  /* ===== B: command strip footer ===== */
+  .b .strip { display: flex; align-items: center; gap: 12px; flex: none; padding: 9px 11px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--acc) 7%, var(--term)); }
+  .b .strip .lead { font-size: 11.5px; color: var(--mut); display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .b .strip .lead .kbd { color: var(--acc); font-size: 14px; }
+  .b .strip code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ===== C: floating chip over terminal ===== */
+  .c .liveterm-inner { padding: 10px 12px; }
+  .floatchip { position: absolute; right: 10px; top: 10px; z-index: 6; }
+  .floatchip .attachbtn { background: rgba(33,31,29,0.86); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+  .floatcard { position: absolute; right: 10px; top: 48px; z-index: 7; width: 300px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 13px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); }
+  .floatcard .pt { font-size: 12.5px; color: var(--ink); font-weight: 600; margin: 0 0 2px; }
+  .floatcard .pw { font-size: 11px; color: var(--mut); margin: 0 0 10px; line-height: 1.5; }
+
+  /* ===== D: read-only callout banner ===== */
+  .d .banner { display: flex; align-items: center; gap: 12px; flex: none; padding: 9px 12px; background: color-mix(in srgb, var(--acc) 10%, var(--term)); border-bottom: 1px solid color-mix(in srgb, var(--acc) 30%, var(--line)); }
+  .d .banner .ico { width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--acc) 20%, transparent); color: var(--acc); font-size: 14px; }
+  .d .banner .txt { flex: 1; min-width: 0; font-size: 11.5px; color: var(--mut); line-height: 1.4; }
+  .d .banner .txt b { color: var(--ink); font-weight: 600; }
+  .d .banner .dismiss { background: transparent; border: 0; color: var(--dim); cursor: pointer; font-size: 14px; padding: 4px 6px; border-radius: 6px; line-height: 1; }
+  .d .banner .dismiss:hover { color: var(--mut); background: rgba(255,255,255,0.05); }
+
+  /* ===== E: split dual primary actions ===== */
+  .actionrow { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .e .txtoggle.primary { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); display: inline-flex; align-items: center; gap: 6px; }
+  .e .txtoggle.primary:hover { background: color-mix(in srgb, var(--acc) 12%, transparent); }
+  .e .twolabel { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.1; }
+  .e .twolabel .small { font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  .e .vline { width: 1px; height: 22px; background: var(--line2); }
+
+  /* ===== G: read-only badge that expands ===== */
+  .robadge { display: inline-flex; align-items: center; gap: 6px; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--acc); border: 1px solid color-mix(in srgb, var(--acc) 45%, var(--line)); background: color-mix(in srgb, var(--acc) 10%, transparent); border-radius: 999px; padding: 3px 9px; cursor: pointer; transition: background 0.12s; font-family: var(--body); }
+  .robadge:hover { background: color-mix(in srgb, var(--acc) 18%, transparent); }
+  .robadge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--acc); }
+
+  .stagelabel { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin: 0 0 9px; }
+  .twoup { display: grid; grid-template-columns: 1fr; gap: 22px; }
+  .recommend { display: inline-block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--good); border: 1px solid color-mix(in srgb, var(--good) 45%, var(--line)); border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Attach to terminal — options</h1>
+  <p class="sub">While a user is <b>watching the live CLI</b> (inline in the session card, or in the fullscreen overlay), give them a prominent, unmistakable way to <b>attach to that same session in their own terminal</b> and take the keyboard.</p>
+  <p class="hint">Hover/click the controls below — copy buttons, popovers, banners and dismiss buttons are live so you can feel each interaction.</p>
+  <p class="ctx">Today the attach command lives only in a <i>collapsed</i> “Continue in your terminal” disclosure under the card — easy to miss. The command is <code>tmux attach -t vc_3f7a9c21</code>. Every idea below surfaces exactly that, but more visibly and always-while-watching. Each is shown on a faithful replica of the real live view.</p>
+
+  <!-- ============ A ============ -->
+  <div class="opt a">
+    <div class="lbl"><span class="tag">A.</span> Attach pill in the live header bar <span class="modetag">inline + fullscreen</span></div>
+    <div class="desc">Add a “⌨ Attach” pill right into the header bar that already carries Minimize / Fullscreen. It sits next to the title, always visible the whole time you’re watching. Clicking it drops a small popover with the exact command + copy. Zero new chrome, lives where your eyes already are.</div>
+
+    <div class="liveterm-box">
+      <div class="liveterm-bar">
+        <button class="ltbtn" title="Minimize">✕</button>
+        <span class="ltbar-title">Live CLI</span>
+        <button class="attachbtn small" style="margin-left:auto" onclick="togglePop('popA')"><span class="kbd">⌨</span> Attach in terminal</button>
+        <button class="ltbtn" title="Fullscreen">⛶</button>
+      </div>
+      <div class="liveterm-inner">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Reading <span class="dim">src/app/page.tsx</span>
+<span class="acc">●</span> Editing component layout…
+  <span class="dim">└</span> applied 3 edits<span class="cur"> </span></div>
+      </div>
+    </div>
+
+    <div class="pop" id="popA" style="display:none">
+      <div class="pt">Take the keyboard</div>
+      <div class="pw">You’re watching read-only. Paste this in your terminal to attach to this exact tmux session and type directly.</div>
+      <div class="cmdrow"><code>tmux attach -t vc_3f7a9c21</code><button class="copybtn" data-cmd="tmux attach -t vc_3f7a9c21" onclick="copyBtn(this)">{COPY}</button></div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> discoverability with no layout change. <b>Trade-off:</b> the bar gets one more control; on narrow cards it competes for space.</p>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="opt b">
+    <div class="lbl"><span class="tag">B.</span> Persistent command strip under the terminal <span class="recommend">recommended</span> <span class="modetag">inline + fullscreen</span></div>
+    <div class="desc">A slim accent-tinted footer welded to the bottom of the terminal: a “⌨ Type in your own terminal” lead, the full command inline, and a copy button. Always visible, never collapsed, reads like a status bar. The command itself is the hero — no extra click to reveal it.</div>
+
+    <div class="liveterm-box">
+      <div class="liveterm-bar">
+        <button class="ltbtn" title="Minimize">✕</button>
+        <span class="ltbar-title">Live CLI</span>
+        <button class="ltbtn right" title="Fullscreen">⛶</button>
+      </div>
+      <div class="liveterm-inner" style="flex:1">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Running tests…
+  <span class="dim">└</span> 42 passed<span class="cur"> </span></div>
+      </div>
+      <div class="strip">
+        <span class="lead"><span class="kbd">⌨</span> Type in your terminal</span>
+        <code>tmux attach -t vc_3f7a9c21</code>
+        <button class="copybtn" data-cmd="tmux attach -t vc_3f7a9c21" onclick="copyBtn(this)">{COPY}</button>
+      </div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> maximum clarity — the command is right there, one copy away, every second you watch. <b>Trade-off:</b> permanently spends ~36px of vertical space.</p>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="opt c">
+    <div class="lbl"><span class="tag">C.</span> Floating “take control” chip over the terminal <span class="modetag">inline + fullscreen</span></div>
+    <div class="desc">A floating accent chip pinned to the corner of the terminal (same family as the existing scroll buttons), hovering over the output. Click to pop a compact card with the command + copy + a one-line “what this does”. Costs no layout space; dismisses out of the way.</div>
+
+    <div class="liveterm-box">
+      <div class="liveterm-bar">
+        <button class="ltbtn" title="Minimize">✕</button>
+        <span class="ltbar-title">Live CLI</span>
+        <button class="ltbtn right" title="Fullscreen">⛶</button>
+      </div>
+      <div class="liveterm-inner">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Searching the codebase…
+<span class="acc">●</span> Found 7 matches in 4 files
+  <span class="dim">└</span> summarizing<span class="cur"> </span></div>
+        <div class="floatchip"><button class="attachbtn" onclick="togglePop('popC')"><span class="kbd">⌨</span> Take control</button></div>
+        <div class="floatcard" id="popC" style="display:none">
+          <div class="pt">Attach in your terminal</div>
+          <div class="pw">Jump into this live session and type directly. The browser view stays read-only.</div>
+          <div class="cmdrow"><code>tmux attach -t vc_3f7a9c21</code><button class="copybtn" data-cmd="tmux attach -t vc_3f7a9c21" onclick="copyBtn(this)">{COPY}</button></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> keeping the option visible without spending layout. <b>Trade-off:</b> overlays a sliver of terminal output; floating UI can feel less “solid” than a bar.</p>
+  </div>
+
+  <!-- ============ D ============ -->
+  <div class="opt d">
+    <div class="lbl"><span class="tag">D.</span> Read-only callout banner at the top of the view <span class="modetag">inline + fullscreen</span></div>
+    <div class="desc">A one-line banner just under the header that names the situation — <i>you’re watching, read-only</i> — and makes attaching the call to action. It teaches <i>why</i> you’d attach (you can’t type here) and offers the command right in the sentence. Dismissible so it doesn’t nag on repeat views.</div>
+
+    <div class="liveterm-box">
+      <div class="liveterm-bar">
+        <button class="ltbtn" title="Minimize">✕</button>
+        <span class="ltbar-title">Live CLI</span>
+        <button class="ltbtn right" title="Fullscreen">⛶</button>
+      </div>
+      <div class="banner" id="bannerD">
+        <span class="ico">👁</span>
+        <span class="txt"><b>Read-only view.</b> To type, attach in your terminal:</span>
+        <button class="attachbtn small" onclick="copyInline(this)" data-cmd="tmux attach -t vc_3f7a9c21"><span class="kbd">⌨</span> Copy attach command</button>
+        <button class="dismiss" title="Dismiss" onclick="document.getElementById('bannerD').style.display='none'">✕</button>
+      </div>
+      <div class="liveterm-inner" style="flex:1">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Waiting for your input…<span class="cur"> </span></div>
+      </div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> explaining the read-only limitation and converting it into the attach action. <b>Trade-off:</b> banners read as “alerts”; once dismissed the option is gone for that view.</p>
+  </div>
+
+  <!-- ============ E ============ -->
+  <div class="opt e">
+    <div class="lbl"><span class="tag">E.</span> Split dual primary actions — Watch live <i>and</i> Attach <span class="modetag">card action row</span></div>
+    <div class="desc">Promote “Attach” to a first-class peer of “Watch live” in the card’s action row, instead of hiding it in a disclosure. Two side-by-side accent buttons: watch <i>here</i>, or take it into <i>your</i> terminal. Visible before and during watching, so the choice is framed up front.</div>
+
+    <div class="stagelabel">Session card · action row</div>
+    <div class="actionrow">
+      <button class="txtoggle primary"><span>▷</span> Watch live</button>
+      <span class="vline"></span>
+      <button class="txtoggle primary" onclick="copyInline(this)" data-cmd="tmux attach -t vc_3f7a9c21">
+        <span>⌨</span>
+        <span class="twolabel"><span>Attach</span><span class="small">your terminal</span></span>
+      </button>
+      <button class="txtoggle">Transcript</button>
+    </div>
+
+    <p class="pros"><b>Best for:</b> making the terminal path obviously equal to the in-browser path. <b>Trade-off:</b> doesn’t live <i>inside</i> the live view itself; pair with A/B/C for in-view presence while watching.</p>
+  </div>
+
+  <!-- ============ F ============ -->
+  <div class="opt f">
+    <div class="lbl"><span class="tag">F.</span> Prominent action in the fullscreen header <span class="modetag">fullscreen</span></div>
+    <div class="desc">For the fullscreen overlay specifically, place a solid “⌨ Attach in your terminal” button in the modal header next to Close — the natural spot for a primary action at this size. Clicking reveals the command inline. Ensures the option is loud in the immersive mode, not just the small inline box.</div>
+
+    <div class="modal">
+      <div class="modal-head">
+        <span>Live Claude CLI</span>
+        <span class="right">
+          <button class="attachbtn" onclick="togglePop('popF')"><span class="kbd">⌨</span> Attach in your terminal</button>
+          <button class="txtoggle">Close ✕</button>
+        </span>
+      </div>
+      <div class="modal-body">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Building the project…
+<span class="acc">●</span> Compiled successfully in 4.2s
+  <span class="dim">└</span> ready on :3000<span class="cur"> </span></div>
+        <div class="floatcard" id="popF" style="display:none; right:14px; top:14px; width:320px">
+          <div class="pt">Take the keyboard</div>
+          <div class="pw">Attach to this tmux session in your own terminal to type directly.</div>
+          <div class="cmdrow"><code>tmux attach -t vc_3f7a9c21</code><button class="copybtn" data-cmd="tmux attach -t vc_3f7a9c21" onclick="copyBtn(this)">{COPY}</button></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> the fullscreen mode, where there’s room for a bold header action. <b>Trade-off:</b> fullscreen-only; needs an inline counterpart (A/B/C) to cover the embedded view.</p>
+  </div>
+
+  <!-- ============ G ============ -->
+  <div class="opt g">
+    <div class="lbl"><span class="tag">G.</span> “Read-only” badge in the header that expands to attach <span class="modetag">inline + fullscreen</span></div>
+    <div class="desc">Replace the plain “Live CLI” title with a clickable <span class="robadge"><span class="dot"></span>Read-only</span> badge. It states the constraint at a glance, and clicking it expands the attach command — tying the affordance directly to the reason a user would reach for it. Quiet until you want it.</div>
+
+    <div class="liveterm-box">
+      <div class="liveterm-bar">
+        <button class="ltbtn" title="Minimize">✕</button>
+        <button class="robadge" onclick="togglePop('popG')"><span class="dot"></span> Read-only · attach to type</button>
+        <button class="ltbtn right" title="Fullscreen">⛶</button>
+      </div>
+      <div class="liveterm-inner">
+        <div class="term-text"><span class="dim">$</span> claude --resume
+<span class="acc">●</span> Reviewing the diff…
+  <span class="dim">└</span> 2 files changed<span class="cur"> </span></div>
+      </div>
+    </div>
+
+    <div class="pop" id="popG" style="display:none">
+      <div class="pt">This view is read-only</div>
+      <div class="pw">You can watch here, but typing happens in the terminal. Attach to take the keyboard:</div>
+      <div class="cmdrow"><code>tmux attach -t vc_3f7a9c21</code><button class="copybtn" data-cmd="tmux attach -t vc_3f7a9c21" onclick="copyBtn(this)">{COPY}</button></div>
+    </div>
+
+    <p class="pros"><b>Best for:</b> communicating read-only-ness and the fix in one control. <b>Trade-off:</b> replaces the title; the attach command is one click away rather than always shown.</p>
+  </div>
+
+  <p class="hint" style="margin-top:34px">Tip: these aren’t mutually exclusive — a common pairing is <b>B</b> (always-visible strip in the inline box) + <b>F</b> (bold header action in fullscreen), or <b>A</b> used in both modes for one consistent control. Tell me which direction you like and I’ll wire it into the real components.</p>
+</div>
+
+<script>
+  const COPY_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const DONE_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  // hydrate {COPY} placeholders
+  document.querySelectorAll('.copybtn').forEach(b => { if (b.textContent.trim() === '{COPY}') b.innerHTML = COPY_SVG; });
+
+  function copyBtn(btn) {
+    const cmd = btn.getAttribute('data-cmd') || '';
+    if (navigator.clipboard) navigator.clipboard.writeText(cmd).catch(() => {});
+    btn.classList.add('done');
+    btn.innerHTML = DONE_SVG;
+    setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = COPY_SVG; }, 1100);
+  }
+  // for accent buttons that show a "Copied ✓" text instead of an icon swap
+  function copyInline(btn) {
+    const cmd = btn.getAttribute('data-cmd') || '';
+    if (navigator.clipboard) navigator.clipboard.writeText(cmd).catch(() => {});
+    const html = btn.innerHTML;
+    btn.innerHTML = '<span class="kbd">✓</span> Copied';
+    setTimeout(() => { btn.innerHTML = html; }, 1100);
+  }
+  function togglePop(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? '' : 'none';
+  }
+</script>
+</body>
+</html>
