@@ -438,7 +438,11 @@ details.handoff:hover > summary { color: var(--mut); }
 .ltbtn { background: transparent; border: 0; color: var(--mut); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 7px; border-radius: 6px; display: inline-grid; place-items: center; transition: color 0.12s, background 0.12s; }
 .ltbtn:hover { color: var(--ink); background: rgba(255,255,255,0.07); }
 .ltbtn.right { margin-left: auto; }
-.liveterm-inner { flex: 1; min-height: 0; padding: 6px; }
+/* Clip the terminal area to the box so only xterm's own viewport scrollbar
+   shows. Without overflow:hidden here the height:100% chain (.liveterm-wrap →
+   .liveterm) can over-resolve inside this flex item and spill past the box,
+   producing a second, stray scrollbar on top of xterm's native one. */
+.liveterm-inner { flex: 1; min-height: 0; padding: 6px; overflow: hidden; }
 
 /* ---- fullscreen overlay ---- */
 .tx-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(12,11,9,0.78); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; }
