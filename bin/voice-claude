@@ -40,8 +40,14 @@ prompt_default() { # prompt_default "Question" "default" -> echoes answer
 
 read_secret() { # read_secret "Prompt" -> echoes secret, never echoes keystrokes
   local q="$1" s=""
-  read -rsp "$q: " s || true
-  printf '\n' >&2
+  while :; do
+    if ! read -rsp "$q: " s; then # EOF (e.g. Ctrl-D / closed pipe): don't write a half-baked config
+      printf '\n' >&2; err "voice-claude: no input — aborting setup"; exit 1
+    fi
+    printf '\n' >&2
+    [ -n "$s" ] && break
+    err "  value can't be empty — try again"
+  done
   printf '%s' "$s"
 }
 
@@ -56,6 +62,25 @@ gen_token() { # cryptographically-strong, URL-safe
 }
 
 trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+
+# Load config into the environment WITHOUT sourcing it. Sourcing (`. file`) would
+# execute any backticks/$(...) in a value and choke on spaces; we parse KEY=VALUE
+# lines literally instead, so a key is always taken verbatim. Strips one layer of
+# matching surrounding quotes (dotenv-style) so `KEY="sk-..."` works too.
+load_env() {
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac # skip blanks/comments
+    case "$line" in *=*) ;; *) continue ;; esac # skip lines without '='
+    key="$(trim "${line%%=*}")"
+    val="${line#*=}"
+    case "$val" in # strip one layer of matching quotes
+      \"*\") val="${val#\"}"; val="${val%\"}" ;;
+      \'*\') val="${val#\'}"; val="${val%\'}" ;;
+    esac
+    [ -n "$key" ] && export "$key=$val"
+  done < "$ENV_FILE"
+}
 
 # All roots must exist and none may be the whole home dir or filesystem root —
 # this is the agent's command-execution sandbox, so being strict here matters.
@@ -178,7 +203,7 @@ cmd_up() {
   # backend/.env. Then drop VC_AUTH_TOKEN: on localhost, setting it would force
   # even loopback callers to present the token (per the access-control model),
   # breaking the zero-config localhost flow. It stays in the file for run-network.
-  set -a; . "$ENV_FILE"; set +a
+  load_env
   unset VC_AUTH_TOKEN
 
   ( cd "$APP_ROOT/backend" && exec .venv/bin/python -m uvicorn main:app --port 8000 --log-level info ) &
@@ -202,7 +227,7 @@ cmd_up() {
 
 cmd_session() {
   ensure_env
-  set -a; . "$ENV_FILE"; set +a
+  load_env
   export VOICE_CLAUDE_TOKEN="${VC_AUTH_TOKEN:-}" # the plugin launcher reads this
   exec "$APP_ROOT/integrations/claude-code-plugin/bin/voice-claude" "$@"
 }
