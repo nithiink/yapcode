@@ -181,16 +181,39 @@ body {
 .tc-code::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
 
 /* Conversation history (Option C): the panel always auto-scrolls to the latest
-   message. A thick, prominent fade at the top softens the cut-off older messages
-   so it reads as "more above".
-   The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
+   message. Dynamic fade indicators hint at off-screen content — a top fade when
+   there's more above, a bottom fade when there's more below — each painted as a
+   --bg gradient overlay on the non-scrolling wrapper (so it stays pinned to the
+   viewport, not the content) and animated via opacity for a smooth fade in/out.
+   JS toggles .more-above / .more-below on .conv-wrap from the scroll position. */
+.conv-wrap { position: relative; }
+.conv-wrap::before,
+.conv-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 104px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.conv-wrap::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
+}
+.conv-wrap::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
+}
+.conv-wrap.more-above::before { opacity: 1; }
+.conv-wrap.more-below::after { opacity: 1; }
+
+/* The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
    the thumb is transparent at rest and only paints in --line2/--mut while the
    user is scrolling. A JS scroll handler toggles the .scrolling class, then
    removes it after a short idle, so the bar appears on scroll and fades out. */
-.conv-scroll.fade {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
-  mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
-}
 .conv-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 0.3s ease; }
 .conv-scroll.scrolling { scrollbar-color: var(--line2) transparent; }
 .conv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }

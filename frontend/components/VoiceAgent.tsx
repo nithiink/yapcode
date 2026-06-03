@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
@@ -350,6 +350,9 @@ export default function VoiceAgent() {
   // Conversation panel always auto-scrolls to the latest message. The scrollbar
   // is theme-matched and auto-hiding: a `.scrolling` class (toggled on scroll,
   // cleared after a short idle) paints the thumb only while the user scrolls.
+  // Dynamic top/bottom fade indicators (.more-above / .more-below on the wrap)
+  // hint at off-screen content and fade out smoothly at each end.
+  const convWrapRef = useRef<HTMLDivElement | null>(null);
   const convScrollRef = useRef<HTMLDivElement | null>(null);
   const convScrollHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
@@ -778,12 +781,31 @@ export default function VoiceAgent() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [debugEvents, logPaused, showDebug]);
 
-  // Conversation: always auto-scroll to the latest message. The OS scrollbar
-  // (appears on scroll, hides otherwise) lets the user scroll up to review.
+  // Recompute the top/bottom fade indicators from the current scroll position:
+  // show the top fade only when there's content above, the bottom fade only when
+  // there's content below (a few px of slack avoids flicker right at each end).
+  const updateConvFades = useCallback(() => {
+    const el = convScrollRef.current;
+    const wrap = convWrapRef.current;
+    if (!el || !wrap) return;
+    wrap.classList.toggle("more-above", el.scrollTop > 4);
+    wrap.classList.toggle("more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  }, []);
+
+  // Conversation: always auto-scroll to the latest message, then refresh the
+  // fades (after auto-scrolling to the bottom, the top fade shows and the bottom
+  // fade hides). The themed auto-hide scrollbar lets the user scroll up to review.
   useEffect(() => {
     const el = convScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [timeline]);
+    updateConvFades();
+  }, [timeline, updateConvFades]);
+
+  // Keep the fades correct when the viewport (and so clientHeight) changes.
+  useEffect(() => {
+    window.addEventListener("resize", updateConvFades);
+    return () => window.removeEventListener("resize", updateConvFades);
+  }, [updateConvFades]);
 
   // Keep the orb-loop's connection gate current.
   useEffect(() => {
@@ -1248,21 +1270,24 @@ export default function VoiceAgent() {
             Conversation <span className="ct">live</span>
           </h2>
           <div className="rule" />
-          <div
-            ref={convScrollRef}
-            className="scroll conv-scroll fade"
-            onScroll={() => {
-              const el = convScrollRef.current;
-              if (!el) return;
-              el.classList.add("scrolling");
-              if (convScrollHideRef.current) clearTimeout(convScrollHideRef.current);
-              convScrollHideRef.current = setTimeout(() => el.classList.remove("scrolling"), 1000);
-            }}
-          >
-            {timeline.length === 0 && (
-              <div className="empty">Assistant replies and Claude actions show here.</div>
-            )}
-            {renderConversation(timeline)}
+          <div className="conv-wrap" ref={convWrapRef}>
+            <div
+              ref={convScrollRef}
+              className="scroll conv-scroll"
+              onScroll={() => {
+                const el = convScrollRef.current;
+                if (!el) return;
+                el.classList.add("scrolling");
+                if (convScrollHideRef.current) clearTimeout(convScrollHideRef.current);
+                convScrollHideRef.current = setTimeout(() => el.classList.remove("scrolling"), 1000);
+                updateConvFades();
+              }}
+            >
+              {timeline.length === 0 && (
+                <div className="empty">Assistant replies and Claude actions show here.</div>
+              )}
+              {renderConversation(timeline)}
+            </div>
           </div>
         </div>
 
