@@ -347,9 +347,11 @@ export default function VoiceAgent() {
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
-  // Conversation panel always auto-scrolls to the latest message; the OS-native
-  // scrollbar (appears on scroll, hides otherwise) lets the user review history.
+  // Conversation panel always auto-scrolls to the latest message. The scrollbar
+  // is theme-matched and auto-hiding: a `.scrolling` class (toggled on scroll,
+  // cleared after a short idle) paints the thumb only while the user scrolls.
   const convScrollRef = useRef<HTMLDivElement | null>(null);
+  const convScrollHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
@@ -1246,7 +1248,17 @@ export default function VoiceAgent() {
             Conversation <span className="ct">live</span>
           </h2>
           <div className="rule" />
-          <div ref={convScrollRef} className="scroll conv-scroll fade">
+          <div
+            ref={convScrollRef}
+            className="scroll conv-scroll fade"
+            onScroll={() => {
+              const el = convScrollRef.current;
+              if (!el) return;
+              el.classList.add("scrolling");
+              if (convScrollHideRef.current) clearTimeout(convScrollHideRef.current);
+              convScrollHideRef.current = setTimeout(() => el.classList.remove("scrolling"), 1000);
+            }}
+          >
             {timeline.length === 0 && (
               <div className="empty">Assistant replies and Claude actions show here.</div>
             )}
