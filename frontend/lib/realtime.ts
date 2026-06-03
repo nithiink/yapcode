@@ -48,6 +48,13 @@ export class RealtimeSession implements VoiceSession {
   // but a response was still active when we tried to ask for it. Fire the
   // response.create as soon as the active response ends (response.done).
   private awaitingContinuation = false;
+  // Function-call arguments stream as response.function_call_arguments.delta and
+  // are NOT included in the conversation.item.added item that Azure uses to
+  // surface the call — so accumulate them by call_id and dispatch with the
+  // complete string. Maps call_id -> partial/complete arguments JSON, and
+  // call_id -> tool name (so a later arguments.done can find the name).
+  private callArgs = new Map<string, string>();
+  private callNames = new Map<string, string>();
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -215,11 +222,10 @@ export class RealtimeSession implements VoiceSession {
       return;
     }
     const emit = this.opts.onEvent;
-    // Trace every inbound event type so the Azure flow is fully visible. Skip
-    // the high-frequency delta events to keep the feed readable. Include the
-    // carried item's type/name — that's how we'll spot a function_call that
-    // Azure surfaces via conversation.item.added rather than response.done.
-    if (!/\.delta$/.test(evt.type)) {
+    // Trace every event type. Audio deltas are far too noisy, but the
+    // function_call_arguments deltas are exactly what we need to see, so only
+    // filter the audio ones. Include the carried item's type/name.
+    if (!/audio.*\.delta$|output_audio_transcript\.delta$/.test(evt.type)) {
       const it = evt.item;
       const extra = it
         ? ` item.type=${it.type}` +
@@ -229,31 +235,54 @@ export class RealtimeSession implements VoiceSession {
     }
 
     switch (evt.type) {
+      // Function-call arguments stream as deltas, then a *.done with the full
+      // string. Accumulate by call_id so we always dispatch with complete args.
+      case "response.function_call_arguments.delta": {
+        const id = evt.call_id || evt.item_id;
+        if (id) this.callArgs.set(id, (this.callArgs.get(id) || "") + (evt.delta || ""));
+        break;
+      }
+      case "response.function_call_arguments.done": {
+        const id = evt.call_id || evt.item_id;
+        if (id) {
+          const argsStr = evt.arguments ?? this.callArgs.get(id) ?? "";
+          this.callArgs.set(id, argsStr);
+          const name = this.callNames.get(id) || evt.name;
+          if (name) {
+            emit({ type: "state", state: "thinking" });
+            await this.runFunctionCall(name, id, argsStr);
+          }
+        }
+        break;
+      }
       // Azure's WebRTC realtime omits response.created/response.done and
       // surfaces the model's function call as a conversation.item.added/created
-      // item instead. Dispatch it here too (runFunctionCall dedupes by call_id,
-      // so OpenAI surfacing the same call via response.done is harmless).
+      // item — but with EMPTY arguments (those arrive via the delta stream
+      // above). Dispatch with the accumulated args. runFunctionCall dedupes by
+      // call_id, so OpenAI surfacing the same call via response.done is harmless.
       case "conversation.item.added":
       case "conversation.item.created": {
         const item = evt.item;
         if (item?.type === "function_call" && item.call_id) {
-          this.trace(`conversation.item → function_call ${item.name}`);
+          this.callNames.set(item.call_id, item.name);
+          const argsStr =
+            item.arguments && item.arguments.trim()
+              ? item.arguments
+              : this.callArgs.get(item.call_id) || "";
+          this.trace(`conversation.item → function_call ${item.name} args=${argsStr.slice(0, 60)}`);
           emit({ type: "state", state: "thinking" });
-          await this.runFunctionCall(item);
+          await this.runFunctionCall(item.name, item.call_id, argsStr);
         }
         break;
       }
-      // Function calls can be streamed here as soon as their arguments finish,
-      // before response.done. Dispatch immediately (deduped by call_id) so the
-      // model never waits on a tool result we failed to send. Some providers
-      // (notably Azure) rely on this path and ship a response.done whose
-      // output[] omits the call.
+      // OpenAI streams the completed call here (complete args in item.arguments)
+      // before response.done — dispatch immediately (deduped by call_id).
       case "response.output_item.done": {
         const item = evt.item;
         if (item?.type === "function_call" && item.call_id) {
           this.trace(`output_item.done → function_call ${item.name}`);
           emit({ type: "state", state: "thinking" });
-          await this.runFunctionCall(item);
+          await this.runFunctionCall(item.name, item.call_id, item.arguments || "");
         }
         break;
       }
@@ -321,7 +350,9 @@ export class RealtimeSession implements VoiceSession {
         // runFunctionCall dedupes on call_id and, since no response is active,
         // requestContinuation will fire the follow-up response.create.
         for (const item of out) {
-          if (item.type === "function_call") await this.runFunctionCall(item);
+          if (item.type === "function_call") {
+            await this.runFunctionCall(item.name, item.call_id, item.arguments || "");
+          }
         }
         // A tool ran via the streaming path and its continuation was deferred
         // until this response ended — fire it now.
@@ -424,17 +455,15 @@ export class RealtimeSession implements VoiceSession {
     this.send({ type: "response.create" });
   }
 
-  private async runFunctionCall(item: any) {
-    const name: string = item.name;
-    const callId: string = item.call_id;
-    // Each function_call can surface on both the streaming and response.done
-    // paths — run it exactly once.
+  private async runFunctionCall(name: string, callId: string, argsStr: string) {
+    // Each function_call can surface on several paths (conversation.item.added,
+    // arguments.done, output_item.done, response.done) — run it exactly once.
     if (callId && this.dispatchedCalls.has(callId)) return;
     if (callId) this.dispatchedCalls.add(callId);
-    this.trace(`dispatch tool ${name} (call_id=${callId})`);
+    this.trace(`dispatch tool ${name} (call_id=${callId}) args=${(argsStr || "").slice(0, 60)}`);
     let args: any = {};
     try {
-      args = item.arguments ? JSON.parse(item.arguments) : {};
+      args = argsStr && argsStr.trim() ? JSON.parse(argsStr) : {};
     } catch {
       args = {};
     }
