@@ -377,6 +377,7 @@ export default function VoiceAgent() {
   const [fullscreen, setFullscreen] = useState(false);
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   // Conversation panel always auto-scrolls to the latest message. The scrollbar
   // is theme-matched and auto-hiding: a `.scrolling` class (toggled on scroll,
   // cleared after a short idle) paints the thumb only while the user scrolls.
@@ -522,6 +523,7 @@ export default function VoiceAgent() {
       if (e.key === "Escape") {
         setFullscreen(false);
         setLiveFullscreen(false);
+        setAttachOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1578,21 +1580,63 @@ export default function VoiceAgent() {
         </div>
       )}
 
-      {liveFullscreen && liveSession && (
-        <div className="tx-overlay" onClick={() => setLiveFullscreen(false)}>
-          <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="tx-modal-head">
-              <span>Live Claude CLI</span>
-              <button className="txtoggle" onClick={() => setLiveFullscreen(false)}>
-                Close ✕
-              </button>
-            </div>
-            <div className="tx-modal-body term">
-              <LiveTerminal handle={liveSession} />
+      {liveFullscreen && liveSession && (() => {
+        const liveSess = sessions.find((x) => x.handle === liveSession);
+        const liveTmuxCmd =
+          liveSess?.backend === "cli" ? `tmux attach -t vc_${liveSess.handle.slice(0, 8)}` : null;
+        return (
+          <div
+            className="tx-overlay"
+            onClick={() => {
+              setLiveFullscreen(false);
+              setAttachOpen(false);
+            }}
+          >
+            <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="tx-modal-head">
+                <span>Live Claude CLI</span>
+                <div className="tx-head-actions">
+                  {liveTmuxCmd && (
+                    <button
+                      className="attachbtn"
+                      title="Attach to this session in your own terminal"
+                      aria-expanded={attachOpen}
+                      onClick={() => setAttachOpen((v) => !v)}
+                    >
+                      <span className="kbd" aria-hidden>⌨</span> Attach in your terminal
+                    </button>
+                  )}
+                  <button
+                    className="txtoggle"
+                    onClick={() => {
+                      setLiveFullscreen(false);
+                      setAttachOpen(false);
+                    }}
+                  >
+                    Close ✕
+                  </button>
+                </div>
+              </div>
+              {attachOpen && liveTmuxCmd && (
+                <div className="attach-pop">
+                  <div className="ap-title">Take the keyboard</div>
+                  <div className="ap-why">
+                    Attach to this tmux session in your own terminal to type directly. This view stays
+                    read-only.
+                  </div>
+                  <div className="hcmd">
+                    <code>{liveTmuxCmd}</code>
+                    <CopyBtn text={liveTmuxCmd} />
+                  </div>
+                </div>
+              )}
+              <div className="tx-modal-body term">
+                <LiveTerminal handle={liveSession} />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <audio ref={audioRef} hidden />
     </div>
