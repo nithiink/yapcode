@@ -407,8 +407,10 @@ details.handoff:hover > summary { color: var(--mut); }
 .handoff .hwhy { font-size: 11.5px; color: var(--mut); margin: 1px 0 6px; }
 .handoff .hcmd { display: flex; align-items: center; gap: 8px; }
 .handoff .hcmd code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; background: var(--panel); border: 1px solid var(--line); padding: 7px 9px; border-radius: 8px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.copybtn { background: var(--panel); border: 1px solid var(--line); color: var(--mut); cursor: pointer; font-size: 12px; padding: 6px 9px; border-radius: 8px; line-height: 1; flex: none; }
+.copybtn { display: inline-grid; place-items: center; background: var(--panel); border: 1px solid var(--line); color: var(--mut); cursor: pointer; padding: 7px; border-radius: 8px; line-height: 0; flex: none; transition: color 0.12s, border-color 0.12s; }
+.copybtn svg { display: block; }
 .copybtn:hover { color: var(--acc); border-color: var(--line2); }
+.copybtn.done { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
 
 /* ---- transcript timeline ---- */
 .transcript { margin: 11px 0; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
