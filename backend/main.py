@@ -201,6 +201,7 @@ class SessionRequest(BaseModel):
     model: str | None = None
     voice: str | None = None
     provider: str | None = None  # "azure" | "openai" | "gemini"; falls back to VOICE_PROVIDER
+    instructions: str | None = None  # baked into the Azure mint (see _mint_config)
 
 
 class ToolCallRequest(BaseModel):
@@ -261,8 +262,20 @@ def _mint_config(
         if not key:
             raise HTTPException(status_code=500, detail="AZURE_OPENAI_API_KEY is not set on the server")
         model = AZURE_DEPLOYMENT
-        payload = {"session": {"type": "realtime", "model": model,
-                               "audio": {"output": {"voice": voice}}}}
+        # Azure's ephemeral WebRTC session locks its config at mint time and
+        # ignores the browser's later session.update — so tools/instructions
+        # have to be baked in here, or the model connects with no tools (it can
+        # never call Claude) and no system prompt (generic-assistant behavior).
+        # OpenAI, by contrast, honors the client session.update, so its mint
+        # stays minimal.
+        session_cfg: dict[str, Any] = {
+            "type": "realtime", "model": model,
+            "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
+            "audio": {"output": {"voice": voice}},
+        }
+        if req.instructions:
+            session_cfg["instructions"] = req.instructions
+        payload = {"session": session_cfg}
         headers = {"api-key": key, "Content-Type": "application/json"}
         mint_url = f"{AZURE_ENDPOINT}/openai/v1/realtime/client_secrets"
         webrtc_url = f"{AZURE_ENDPOINT}/openai/v1/realtime/calls?webrtcfilter=on"

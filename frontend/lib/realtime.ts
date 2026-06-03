@@ -72,6 +72,11 @@ export class RealtimeSession implements VoiceSession {
           provider: this.opts.provider,
           model: this.opts.model,
           voice: this.opts.voice,
+          // Azure's ephemeral WebRTC session binds its config at mint time and
+          // ignores the client session.update — so tools/instructions must be
+          // baked into the mint or the model never gets them. Harmless for
+          // OpenAI (which also honors the later session.update).
+          instructions: this.opts.instructions,
         }),
       }),
       fetch("/api/tools", { headers: authHeaders() }),
