@@ -130,9 +130,16 @@ body {
 .panel h2 .ct { font-family: var(--body); font-size: 12px; color: var(--mut); }
 .panel .rule { height: 1px; background: var(--line); margin-bottom: 18px; }
 .scroll { display: flex; flex-direction: column; gap: 10px; }
-/* Conversation panel: cap height so a long live transcript scrolls inside the
-   panel instead of growing the page without bound. */
-.conv-scroll { max-height: 80vh; overflow-y: auto; padding-right: 10px; }
+/* Conversation (chat history) panel: make its height track the session-list
+   panel beside it instead of using a fixed cap. The two panels are siblings in
+   the same grid row, and grid stretches both cells to the row's (taller) height
+   — which the session list drives as sessions are added/removed. min-height: 0
+   lets this column shrink to the row height instead of growing it with its own
+   content, so the session list dictates the height and the conversation follows.
+   The scroll area then flexes to fill whatever height the cell receives. */
+.conv-panel { display: flex; flex-direction: column; min-height: 0; }
+.conv-panel .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.conv-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-right: 10px; }
 /* Keep items at their natural height and let the panel scroll. Without this, a
    max-height flex column shrinks its children to fit: tool-call cards set
    overflow:hidden, which makes their flex auto-min-height 0, so as the

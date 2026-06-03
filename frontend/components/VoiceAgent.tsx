@@ -1295,7 +1295,7 @@ export default function VoiceAgent() {
       )}
 
       <div className="panels">
-        <div className="panel">
+        <div className="panel conv-panel">
           <h2>
             Conversation <span className="ct">live</span>
           </h2>
