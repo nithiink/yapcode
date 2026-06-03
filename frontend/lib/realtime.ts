@@ -216,10 +216,33 @@ export class RealtimeSession implements VoiceSession {
     }
     const emit = this.opts.onEvent;
     // Trace every inbound event type so the Azure flow is fully visible. Skip
-    // the high-frequency delta events to keep the feed readable.
-    if (!/\.delta$/.test(evt.type)) this.trace(`evt ${evt.type}`);
+    // the high-frequency delta events to keep the feed readable. Include the
+    // carried item's type/name — that's how we'll spot a function_call that
+    // Azure surfaces via conversation.item.added rather than response.done.
+    if (!/\.delta$/.test(evt.type)) {
+      const it = evt.item;
+      const extra = it
+        ? ` item.type=${it.type}` +
+          (it.type === "function_call" ? ` name=${it.name} args=${(it.arguments || "").slice(0, 60)}` : "")
+        : "";
+      this.trace(`evt ${evt.type}${extra}`);
+    }
 
     switch (evt.type) {
+      // Azure's WebRTC realtime omits response.created/response.done and
+      // surfaces the model's function call as a conversation.item.added/created
+      // item instead. Dispatch it here too (runFunctionCall dedupes by call_id,
+      // so OpenAI surfacing the same call via response.done is harmless).
+      case "conversation.item.added":
+      case "conversation.item.created": {
+        const item = evt.item;
+        if (item?.type === "function_call" && item.call_id) {
+          this.trace(`conversation.item → function_call ${item.name}`);
+          emit({ type: "state", state: "thinking" });
+          await this.runFunctionCall(item);
+        }
+        break;
+      }
       // Function calls can be streamed here as soon as their arguments finish,
       // before response.done. Dispatch immediately (deduped by call_id) so the
       // model never waits on a tool result we failed to send. Some providers
