@@ -24,6 +24,8 @@ Claude TUI to the browser (and your phone).
 - A Claude Code login (the CLI uses your existing subscription — no Anthropic API
   key needed).
 - A realtime voice provider key: Azure OpenAI, OpenAI, or Google Gemini.
+- macOS or Linux (it needs `tmux`). On **Windows**, run it under WSL2 — see
+  [Windows (WSL2)](#windows-wsl2).
 
 ## Install with Homebrew (recommended)
 
@@ -120,6 +122,65 @@ cd frontend && npm run dev:network     # https://0.0.0.0:3000
 - On each device, open the app once as
   `https://<host>:3000/#vc_token=<your VC_AUTH_TOKEN>` — the browser stores the
   token and strips it from the URL.
+
+## Windows (WSL2)
+
+There is **no native Windows support**: voice-claude drives Claude Code through
+**tmux**, which only runs on Unix-like systems. The supported path is **WSL2**
+(Windows Subsystem for Linux 2) — a real Linux kernel running inside Windows, so
+`tmux`, Python, Node, and Claude Code all run natively. WSL2 forwards
+`localhost` to your Windows browser, and the mic works there because `localhost`
+is a secure context (no TLS certs needed) — so the app behaves just like it does
+on macOS.
+
+Run **every command below inside the Ubuntu terminal**, not PowerShell (except
+step 1).
+
+**1. Install WSL2** — in **PowerShell (Run as administrator)**:
+
+```powershell
+wsl --install
+```
+
+Reboot, launch **Ubuntu** from the Start menu, and set a username/password.
+
+**2. Install the toolchain** (in the Ubuntu terminal):
+
+```bash
+sudo apt update && sudo apt install -y tmux git python3 python3-venv curl
+# Node 20+ via nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+exec $SHELL
+nvm install 20
+```
+
+**3. Install Claude Code *inside WSL* and log in.** It must live on the Linux
+side, not Windows. Install per <https://claude.com/claude-code>, then run
+`claude` once and sign in (uses your existing subscription — no API key needed).
+
+**4. Get the project and run it** — same as on macOS, from the Ubuntu terminal.
+Either use the launcher from a clone:
+
+```bash
+git clone <repo-url> ~/voice-claude     # clone into your Linux home (see below)
+cd ~/voice-claude
+./bin/voice-claude up                   # first run = setup wizard, then starts both servers
+```
+
+…or follow [Setup (from source)](#setup-from-source) + [Running](#running)
+manually. ([Homebrew](#install-with-homebrew-recommended) also works under WSL2
+via Linuxbrew once the repo is public.)
+
+Then open **`http://localhost:3000` in your Windows browser** (Chrome/Edge).
+
+**WSL2-specific gotchas:**
+
+- **Clone into your Linux home** (e.g. `~/voice-claude`), **not** `/mnt/c/...` —
+  the Windows-mounted drive is slow and breaks file watching.
+- Set `ALLOWED_PROJECT_ROOTS` to a **Linux path** (e.g. `/home/<you>/projects`),
+  and keep the projects you want Claude to edit on the Linux side too.
+- Open the app at **`http://localhost:3000`**, not a LAN IP — WSL2 forwards
+  `localhost`, and the mic only works in that secure context.
 
 ## Use it alongside your terminal (live shared session)
 
