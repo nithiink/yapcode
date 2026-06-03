@@ -25,7 +25,53 @@ Claude TUI to the browser (and your phone).
   key needed).
 - A realtime voice provider key: Azure OpenAI, OpenAI, or Google Gemini.
 
-## Setup
+## Install with Homebrew (recommended)
+
+The quickest path on macOS (and Linuxbrew). The formula pulls in the system
+dependencies — `tmux`, Python 3.12, and Node — for you, builds the app, and puts
+a `voice-claude` command on your `PATH`:
+
+```bash
+brew tap nithiink/voice-claude
+brew install voice-claude
+```
+
+Then launch it:
+
+```bash
+voice-claude up
+```
+
+The first `up` runs a short **setup wizard**: it asks for your voice provider and
+API key and the folder(s) the agent may edit, auto-generates a `VC_AUTH_TOKEN`
+(for later network/phone use), and writes everything to
+`~/.config/voice-claude/.env` with `600` permissions. It then starts the backend
+and frontend and opens the app in your browser. Press Ctrl-C to stop both. That
+config file is the single source of truth — later runs never re-prompt.
+
+You still need **Claude Code installed and logged in** (see
+[Prerequisites](#prerequisites)) — it's the engine voice-claude drives. Homebrew
+can't install or log you into that for you.
+
+Other commands:
+
+```bash
+voice-claude config    # open ~/.config/voice-claude/.env to change settings
+voice-claude session   # start + attach a voice-ready Claude session in this dir
+```
+
+Update later with `brew upgrade voice-claude`. Your settings
+(`~/.config/voice-claude`) and runtime state (`~/.local/state/voice-claude`)
+live outside the install and survive upgrades and uninstall.
+
+For LAN/phone access, set up your config first with `voice-claude up`, then see
+[LAN / phone (network mode)](#lan--phone-network-mode) — that path uses the
+`VC_AUTH_TOKEN` the wizard already generated.
+
+## Setup (from source)
+
+Prefer to run from a clone — for development, or to hack on the code? Install the
+dependencies manually (you'll also need `tmux` on your `PATH`):
 
 ```bash
 # 1. Backend deps

@@ -143,9 +143,7 @@ body {
 /* Slim, theme-matched scrollbar shared by the secondary scroll areas so the
    native browser bar never clashes with the dark UI: transparent track, a
    rounded pill thumb in --line2 that warms to --mut on hover.
-   Firefox uses scrollbar-width/color; WebKit/Chromium uses ::-webkit-scrollbar.
-   The Conversation panel is deliberately excluded — it uses the OS-native
-   scrollbar (appears on scroll, auto-hides) plus a top fade instead. */
+   Firefox uses scrollbar-width/color; WebKit/Chromium uses ::-webkit-scrollbar. */
 .logscroll,
 .transcript,
 .tx-modal-body,
@@ -184,12 +182,28 @@ body {
 
 /* Conversation history (Option C): the panel always auto-scrolls to the latest
    message. A thick, prominent fade at the top softens the cut-off older messages
-   so it reads as "more above". The scrollbar is left to the OS — it appears
-   while scrolling and hides otherwise — so nothing persistent clutters the view. */
+   so it reads as "more above".
+   The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
+   the thumb is transparent at rest and only paints in --line2/--mut while the
+   user is scrolling. A JS scroll handler toggles the .scrolling class, then
+   removes it after a short idle, so the bar appears on scroll and fades out. */
 .conv-scroll.fade {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
   mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.4) 48px, #000 104px);
 }
+.conv-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 0.3s ease; }
+.conv-scroll.scrolling { scrollbar-color: var(--line2) transparent; }
+.conv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.conv-scroll::-webkit-scrollbar-track { background: transparent; }
+.conv-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.3s ease;
+}
+.conv-scroll.scrolling::-webkit-scrollbar-thumb { background: var(--line2); background-clip: padding-box; }
+.conv-scroll.scrolling:hover::-webkit-scrollbar-thumb { background: var(--mut); background-clip: padding-box; }
 
 .empty { color: var(--dim); font-size: 14px; padding: 6px 2px; }
 
