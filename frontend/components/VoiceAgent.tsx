@@ -1590,7 +1590,7 @@ export default function VoiceAgent() {
                       aria-expanded={attachOpen}
                       onClick={() => setAttachOpen((v) => !v)}
                     >
-                      <Icon name="keyboard" size={21} strokeWidth={1.7} className="kbd" />
+                      <Icon name="keyboard" size={16} strokeWidth={1.75} />
                       Attach in your terminal
                     </button>
                   )}
@@ -1607,10 +1607,10 @@ export default function VoiceAgent() {
               </div>
               {attachOpen && liveTmuxCmd && (
                 <div className="attach-pop">
-                  <div className="ap-title">Take the keyboard</div>
+                  <div className="ap-title">Open in your terminal</div>
                   <div className="ap-why">
-                    Attach to this tmux session in your own terminal to type directly. This view stays
-                    read-only.
+                    Attach to this session&apos;s tmux in your own terminal for a full native session —
+                    keyboard shortcuts, copy-paste, and scrollback.
                   </div>
                   <div className="hcmd">
                     <code>{liveTmuxCmd}</code>
