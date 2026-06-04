@@ -185,6 +185,13 @@ class TmuxClaudeRunner(ClaudeRunner):
         _, out = await self._tmux("capture-pane", "-t", s.pane, "-p")
         return out
 
+    async def _capture_history(self, s: _TmuxSession, lines: int = 300) -> str:
+        """The visible pane PLUS the last `lines` rows of scrollback. Needed for
+        output taller than the pane (e.g. /context) whose top has already
+        scrolled off — a plain capture would silently lose it."""
+        _, out = await self._tmux("capture-pane", "-t", s.pane, "-p", "-S", f"-{lines}")
+        return out
+
     async def _alive(self, s: _TmuxSession) -> bool:
         rc, _ = await self._tmux("has-session", "-t", s.pane)
         return rc == 0
@@ -1003,18 +1010,50 @@ class TmuxClaudeRunner(ClaudeRunner):
                 log.info("slash %s: Stop hook fired (real turn)", command)
                 return self._collect(s)
 
-            # Settle detection won → UI-only built-in. Return what's on screen.
+            # Settle detection won → UI-only built-in. The output can be taller
+            # than the visible pane (/context routinely is), so re-capture WITH
+            # scrollback and slice from the echoed command — returning just the
+            # visible pane loses the top of the output (the part with the actual
+            # numbers in /context's case).
             log.info("slash %s: screen settled (UI-only built-in)", command)
-            pane_text = settle_task.result() if not settle_task.cancelled() else ""
-            rows = [r.rstrip() for r in pane_text.splitlines()]
-            while rows and not rows[0].strip():
-                rows.pop(0)
-            while rows and not rows[-1].strip():
-                rows.pop()
-            text = "\n".join(rows[-50:]) or "(slash command ran)"
+            full = await self._capture_history(s)
+            text = self._slash_output(full, command)
             s.status = "completed"
             return AdvanceResult(status="completed", assistant_text=text,
                                  session_id=s.handle, cost_usd=0.0)
+
+    @staticmethod
+    def _slash_output(pane_text: str, command: str) -> str:
+        """Extract a slash command's full output from a history-inclusive pane
+        capture: everything between the echoed command (`❯ /context`) and the
+        live input box, minus transient chrome (feedback survey, footer)."""
+        rows = [r.rstrip() for r in pane_text.splitlines()]
+        # Start after the LAST echo of the command (the submission this turn).
+        for i in range(len(rows) - 1, -1, -1):
+            ls = rows[i].lstrip()
+            if (ls.startswith("❯") or ls.startswith(">")) and command in ls:
+                rows = rows[i + 1:]
+                break
+        # Cut the live input box and everything under it (footer/shortcuts):
+        # the bottom-most `❯` row, plus the box's separator line above it.
+        for i in range(len(rows) - 1, -1, -1):
+            if rows[i].lstrip().startswith("❯"):
+                j = i - 1
+                if j >= 0 and rows[j].strip() and set(rows[j].strip()) <= {"─"}:
+                    i = j
+                rows = rows[:i]
+                break
+        # Drop the transient feedback survey if it rendered into the tail.
+        rows = [
+            r for r in rows
+            if not r.strip().startswith("● How is Claude doing this session")
+            and not re.match(r"^\s*1: Bad\s+2: Fine", r)
+        ]
+        while rows and not rows[0].strip():
+            rows.pop(0)
+        while rows and not rows[-1].strip():
+            rows.pop()
+        return "\n".join(rows[-200:]) or "(slash command ran)"
 
     async def _wait_for_settle(self, s: _TmuxSession, settle_secs: float,
                                 max_wait: float) -> str:
