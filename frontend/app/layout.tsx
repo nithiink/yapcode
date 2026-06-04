@@ -7,7 +7,7 @@ const display = Anton({ weight: "400", subsets: ["latin"], variable: "--font-dis
 const body = Archivo({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Voice-Claude",
+  title: "Yap Code",
   description: "Hands-free voice control for Claude Code",
 };
 

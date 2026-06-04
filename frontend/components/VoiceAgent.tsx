@@ -716,18 +716,49 @@ export default function VoiceAgent() {
     return rec;
   };
 
+  const fetchSessions = async (): Promise<Sess[]> => {
+    const r = await fetch("/api/tools/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ name: "list_sessions", arguments: {} }),
+    });
+    const data = await r.json();
+    return data?.result?.sessions || [];
+  };
+
   const refreshSessions = async () => {
     try {
-      const r = await fetch("/api/tools/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ name: "list_sessions", arguments: {} }),
-      });
-      const data = await r.json();
-      setSessions(data?.result?.sessions || []);
+      setSessions(await fetchSessions());
     } catch {
       /* ignore */
     }
+  };
+
+  // Point-in-time context appended to the static instructions at connect():
+  // Claude sessions outlive voice connections, so a fresh model otherwise wakes
+  // up blind to what's running and re-asks (or worse, re-creates). Built ONCE
+  // per connection and never rewritten mid-session — instructions sit at the
+  // front of the prompt-cache prefix, and updating them would re-bill the whole
+  // prefix uncached on the next response. list_sessions stays the live truth.
+  const dynamicContext = (sess: Sess[]): string => {
+    const lines = sess.map((s) => {
+      const state = s.running ? "working" : s.status || "idle";
+      const extras = [
+        s.mode && s.mode !== "default" ? `${s.mode} mode` : "",
+        s.queued ? `${s.queued} queued` : "",
+      ].filter(Boolean);
+      const folder = s.cwd.replace(/^\/Users\/[^/]+/, "~");
+      return `- "${s.name || s.handle.slice(0, 8)}" · ${folder} · ${[state, ...extras].join(", ")}`;
+    });
+    return [
+      "",
+      "",
+      "CURRENT STATE (snapshot from the moment this conversation connected — it goes stale as you work; list_sessions is the live source of truth):",
+      `- Connected: ${new Date().toLocaleString()}`,
+      lines.length
+        ? `- Open Claude sessions (reuse these for matching work instead of starting new ones):\n${lines.join("\n")}`
+        : "- Open Claude sessions: none — call start_session before any work.",
+    ].join("\n");
   };
 
   // Keep the session list — and its live running/queued/pending badges — fresh
@@ -964,10 +995,20 @@ export default function VoiceAgent() {
 
   const connect = async () => {
     setVstate("connecting");
+    // Fetch the session list fresh rather than trusting the 2s poll — on a cold
+    // page load the polled state may still be empty, and baking a wrong "no
+    // sessions" snapshot invites the model to start duplicates.
+    let snapshot = sessions;
+    try {
+      snapshot = await fetchSessions();
+      setSessions(snapshot);
+    } catch {
+      /* offline backend surfaces in start(); use the last poll for the snapshot */
+    }
     const params = connectionParams(provider, model);
     const opts: RealtimeOptions = {
       ...params,
-      instructions: INSTRUCTIONS,
+      instructions: INSTRUCTIONS + dynamicContext(snapshot),
       backend,
       onEvent,
       onDebug: (msg) => logDebug("info", `transport: ${msg}`, undefined, "voice", "backend"),
@@ -1118,8 +1159,12 @@ export default function VoiceAgent() {
     <div className="app">
       <header className="topbar">
         <div className={`brand ${connected ? "live" : ""}`}>
-          <span className="dot" />
-          <span className="logo">Voice<span className="sep">·</span>Claude</span>
+          <span className="speakdot" aria-hidden>
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="logo">Yap Code</span>
         </div>
         <div className="topmeta">
           {/* Stable label: don't churn through listening/hearing/thinking/speaking —
