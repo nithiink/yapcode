@@ -35,19 +35,17 @@ body {
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo { font-family: var(--disp); font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
 .logo .sep { color: var(--acc); }
-/* Speaking dot: idle shows a single dim dot; when live it expands into a small
-   accent equalizer that pulses (the brand "speaks" while connected). The three
-   bars share one element; the outer two collapse to nothing and the middle one
-   rounds into a dot when idle, then spring back out under .brand.live. */
+/* Speaking dot: a small equalizer that's always animating, so the brand always
+   shows the voice signal. Resting (idle) it pulses dim; when live it goes accent
+   with a soft glow. */
 .brand .speakdot { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 22px; height: 20px; flex: none; }
-.brand .speakdot i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); transition: width 0.32s ease, height 0.32s ease, border-radius 0.32s ease, background 0.3s ease, opacity 0.25s ease; }
-.brand .speakdot i:nth-child(1), .brand .speakdot i:nth-child(3) { width: 0; opacity: 0; }
-.brand.live .speakdot i { width: 3px; border-radius: 2px; opacity: 1; background: var(--acc); box-shadow: 0 0 8px rgba(221,138,106,0.5); animation: speak 1.05s ease-in-out infinite; }
-.brand.live .speakdot i:nth-child(1) { height: 9px; animation-delay: 0s; }
-.brand.live .speakdot i:nth-child(2) { height: 18px; animation-delay: 0.16s; }
-.brand.live .speakdot i:nth-child(3) { height: 11px; animation-delay: 0.32s; }
-@keyframes speak { 0%, 100% { transform: scaleY(0.45); } 50% { transform: scaleY(1); } }
-@media (prefers-reduced-motion: reduce) { .brand.live .speakdot i { animation: none; } }
+.brand .speakdot i { width: 3px; border-radius: 2px; background: var(--mut); transition: background 0.3s ease, box-shadow 0.3s ease; animation: speak 1.05s ease-in-out infinite; transform-origin: center; }
+.brand .speakdot i:nth-child(1) { height: 9px; animation-delay: 0s; }
+.brand .speakdot i:nth-child(2) { height: 18px; animation-delay: 0.16s; }
+.brand .speakdot i:nth-child(3) { height: 11px; animation-delay: 0.32s; }
+.brand.live .speakdot i { background: var(--acc); box-shadow: 0 0 8px rgba(221,138,106,0.5); }
+@keyframes speak { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .brand .speakdot i { animation: none; } }
 .topmeta { font-size: 12.5px; color: var(--mut); text-align: right; letter-spacing: 0.01em; }
 .topmeta b { color: var(--ink); font-weight: 600; }
 .cost { font-variant-numeric: tabular-nums; }
