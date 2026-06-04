@@ -62,6 +62,17 @@ will be rejected — that's intentional.)
 On localhost the mic works without certs and **no auth token is needed**.
 
 ```bash
+# 0. Check your Python — must print 3.12 or newer!
+python3 --version
+```
+
+If it's older, `pip install` below fails with a **misleading**
+`No matching distribution found for claude-agent-sdk==…`. Fix: on macOS,
+`brew install python@3.12` and use `python3.12 -m venv .venv` in step 1; on
+Windows/WSL, install a current Ubuntu (`wsl --install -d Ubuntu-24.04` in
+PowerShell — its default `python3` is 3.12) and redo the setup inside it.
+
+```bash
 # 1. Backend deps
 cd backend
 python3 -m venv .venv
@@ -119,6 +130,11 @@ exec $SHELL
 nvm install 20
 ```
 
+Then check `python3 --version` — the backend needs **3.12+**. A fresh
+`wsl --install` gives you Ubuntu 24.04, which ships 3.12. If you're on an older
+WSL Ubuntu (20.04 = 3.8, 22.04 = 3.10), install a current one from PowerShell
+(`wsl --install -d Ubuntu-24.04`) and do everything inside that instead.
+
 **3. Install Claude Code *inside WSL* and log in** — it must live on the Linux
 side. Install per <https://claude.com/claude-code>, then run `claude` once and
 sign in.
@@ -163,6 +179,11 @@ first testing.
 
 ## Troubleshooting
 
+- `No matching distribution found for claude-agent-sdk==…` during
+  `pip install` → your `python3` is too old (needs 3.12+; Ubuntu 20.04's
+  default is 3.8). macOS: `brew install python@3.12`, then recreate the venv
+  with `python3.12 -m venv .venv`. WSL: install Ubuntu 24.04
+  (`wsl --install -d Ubuntu-24.04`) and redo the setup there.
 - `git@github-voiceclaude: Permission denied (publickey)` → your key isn't added
   yet (ping me) or the `~/.ssh/config` alias above is missing.
 - `start_session refuses` / "no allowed roots" → `ALLOWED_PROJECT_ROOTS` isn't

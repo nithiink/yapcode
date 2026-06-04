@@ -75,6 +75,12 @@ For LAN/phone access, set up your config first with `voice-claude up`, then see
 Prefer to run from a clone — for development, or to hack on the code? Install the
 dependencies manually (you'll also need `tmux` on your `PATH`):
 
+> **Check your Python first:** `python3 --version` must print **3.12+**. With an
+> older default (Ubuntu 20.04 ships 3.8) pip fails with the misleading error
+> `No matching distribution found for claude-agent-sdk==…`. If yours is older:
+> on macOS `brew install python@3.12` and substitute `python3.12` for `python3`
+> below; on Ubuntu upgrade to **24.04**, whose default `python3` is 3.12.
+
 ```bash
 # 1. Backend deps
 cd backend
@@ -152,6 +158,15 @@ sudo apt update && sudo apt install -y tmux git python3 python3-venv curl
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 exec $SHELL
 nvm install 20
+```
+
+Then check `python3 --version` — it must be **3.12+**. **Ubuntu 24.04** (what a
+fresh `wsl --install` gives you) ships 3.12; if you're on an older WSL distro
+(20.04 ships 3.8, 22.04 ships 3.10), install a current one from PowerShell and
+redo these steps inside it:
+
+```powershell
+wsl --install -d Ubuntu-24.04
 ```
 
 **3. Install Claude Code *inside WSL* and log in.** It must live on the Linux

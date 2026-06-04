@@ -180,10 +180,32 @@ ensure_env() { [ -f "$ENV_FILE" ] || run_wizard; }
 
 # --- one-time dependency bootstrap (no-op once set up) ----------------------
 
+# The backend needs Python 3.12+. With an older default python3 (Ubuntu 20.04
+# ships 3.8) pip fails with a misleading "No matching distribution found for
+# claude-agent-sdk==…", so pick a suitable interpreter and fail clearly instead.
+find_python() {
+  local c
+  for c in python3 python3.13 python3.12; do
+    if command -v "$c" >/dev/null 2>&1 && \
+       "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+      command -v "$c"; return 0
+    fi
+  done
+  return 1
+}
+
 bootstrap() {
   if [ ! -x "$APP_ROOT/backend/.venv/bin/python" ]; then
+    local py
+    if ! py="$(find_python)"; then
+      err "voice-claude: Python 3.12+ is required (found: $(python3 --version 2>&1 || echo 'no python3'))."
+      err "  macOS:  brew install python@3.12"
+      err "  Ubuntu: upgrade to 24.04, whose default python3 is 3.12"
+      err "          (WSL: run  wsl --install -d Ubuntu-24.04  in PowerShell)"
+      exit 1
+    fi
     err "Setting up the Python backend (first run)…"
-    python3 -m venv "$APP_ROOT/backend/.venv"
+    "$py" -m venv "$APP_ROOT/backend/.venv"
     "$APP_ROOT/backend/.venv/bin/pip" install -q -r "$APP_ROOT/backend/requirements.txt"
   fi
   if [ ! -d "$APP_ROOT/frontend/node_modules" ]; then
