@@ -275,6 +275,9 @@ body {
 .tc-name { font-family: var(--mono); font-size: 12.5px; color: var(--ink); flex: none; }
 .tc-summary { font-size: 13px; color: var(--mut); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tcall.error .tc-summary { color: var(--danger); }
+/* Base for all <Icon> usages: align inline icons with adjacent text and keep
+   them from shrinking inside flex rows. Color is inherited (currentColor). */
+.icon { vertical-align: middle; flex: none; }
 .tc-chev { color: var(--dim); flex: none; margin-left: auto; transition: transform 0.18s ease, color 0.15s ease; }
 .tcall[open] .tc-chev { transform: rotate(180deg); }
 .tcall > summary:hover .tc-chev { color: var(--mut); }

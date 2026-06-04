@@ -7,6 +7,7 @@ AdvanceResult so the voice model can narrate progress and surface prompts.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from session_manager import (
@@ -27,6 +28,12 @@ from session_manager import (
     set_session_name,
 )
 from slash_commands import list_slash_commands
+
+# start_session duplicate guard (see the handler): the most recent session
+# creation, so a rapid second call can be redirected to it instead of silently
+# spawning a twin. {"ts": monotonic, "handle": str, "name": str} or None.
+START_GUARD_SECS = 15.0
+_last_start: dict[str, Any] | None = None
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -70,6 +77,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Initial permission mode. 'default' (asks before risky actions — recommended), 'plan' (only plans, makes no changes), 'acceptEdits' (auto-applies file edits), or 'auto' (runs everything without asking).",
                     "enum": ["default", "plan", "acceptEdits", "auto"],
+                },
+                "another": {
+                    "type": "boolean",
+                    "description": "Set true ONLY when the user explicitly wants an additional session right after one was just created (e.g. 'start two sessions'). Without it, a second start_session within a few seconds is rejected as an accidental duplicate — if the user merely added a name or detail after the session was created, use rename_session/set_mode on the existing session instead.",
                 },
             },
             "required": [],
@@ -256,17 +267,47 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"sessions": list_all_sessions()}
 
     if name == "start_session":
+        # Duplicate guard: in voice flows the model sometimes re-calls
+        # start_session when the user's answer to "what should we name it?"
+        # lands while the first call is still executing — creating two sessions
+        # (then denying it, since the first result never got narrated). A second
+        # start within the window needs an explicit another=true; otherwise we
+        # point the model at the session it just created.
+        global _last_start
+        now = time.monotonic()
+        recent = _last_start
+        if recent and now - recent["ts"] < START_GUARD_SECS and not args.get("another"):
+            return {
+                "duplicate_guard": True,
+                "existing_session": {"session_id": recent["handle"], "name": recent["name"]},
+                "message": (
+                    f"NOT creating another session: '{recent['name']}' was created "
+                    f"{int(now - recent['ts'])}s ago and is probably the session the user means. "
+                    "If the user was adding a name or detail for it, apply that with "
+                    "rename_session/set_mode (or just use the session). Only if the user "
+                    "explicitly wants a SECOND separate session, call start_session again "
+                    "with another=true."
+                ),
+            }
         backend = args.get("backend") or "cli"
         path = resolve_project_path(args.get("project_path", ""))
         mode = args.get("mode") or "default"
         runner = get_runner(backend)
-        handle = await runner.start(path, args.get("model"), mode)
+        # Record before the (slow) start so a concurrent duplicate call also trips
+        # the guard rather than racing past it.
+        _last_start = {"ts": now, "handle": "", "name": "(starting…)"}
+        try:
+            handle = await runner.start(path, args.get("model"), mode)
+        except BaseException:
+            _last_start = recent  # failed start shouldn't block a retry
+            raise
         register_owner(handle, backend)
         try:
             sess_name = set_session_name(handle, args.get("name") or default_name_for(path))
         except ValueError:
             # A user-supplied name clashed — fall back to a guaranteed-unique default.
             sess_name = set_session_name(handle, default_name_for(path))
+        _last_start = {"ts": time.monotonic(), "handle": handle, "name": sess_name}
         return {"session_id": handle, "name": sess_name, "project_path": path,
                 "backend": backend, "mode": mode,
                 "message": f"Started Claude session '{sess_name}' in {path}."}

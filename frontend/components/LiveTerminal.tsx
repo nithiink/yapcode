@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { withAuthParam } from "@/lib/auth";
+import { Icon } from "./ui/Icon";
 
 // Streams the live interactive Claude TUI (CLI backend) by bridging the
 // backend's PTY-over-WebSocket terminal endpoint into an xterm.js instance.
@@ -129,9 +130,9 @@ export default function LiveTerminal({ handle }: { handle: string }) {
     <div className="liveterm-wrap">
       <div className="liveterm" ref={ref} />
       <div className="term-scrollbtns">
-        <button onClick={() => send("\x1b[5~")} title="Scroll up" aria-label="Scroll up">▲</button>
-        <button onClick={() => send("\x1b[6~")} title="Scroll down" aria-label="Scroll down">▼</button>
-        <button onClick={() => send("\x1b[1;5F")} title="Jump to bottom" aria-label="Jump to bottom">⤓</button>
+        <button onClick={() => send("\x1b[5~")} title="Scroll up" aria-label="Scroll up"><Icon name="scroll-up" size={15} /></button>
+        <button onClick={() => send("\x1b[6~")} title="Scroll down" aria-label="Scroll down"><Icon name="scroll-down" size={15} /></button>
+        <button onClick={() => send("\x1b[1;5F")} title="Jump to bottom" aria-label="Jump to bottom"><Icon name="scroll-bottom" size={15} /></button>
       </div>
     </div>
   );

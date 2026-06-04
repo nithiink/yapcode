@@ -7,6 +7,7 @@ import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSess
 import { INSTRUCTIONS } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
 import LiveTerminal from "./LiveTerminal";
+import { Icon } from "./ui/Icon";
 
 // One ordered list of bubbles + tool rows so the live "Conversation" panel renders
 // tool calls inline with the surrounding turns instead of piling them at the end.
@@ -141,10 +142,7 @@ function ToolCall({
         <span className={`tc-dot ${state}`} aria-hidden />
         <span className="tc-name">{item.name}</span>
         {summary && <span className="tc-summary">{summary}</span>}
-        <svg className="tc-chev" viewBox="0 0 16 16" width="13" height="13" aria-hidden>
-          <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5"
-            strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon name="chevron-down" size={13} strokeWidth={1.5} className="tc-chev" />
       </summary>
       <div className="tc-body">
         <section className="tc-sec">
@@ -254,16 +252,9 @@ function CopyBtn({ text }: { text: string }) {
       }}
     >
       {done ? (
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
+        <Icon name="check" size={14} strokeWidth={2.5} />
       ) : (
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
+        <Icon name="copy" size={14} />
       )}
     </button>
   );
@@ -1359,11 +1350,7 @@ export default function VoiceAgent() {
                       >
                         {s.name || s.cwd.split("/").pop()}
                         <span className="penicon" aria-hidden>
-                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
-                            stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                          </svg>
+                          <Icon name="edit" size={15} strokeWidth={1.7} />
                         </span>
                       </button>
                     )}
@@ -1409,7 +1396,7 @@ export default function VoiceAgent() {
                             setLiveFullscreen(false);
                           }}
                         >
-                          ✕
+                          <Icon name="close" size={14} />
                         </button>
                         <span className="ltbar-title">Live CLI</span>
                         <button
@@ -1418,7 +1405,7 @@ export default function VoiceAgent() {
                           aria-label="Full screen live view"
                           onClick={() => setLiveFullscreen(true)}
                         >
-                          ⛶
+                          <Icon name="fullscreen" size={14} />
                         </button>
                       </div>
                       <div className="liveterm-inner">
@@ -1458,7 +1445,7 @@ export default function VoiceAgent() {
                         title="Watch the live CLI in your browser"
                         onClick={() => setLiveSession(s.handle)}
                       >
-                        ▷ Watch live
+                        <Icon name="play" size={13} /> Watch live
                       </button>
                     )}
                     <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
@@ -1466,7 +1453,7 @@ export default function VoiceAgent() {
                     </button>
                     {open && (
                       <button className="txtoggle" title="Expand" onClick={() => setFullscreen(true)}>
-                        ⛶
+                        <Icon name="fullscreen" size={13} />
                       </button>
                     )}
                   </div>
@@ -1474,7 +1461,7 @@ export default function VoiceAgent() {
                   {(tmuxCmd || cmd) && (
                     <details className="handoff">
                       <summary>
-                        <span className="chev">▶</span> Continue in your terminal
+                        <span className="chev"><Icon name="chevron-right" size={10} /></span> Continue in your terminal
                       </summary>
                       {tmuxCmd && (
                         <div className="hopt">
@@ -1572,7 +1559,7 @@ export default function VoiceAgent() {
             <div className="tx-modal-head">
               <span>Claude session transcript</span>
               <button className="txtoggle" onClick={() => setFullscreen(false)}>
-                Close ✕
+                Close <Icon name="close" size={13} />
               </button>
             </div>
             <div className="tx-modal-body">{renderTimeline(transcript)}</div>
@@ -1603,19 +1590,7 @@ export default function VoiceAgent() {
                       aria-expanded={attachOpen}
                       onClick={() => setAttachOpen((v) => !v)}
                     >
-                      <svg
-                        className="kbd"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <rect x="2" y="6" width="20" height="12" rx="2.4" />
-                        <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M16.5 13.5h.01M9 13.5h6" />
-                      </svg>
+                      <Icon name="keyboard" size={21} strokeWidth={1.7} className="kbd" />
                       Attach in your terminal
                     </button>
                   )}
@@ -1626,7 +1601,7 @@ export default function VoiceAgent() {
                       setAttachOpen(false);
                     }}
                   >
-                    Close ✕
+                    Close <Icon name="close" size={13} />
                   </button>
                 </div>
               </div>
