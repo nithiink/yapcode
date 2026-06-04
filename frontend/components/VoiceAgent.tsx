@@ -1603,7 +1603,20 @@ export default function VoiceAgent() {
                       aria-expanded={attachOpen}
                       onClick={() => setAttachOpen((v) => !v)}
                     >
-                      <span className="kbd" aria-hidden>⌨</span> Attach in your terminal
+                      <svg
+                        className="kbd"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <rect x="2" y="6" width="20" height="12" rx="2.4" />
+                        <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M16.5 13.5h.01M9 13.5h6" />
+                      </svg>
+                      Attach in your terminal
                     </button>
                   )}
                   <button
