@@ -63,6 +63,12 @@ body {
 .talk { border: none; cursor: pointer; font: inherit; font-weight: 600; font-size: 15px; padding: 14px 32px; border-radius: 999px; color: var(--acc-ink); background: var(--acc); transition: filter 0.15s ease, transform 0.12s ease; }
 .talk:hover { filter: brightness(1.06); }
 .talk.stop { background: var(--panel2); color: var(--ink); border: 1px solid var(--line2); }
+/* Connecting state: a spinner + label, non-interactive until the handshake
+   completes. The ring sits on the accent button so it's drawn in acc-ink. */
+.talk.connecting { display: inline-flex; align-items: center; gap: 9px; cursor: default; }
+.talk.connecting:hover { filter: none; }
+.talk .spinner { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acc-ink) 30%, transparent); border-top-color: var(--acc-ink); animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); padding: 13px 20px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
 .ghost:hover { border-color: var(--line2); }
 .ghost.mute.muted { color: var(--danger); border-color: var(--danger); }
@@ -83,7 +89,11 @@ body {
 }
 .orb::after { content: ""; position: absolute; inset: -20px; border-radius: 50%; border: 1px solid var(--line2); }
 .orb.idle { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; }
-.orb.connecting { animation: breathe 1.3s ease-in-out infinite; }
+/* While connecting, keep the orb the dim idle color (just breathing) — it should
+   only warm to the accent gradient once a live state (listening/etc.) arrives,
+   i.e. after it's fully connected. The base .orb `background` transition makes
+   that switch cross-fade. */
+.orb.connecting { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; animation: breathe 1.3s ease-in-out infinite; }
 .orb.listening { animation: breathe 5s ease-in-out infinite; }
 /* While connected the orb keeps one stable warm color — only its scale reacts to
    volume. (hearing/thinking/speaking no longer recolor the orb.) */
