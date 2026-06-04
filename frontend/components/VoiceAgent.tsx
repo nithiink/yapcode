@@ -1612,7 +1612,7 @@ export default function VoiceAgent() {
                     Attach to this session&apos;s tmux in your own terminal for a full native session —
                     keyboard shortcuts, copy-paste, and scrollback.
                   </div>
-                  <div className="hcmd">
+                  <div className="cmdfield">
                     <code>{liveTmuxCmd}</code>
                     <CopyBtn text={liveTmuxCmd} />
                   </div>
