@@ -1,23 +1,13 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Yap Code favicon: continuous voice waveform, "Amber Red" gradient
+       (picked from design-previews/favicon-amber-compare.html). Bare line on
+       transparency so it sits on light and dark tab bars alike. -->
   <defs>
-    <linearGradient id="bar" x1="16" y1="3" x2="16" y2="29" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f3d9c6"/>
-      <stop offset="0.55" stop-color="#dd8a6a"/>
-      <stop offset="1" stop-color="#c2704f"/>
+    <linearGradient id="wave" x1="2" y1="16" x2="30" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e0a458"/>
+      <stop offset="1" stop-color="#e0584a"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.55">
-      <stop stop-color="#dd8a6a" stop-opacity="0.38"/>
-      <stop offset="1" stop-color="#dd8a6a" stop-opacity="0"/>
-    </radialGradient>
   </defs>
-  <rect width="32" height="32" rx="7.5" fill="#1a1917"/>
-  <rect width="32" height="32" rx="7.5" fill="url(#glow)"/>
-  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="6.9" stroke="#3c3833" stroke-opacity="0.7" stroke-width="1.2"/>
-  <g fill="url(#bar)">
-    <rect x="4"    y="11.5" width="3" height="9"  rx="1.5"/>
-    <rect x="9.25" y="6.5"  width="3" height="19" rx="1.5"/>
-    <rect x="14.5" y="3.5"  width="3" height="25" rx="1.5"/>
-    <rect x="19.75" y="6.5" width="3" height="19" rx="1.5"/>
-    <rect x="25"   y="11.5" width="3" height="9"  rx="1.5"/>
-  </g>
+  <path d="M2 16 C4 16 4 23 6 23 C8 23 8 6 10.5 6 C13 6 13 27 16 27 C19 27 19 8 21.5 8 C24 8 24 22 26 22 C28 22 28 16 30 16"
+        fill="none" stroke="url(#wave)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
