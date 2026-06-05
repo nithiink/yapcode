@@ -378,8 +378,9 @@ class SDKClaudeRunner(ClaudeRunner):
         }
 
     def list(self) -> list[dict[str, Any]]:
-        return [
-            {
+        out: list[dict[str, Any]] = []
+        for s in self._sessions.values():
+            d = {
                 "handle": s.handle,
                 "session_id": s.session_id,
                 "cwd": s.cwd,
@@ -389,8 +390,13 @@ class SDKClaudeRunner(ClaudeRunner):
                 "cost_usd": round(s.cost_usd, 4),
                 **self._queue_counts(s),
             }
-            for s in self._sessions.values()
-        ]
+            # Mirror the tmux runner: surface the live pending prompt so an
+            # agent that wasn't connected when it fired can still see it.
+            if s.pending is not None:
+                d["prompt"] = {"kind": s.pending.kind, "text": s.pending.text,
+                               "options": list(s.pending.options or [])}
+            out.append(d)
+        return out
 
     # --- internals --------------------------------------------------------
 

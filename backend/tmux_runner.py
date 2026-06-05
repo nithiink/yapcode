@@ -907,12 +907,21 @@ class TmuxClaudeRunner(ClaudeRunner):
         }
 
     def list(self) -> list[dict]:
-        return [
-            {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
-             "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0,
-             **self._queue_counts(s)}
-            for s in self._sessions.values()
-        ]
+        out: list[dict] = []
+        for s in self._sessions.values():
+            d = {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
+                 "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0,
+                 **self._queue_counts(s)}
+            # Expose the live pending prompt. A prompt's needs_* result is
+            # delivered exactly once via poll_status; a voice agent that
+            # connects AFTER that (reconnect, second device) only sees the bare
+            # status string and has no way to learn what's being asked — for a
+            # plan approval the plan has long scrolled off the screen.
+            if s.pending is not None:
+                d["prompt"] = {"kind": s.pending.kind, "text": s.pending.text,
+                               "options": list(s.pending.options or [])}
+            out.append(d)
+        return out
 
     # --- non-blocking driving (mirrors SDKClaudeRunner) -------------------
 

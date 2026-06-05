@@ -151,10 +151,21 @@ async def peek_session(handle: str, lines: int = 40) -> dict:
     r = runner_for(handle)
     peek = getattr(r, "peek", None)
     if peek is not None:
-        return {"session_id": handle, "screen": await peek(handle, lines)}
-    text = await r.read(handle)
-    return {"session_id": handle, "screen": text or "(no output yet)",
-            "note": "SDK backend has no live screen; showing accumulated text."}
+        out = {"session_id": handle, "screen": await peek(handle, lines)}
+    else:
+        text = await r.read(handle)
+        out = {"session_id": handle, "screen": text or "(no output yet)",
+               "note": "SDK backend has no live screen; showing accumulated text."}
+    # If a prompt is waiting, attach it in full. The screen alone can't be
+    # trusted for this: long prompt context (a plan approval's plan, a long
+    # question) scrolls off the pane, so an agent peeking to find out "what is
+    # it waiting on?" would otherwise come back empty-handed.
+    sess = next((s for s in r.list() if s["handle"] == handle), None)
+    if sess and sess.get("prompt"):
+        out["pending_prompt"] = sess["prompt"]
+        out["note_prompt"] = ("This session is waiting on the prompt above — "
+                              "answer it with answer_prompt.")
+    return out
 
 
 async def rehydrate_cli_sessions() -> list[dict]:

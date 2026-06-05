@@ -216,6 +216,9 @@ type Sess = {
   pending?: number;
   // The actual in-flight + waiting turns, in order, with their message text.
   queue?: { text: string; state: "running" | "queued" }[];
+  // The live pending prompt when status is needs_permission/needs_choice —
+  // lets an agent that connected after the prompt fired still see it in full.
+  prompt?: { kind: string; text: string; options?: string[] };
 };
 
 // Abbreviate the user's home dir to ~ for a compact path display.
@@ -800,7 +803,17 @@ export default function VoiceAgent() {
         s.queued ? `${s.queued} queued` : "",
       ].filter(Boolean);
       const folder = s.cwd.replace(/^\/Users\/[^/]+/, "~");
-      return `- "${s.name || s.handle.slice(0, 8)}" · ${folder} · ${[state, ...extras].join(", ")}`;
+      let line = `- "${s.name || s.handle.slice(0, 8)}" · ${folder} · ${[state, ...extras].join(", ")}`;
+      // A prompt that fired before this conversation connected was never
+      // narrated to us — without this the agent only sees "needs_permission"
+      // and can't tell the user what (e.g. which plan) is awaiting approval.
+      if (s.prompt) {
+        const opts = (s.prompt.options || []).map((o, i) => `(${i + 1}) ${o}`).join("; ");
+        line +=
+          `\n  WAITING ON ${s.prompt.kind === "choice" ? "A QUESTION" : "PERMISSION"} ` +
+          `(answer via answer_prompt): ${s.prompt.text}${opts ? ` Options: ${opts}.` : ""}`;
+      }
+      return line;
     });
     return [
       "",
