@@ -1,13 +1,10 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Yap Code favicon: continuous voice waveform, "Amber Red" gradient
-       (picked from design-previews/favicon-amber-compare.html). Bare line on
-       transparency so it sits on light and dark tab bars alike. -->
   <defs>
     <linearGradient id="wave" x1="2" y1="16" x2="30" y2="16" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#e0a458"/>
+      <stop stop-color="#e0a458"/>
       <stop offset="1" stop-color="#e0584a"/>
     </linearGradient>
   </defs>
   <path d="M2 16 C4 16 4 23 6 23 C8 23 8 6 10.5 6 C13 6 13 27 16 27 C19 27 19 8 21.5 8 C24 8 24 22 26 22 C28 22 28 16 30 16"
-        fill="none" stroke="url(#wave)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    fill="none" stroke="url(#wave)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
