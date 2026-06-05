@@ -635,32 +635,36 @@ class TmuxClaudeRunner(ClaudeRunner):
 
         if multi:
             await self._answer_multi(s, options, c)
-            return more
-
-        # The spoken prompt numbers the options, so the user may answer by
-        # ordinal ("two", transcribed as "2" / "option 2"). Map a bare 1-based
-        # index to its row before falling back to text matching.
-        m = re.fullmatch(r"(?:option\s*)?(\d+)\.?", c)
-        idx = int(m.group(1)) - 1 if m else -1
-        if not (0 <= idx < len(options)):
-            idx = next(
-                (i for i, o in enumerate(options)
-                 if o.strip().lower() == c or (c and c in o.strip().lower())),
-                -1,
-            )
-        if idx >= 0:
-            await self._select_row(s, idx)
-            return more
-        # No listed option matched — give a free-form answer via "Type something"
-        # (the row immediately after the real options).
-        if choice.strip():
-            await self._select_row(s, len(options))
-            await asyncio.sleep(0.4)
-            await self._tmux("send-keys", "-t", s.pane, "-l", "--", choice.strip())
-            await asyncio.sleep(0.3)
-            await self._tmux("send-keys", "-t", s.pane, "Enter")
         else:
-            await self._tmux("send-keys", "-t", s.pane, "Enter")
+            # The spoken prompt numbers the options, so the user may answer by
+            # ordinal ("two", transcribed as "2" / "option 2"). Map a bare 1-based
+            # index to its row before falling back to text matching.
+            m = re.fullmatch(r"(?:option\s*)?(\d+)\.?", c)
+            idx = int(m.group(1)) - 1 if m else -1
+            if not (0 <= idx < len(options)):
+                idx = next(
+                    (i for i, o in enumerate(options)
+                     if o.strip().lower() == c or (c and c in o.strip().lower())),
+                    -1,
+                )
+            if idx >= 0:
+                await self._select_row(s, idx)
+            elif choice.strip():
+                # No listed option matched — give a free-form answer via "Type
+                # something" (the row immediately after the real options).
+                await self._select_row(s, len(options))
+                await asyncio.sleep(0.4)
+                await self._tmux("send-keys", "-t", s.pane, "-l", "--", choice.strip())
+                await asyncio.sleep(0.3)
+                await self._tmux("send-keys", "-t", s.pane, "Enter")
+            else:
+                await self._tmux("send-keys", "-t", s.pane, "Enter")
+
+        if not more and len(s.questions) > 1:
+            # Answering the LAST question of a multi-question form does NOT fire
+            # the tool — the TUI advances to a final review screen that needs one
+            # more confirmation. Single-question forms submit on selection.
+            await self._confirm_submit(s)
         return more
 
     def _menu_cursor(self, pane: str) -> int:
@@ -701,6 +705,30 @@ class TmuxClaudeRunner(ClaudeRunner):
                 await asyncio.sleep(0.2)
         # Move down to the Submit row (just past the options) and confirm.
         await self._select_row(s, len(options))
+
+    async def _confirm_submit(self, s: _TmuxSession) -> None:
+        """Confirm the review screen a multi-question form ends on.
+
+        After the last question is answered the TUI shows 'Review your answers'
+        with '❯ 1. Submit answers / 2. Cancel' and waits for Enter — the
+        AskUserQuestion tool only fires once that's confirmed. We previously
+        stopped at the last selection, so the form sat unsubmitted while the
+        voice agent believed it had answered (the user watched the menu stay
+        on screen). Verified live against CLI v2.1.165: single-question forms
+        submit on selection and never render this screen; multi-question forms
+        always do. The cursor defaults to 'Submit answers', but navigate to it
+        explicitly in case the highlight moved."""
+        for _ in range(20):  # the review screen renders well within ~3s
+            pane = await self._capture(s)
+            if "Submit answers" in pane:
+                if self._menu_cursor(pane) != 0:
+                    await self._select_row(s, 0)
+                else:
+                    await self._tmux("send-keys", "-t", s.pane, "Enter")
+                return
+            await asyncio.sleep(0.15)
+        log.warning("submit/review screen never appeared for %s; "
+                    "the question form may be left unsubmitted", s.handle)
 
     async def _wait_for_menu(self, s: _TmuxSession, timeout: float = 4.0) -> None:
         """Wait until the selection menu is actually rendered before sending keys

@@ -526,9 +526,20 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
         # naturally ("proceed" / "keep planning") rather than seeing an opaque
         # "use the ExitPlanMode tool" permission. Approve -> allow (leave plan
         # mode, start making changes); decline -> deny (stay in plan mode).
-        return ("proceed with the plan it just laid out — approving leaves plan "
+        text = ("proceed with the plan it just laid out — approving leaves plan "
                 "mode and starts making the changes; declining keeps it in plan "
                 "mode so you can refine the plan")
+        # Include the plan itself: the prompt text is the ONLY channel the voice
+        # agent reliably receives — by the time it reacts, the plan has usually
+        # scrolled out of the visible pane, so peek_screen can't recover it and
+        # the agent ends up approving a plan it never saw.
+        plan = str(ti.get("plan") or "").strip()
+        if plan:
+            if len(plan) > 8000:
+                plan = plan[:8000] + "\n…(plan truncated)"
+            text += (". The full plan follows — summarize it for the user "
+                     f"before asking:\n\n{plan}")
+        return text
     if tool_name == "Bash":
         cmd = ti.get("command", "")
         return f"run the command: {cmd}"
