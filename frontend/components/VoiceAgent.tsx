@@ -411,6 +411,14 @@ export default function VoiceAgent() {
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [showDebug, setShowDebug] = useState(false);
+  // The activity panel renders at the bottom of the page — when it's opened,
+  // scroll there so the user isn't left staring at an apparently-unchanged page.
+  useEffect(() => {
+    if (!showDebug) return;
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+    });
+  }, [showDebug]);
   const [logFilter, setLogFilter] = useState("");
   const [logErrorsOnly, setLogErrorsOnly] = useState(false);
   const [logPaused, setLogPaused] = useState(false);
