@@ -280,6 +280,23 @@ bootstrap() {
 
 # --- subcommands ------------------------------------------------------------
 
+# Treat ANY HTTP response from a URL as "process is up and serving" — even a 404
+# (the backend root may not route) counts. curl's own failures (connection
+# refused, not-listening-yet) yield code 000, which we treat as "not up yet".
+http_up() { # http_up <url> -> 0 if the server answered with any HTTP status
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)"
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+# True if something is already LISTENing on the given TCP port. lsof ships on
+# macOS and most Linux; if it's absent we can't tell, so we skip the check
+# silently (return "not in use") rather than blocking startup.
+port_in_use() { # port_in_use <port> -> 0 if a listener is bound
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -i ":$1" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
 cmd_up() {
   ensure_env
   bootstrap
@@ -292,20 +309,86 @@ cmd_up() {
   load_env
   unset VC_AUTH_TOKEN
 
+  # Port preflight: if 8000/3000 are already taken, starting again just spawns a
+  # process that fails to bind and dies — fail fast with a clear message instead
+  # of a confusing half-started state or a dead browser tab.
+  if port_in_use 8000; then
+    err "yapcode: port 8000 is already in use — is yapcode (or your dev server) already running?"
+    exit 1
+  fi
+  if port_in_use 3000; then
+    err "yapcode: port 3000 is already in use — is yapcode (or your dev server) already running?"
+    exit 1
+  fi
+
+  # Frontend output goes to a log file (truncated each run) in the XDG state dir,
+  # NOT /dev/null — otherwise a crashed frontend leaves no trace and the launcher
+  # just waits, then opens a dead tab. The backend keeps logging to the terminal
+  # (uvicorn already prints there), so we don't redirect it.
+  local STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/yapcode"
+  mkdir -p "$STATE_DIR"
+  local fe_log="$STATE_DIR/frontend.log"
+
   ( cd "$APP_ROOT/backend" && exec .venv/bin/python -m uvicorn main:app --port 8000 --log-level info ) &
   local back=$!
 
-  # Prefer the production server when a build exists (Homebrew install builds it);
-  # fall back to dev for a plain git clone.
+  # Dev vs. prod detection. `next build` (production) is the ONLY thing that
+  # writes .next/BUILD_ID; `next dev` also creates .next/ but WITHOUT a BUILD_ID.
+  # Keying off the directory alone meant that after a single dev run every later
+  # run picked `next start`, which exits immediately with "could not find a
+  # production build". So gate `start` on the BUILD_ID file specifically.
   local fe_cmd="dev"
-  [ -d "$APP_ROOT/frontend/.next" ] && fe_cmd="start"
-  ( cd "$APP_ROOT/frontend" && exec npm run "$fe_cmd" ) >/dev/null 2>&1 &
+  [ -f "$APP_ROOT/frontend/.next/BUILD_ID" ] && fe_cmd="start"
+  ( cd "$APP_ROOT/frontend" && exec npm run "$fe_cmd" ) >"$fe_log" 2>&1 &
   local front=$!
 
   trap 'kill "$back" "$front" 2>/dev/null || true' INT TERM EXIT
-  err "yapcode: starting (backend :8000, frontend :3000)…"
-  local i
-  for i in $(seq 1 60); do curl -fsS http://localhost:3000 >/dev/null 2>&1 && break; sleep 0.5; done
+
+  err "yapcode: starting backend (:8000) and frontend (:3000)…"
+  if [ "$fe_cmd" = "dev" ]; then
+    err "  frontend log: $fe_log"
+  fi
+
+  # Readiness loop: poll BOTH servers, print a ✓ for each exactly once, and —
+  # crucially — watch the PIDs so a server that dies fails us fast instead of
+  # making us wait out the whole timeout and then open a dead browser tab.
+  local back_ready=0 front_ready=0 i
+  for i in $(seq 1 120); do # 120 * 0.5s ≈ 60s overall timeout
+    # If either process died, abort: kill the survivor, explain, dump the log.
+    if ! kill -0 "$back" 2>/dev/null; then
+      kill "$front" 2>/dev/null || true
+      err "yapcode: backend (:8000) exited before becoming ready — see the uvicorn output above."
+      exit 1
+    fi
+    if ! kill -0 "$front" 2>/dev/null; then
+      kill "$back" 2>/dev/null || true
+      err "yapcode: frontend (:3000) exited before becoming ready. Last 15 lines of $fe_log:"
+      tail -n 15 "$fe_log" >&2 || true
+      exit 1
+    fi
+
+    if [ "$back_ready" -eq 0 ] && http_up http://localhost:8000/; then
+      back_ready=1; err "  ✓ backend ready"
+    fi
+    if [ "$front_ready" -eq 0 ] && http_up http://localhost:3000; then
+      front_ready=1; err "  ✓ frontend ready"
+    fi
+    [ "$back_ready" -eq 1 ] && [ "$front_ready" -eq 1 ] && break
+    sleep 0.5
+  done
+
+  # Timed out without both coming up: tear everything down and show the log.
+  if [ "$back_ready" -ne 1 ] || [ "$front_ready" -ne 1 ]; then
+    kill "$back" "$front" 2>/dev/null || true
+    err "yapcode: timed out waiting for servers to become ready. Last 15 lines of $fe_log:"
+    tail -n 15 "$fe_log" >&2 || true
+    exit 1
+  fi
+
+  err "✓ yapcode is running — http://localhost:3000"
+  if [ "$fe_cmd" = "dev" ]; then
+    err "  (first page load compiles the UI — it can take a few extra seconds)"
+  fi
   if command -v open >/dev/null 2>&1; then open http://localhost:3000 || true; else err "Open http://localhost:3000"; fi
   err "yapcode: running. Press Ctrl-C to stop both servers."
   wait
