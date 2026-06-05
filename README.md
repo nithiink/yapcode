@@ -1,4 +1,4 @@
-# voice-claude
+# yapcode
 
 A voice front-end for [Claude Code](https://claude.com/claude-code). A realtime
 voice agent (OpenAI / Azure OpenAI over WebRTC, or Google Gemini Live over
@@ -31,42 +31,42 @@ Claude TUI to the browser (and your phone).
 
 The quickest path on macOS (and Linuxbrew). The formula pulls in the system
 dependencies — `tmux`, Python 3.12, and Node — for you, builds the app, and puts
-a `voice-claude` command on your `PATH`:
+a `yapcode` command on your `PATH`:
 
 ```bash
-brew tap nithiink/voice-claude
-brew install voice-claude
+brew tap nithiink/yapcode
+brew install yapcode
 ```
 
 Then launch it:
 
 ```bash
-voice-claude up
+yapcode up
 ```
 
 The first `up` runs a short **setup wizard**: it asks for your voice provider and
 API key and the folder(s) the agent may edit, auto-generates a `VC_AUTH_TOKEN`
 (for later network/phone use), and writes everything to
-`~/.config/voice-claude/.env` with `600` permissions. It then starts the backend
+`~/.config/yapcode/.env` with `600` permissions. It then starts the backend
 and frontend and opens the app in your browser. Press Ctrl-C to stop both. That
 config file is the single source of truth — later runs never re-prompt.
 
 You still need **Claude Code installed and logged in** (see
-[Prerequisites](#prerequisites)) — it's the engine voice-claude drives. Homebrew
+[Prerequisites](#prerequisites)) — it's the engine yapcode drives. Homebrew
 can't install or log you into that for you.
 
 Other commands:
 
 ```bash
-voice-claude config    # open ~/.config/voice-claude/.env to change settings
-voice-claude session   # start + attach a voice-ready Claude session in this dir
+yapcode config    # open ~/.config/yapcode/.env to change settings
+yapcode session   # start + attach a voice-ready Claude session in this dir
 ```
 
-Update later with `brew upgrade voice-claude`. Your settings
-(`~/.config/voice-claude`) and runtime state (`~/.local/state/voice-claude`)
+Update later with `brew upgrade yapcode`. Your settings
+(`~/.config/yapcode`) and runtime state (`~/.local/state/yapcode`)
 live outside the install and survive upgrades and uninstall.
 
-For LAN/phone access, set up your config first with `voice-claude up`, then see
+For LAN/phone access, set up your config first with `yapcode up`, then see
 [LAN / phone (network mode)](#lan--phone-network-mode) — that path uses the
 `VC_AUTH_TOKEN` the wizard already generated.
 
@@ -131,7 +131,7 @@ cd frontend && npm run dev:network     # https://0.0.0.0:3000
 
 ## Windows (WSL2)
 
-There is **no native Windows support**: voice-claude drives Claude Code through
+There is **no native Windows support**: yapcode drives Claude Code through
 **tmux**, which only runs on Unix-like systems. The supported path is **WSL2**
 (Windows Subsystem for Linux 2) — a real Linux kernel running inside Windows, so
 `tmux`, Python, Node, and Claude Code all run natively. WSL2 forwards
@@ -177,9 +177,9 @@ side, not Windows. Install per <https://claude.com/claude-code>, then run
 Either use the launcher from a clone:
 
 ```bash
-git clone <repo-url> ~/voice-claude     # clone into your Linux home (see below)
-cd ~/voice-claude
-./bin/voice-claude up                   # first run = setup wizard, then starts both servers
+git clone <repo-url> ~/yapcode     # clone into your Linux home (see below)
+cd ~/yapcode
+./bin/yapcode up                   # first run = setup wizard, then starts both servers
 ```
 
 …or follow [Setup (from source)](#setup-from-source) + [Running](#running)
@@ -190,7 +190,7 @@ Then open **`http://localhost:3000` in your Windows browser** (Chrome/Edge).
 
 **WSL2-specific gotchas:**
 
-- **Clone into your Linux home** (e.g. `~/voice-claude`), **not** `/mnt/c/...` —
+- **Clone into your Linux home** (e.g. `~/yapcode`), **not** `/mnt/c/...` —
   the Windows-mounted drive is slow and breaks file watching.
 - Set `ALLOWED_PROJECT_ROOTS` to a **Linux path** (e.g. `/home/<you>/projects`),
   and keep the projects you want Claude to edit on the Linux side too.
@@ -201,17 +201,17 @@ Then open **`http://localhost:3000` in your Windows browser** (Chrome/Edge).
 
 You can drive one Claude session by **voice and keyboard at the same time** — talk to the voice
 agent while you keep typing in your terminal, all on the same live `claude` process. This works
-because voice-claude runs each session in a tmux session (`vc_<id>`), and tmux lets multiple
+because yapcode runs each session in a tmux session (`vc_<id>`), and tmux lets multiple
 clients (the browser live-terminal, the voice agent, and your own `tmux attach`) drive one pane
 at once — single process, single transcript, no conflicts.
 
 Install the Claude Code plugin in [`integrations/claude-code-plugin/`](integrations/claude-code-plugin/),
 then:
 
-- **Start voice-ready:** run `voice-claude` (the plugin's launcher) instead of `claude`. Work
+- **Start voice-ready:** run `yapcode` (the plugin's launcher) instead of `claude`. Work
   normally; type `/voice-handoff` to switch voice on — no restart, keep typing, open the app to
   talk.
-- **From a plain `claude` session:** type `/voice-handoff`; voice-claude reopens the session
+- **From a plain `claude` session:** type `/voice-handoff`; yapcode reopens the session
   under management and prints a `tmux attach -t vc_…` command — press Ctrl-D, run it, and you're
   co-driving with full features.
 

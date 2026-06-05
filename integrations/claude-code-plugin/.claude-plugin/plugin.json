@@ -1,7 +1,7 @@
 {
-  "name": "voice-claude",
-  "description": "Hand off a terminal Claude Code session to the voice-claude voice agent — continue your work by voice while still typing in the same session.",
+  "name": "yapcode",
+  "description": "Hand off a terminal Claude Code session to the yapcode voice agent — continue your work by voice while still typing in the same session.",
   "version": "0.1.0",
-  "author": { "name": "voice-claude" },
-  "homepage": "https://github.com/nithiink/voice-claude"
+  "author": { "name": "yapcode" },
+  "homepage": "https://github.com/nithiink/yapcode"
 }

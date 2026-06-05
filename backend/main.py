@@ -1,4 +1,4 @@
-"""Voice-Claude backend.
+"""Yapcode backend.
 
 Mints realtime voice tokens (OpenAI / Azure OpenAI over WebRTC, or Google
 Gemini Live over WebSocket) and dispatches the voice model's function calls to
@@ -49,7 +49,7 @@ from tools import TOOL_DEFINITIONS, dispatch_tool
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-log = logging.getLogger("voice-claude")
+log = logging.getLogger("yapcode")
 
 
 class _RedactTokenFilter(logging.Filter):
@@ -124,7 +124,7 @@ DEBUG_POLLS = os.getenv("VC_DEBUG_POLLS", "0") == "1"
 
 # Interactive API docs are disabled: they'd disclose the full route/schema map
 # of a command-executing backend to anyone who can reach the port.
-app = FastAPI(title="Voice-Claude", lifespan=lifespan,
+app = FastAPI(title="Yapcode", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 # Origins restricted to the trusted frontend (localhost + private-LAN dev) instead
 # of "*": a malicious web page in the user's browser can no longer read responses
@@ -234,7 +234,7 @@ class DebugLogRequest(BaseModel):
 
 class HandoffRequest(BaseModel):
     # Terminal -> voice handoff: a Claude Code session the user is running in
-    # their own terminal asks voice-claude to take it over (the /voice-handoff
+    # their own terminal asks yapcode to take it over (the /voice-handoff
     # plugin command POSTs this).
     session_id: str
     cwd: str
@@ -398,8 +398,8 @@ async def create_session(req: SessionRequest) -> dict[str, Any]:
 @app.post("/session/handoff", dependencies=[Depends(require_auth)])
 async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
     """Adopt a Claude Code session the user started in their own terminal so the
-    voice agent can co-drive it. If the id is already a live voice-claude session
-    (e.g. started via the `voice-claude` launcher), this is a no-op that just hands
+    voice agent can co-drive it. If the id is already a live yapcode session
+    (e.g. started via the `yapcode` launcher), this is a no-op that just hands
     back the attach target. Otherwise the session is reopened in a hooked tmux pane
     via `claude --resume` — the caller should then exit the original process and
     `tmux attach` to the returned target (single writer per session)."""
@@ -417,7 +417,7 @@ async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
                 "message": f"Voice is live on this session. Keep typing here, or attach "
                            f"another terminal with: {attach}"}
 
-    # Bare session — reopen it under voice-claude. resolve_project_path realpath +
+    # Bare session — reopen it under yapcode. resolve_project_path realpath +
     # containment-checks the absolute cwd against ALLOWED_PROJECT_ROOTS (fail closed).
     try:
         cwd = resolve_project_path(req.cwd)
@@ -429,7 +429,7 @@ async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
     name = set_session_name(handle, req.name or default_name_for(cwd))
     attach = f"tmux attach -t {cli_pane_for(handle) or 'vc_' + handle[:8]}"
     return {"session_id": handle, "name": name, "cwd": cwd, "attach": attach,
-            "message": f"Reopened '{name}' under voice-claude. Exit your old session "
+            "message": f"Reopened '{name}' under yapcode. Exit your old session "
                        f"(Ctrl-D), then run: {attach}"}
 
 

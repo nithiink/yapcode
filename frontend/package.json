@@ -1,5 +1,5 @@
 {
-  "name": "voice-claude-frontend",
+  "name": "yapcode-frontend",
   "version": "0.1.0",
   "private": true,
   "comment": "Exact-pinned versions, audited clean (npm audit: 0 vulnerabilities). package-lock.json pins + hashes the full transitive tree; install with `npm ci`.",

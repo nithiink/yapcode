@@ -26,7 +26,7 @@ import claude_agent_sdk as sdk
 from permissions import classify
 from event_log import log_event
 
-log = logging.getLogger("voice-claude.runner")
+log = logging.getLogger("yapcode.runner")
 
 Status = Literal["running", "needs_permission", "needs_choice", "completed", "error"]
 
