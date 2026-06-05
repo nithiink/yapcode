@@ -284,10 +284,19 @@ export class RealtimeSession implements VoiceSession {
         const item = evt.item;
         if (item?.type === "function_call" && item.call_id) {
           this.callNames.set(item.call_id, item.name);
-          const argsStr =
+          let argsStr =
             item.arguments && item.arguments.trim()
               ? item.arguments
               : this.callArgs.get(item.call_id) || "";
+          // A tool with NO parameters has nothing to stream — empty args ARE
+          // complete. Dispatch now instead of burning the 1.2s grace timer
+          // (which is what every zero-param call on Azure would otherwise do).
+          if (!argsStr) {
+            const def: any = this.tools.find((t: any) => t.name === item.name);
+            if (def && Object.keys(def.parameters?.properties || {}).length === 0) {
+              argsStr = "{}";
+            }
+          }
           if (argsStr) {
             this.trace(`conversation.item → function_call ${item.name} args=${argsStr.slice(0, 60)}`);
             emit({ type: "state", state: "thinking" });
