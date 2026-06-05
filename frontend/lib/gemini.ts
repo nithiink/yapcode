@@ -304,13 +304,7 @@ export class GeminiSession implements VoiceSession {
 
   // --- audio setup --------------------------------------------------------
   private async initAudio() {
-    // Explicit DSP constraints — Gemini playback goes through a WebAudio
-    // AudioContext (not an <audio> element), the case where Chrome's echo
-    // canceller is least dependable, so don't rely on defaults: the assistant
-    // hearing itself reads as user speech and trips barge-in.
-    this.micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.opts.onLocalStream?.(this.micStream); // feed the user's mic to the orb analyser
 
     this.inCtx = new AudioContext({ sampleRate: INPUT_RATE });
@@ -414,10 +408,6 @@ export class GeminiSession implements VoiceSession {
       tools: toGeminiTools(this.tools),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      // Activity detection stays at Gemini defaults — long real-world testing
-      // found them good; tuned values added 2026-06-05 made it feel laggy and
-      // were reverted same day. The echo/noise DSP on getUserMedia is the layer
-      // that handles self-interruption.
       // Resume the prior conversation when reconnecting (handle preserves
       // context); otherwise start a fresh resumable session.
       sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
