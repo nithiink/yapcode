@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Yap Code — line waveform favicon colors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg:#1a1917; --panel:#211f1d; --ink:#e9e3d8; --mut:#928c81; --dim:#6f6a61; --acc:#dd8a6a; --line:#322f2b; --line2:#3c3833; --disp:"Anton",sans-serif; --body:"Archivo",ui-sans-serif,system-ui,sans-serif; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); margin: 0; padding: 44px 28px 110px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 32px; letter-spacing: .02em; margin: 0 0 8px; }
+  .sub { color: var(--mut); font-size: 14px; margin: 0 0 4px; line-height: 1.5; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 0 0 28px; line-height: 1.5; }
+  h2 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 15px; letter-spacing: .04em; color: var(--acc); margin: 28px 0 14px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  @media (max-width: 860px){ .grid { grid-template-columns: repeat(3,1fr);} }
+  @media (max-width: 560px){ .grid { grid-template-columns: repeat(2,1fr);} }
+  .sw { text-align: center; }
+  .tile { background: linear-gradient(90deg, #14130f 50%, #ece6da 50%); border: 1px solid var(--line2); border-radius: 12px; height: 92px; display: grid; place-items: center; margin-bottom: 7px; }
+  .tile svg { width: 50px; height: 50px; }
+  .small { display:flex; justify-content:center; }
+  .t16 { background: linear-gradient(90deg,#14130f 50%,#ece6da 50%); border-radius:4px; padding:5px; display:inline-flex; }
+  .t16 svg { width: 16px; height: 16px; }
+  .label { font-size: 11px; color: var(--mut); margin-top: 6px; }
+  .label b { color: var(--ink); font-weight: 600; }
+  .note { color: var(--dim); font-size: 12px; margin-top: 32px; line-height: 1.6; }
+  .note b { color: var(--mut); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Yap Code — line waveform</h1>
+  <p class="sub">Shape <b>S3 (line wave)</b> in a wide color range, on a transparent background over a split <span style="color:#bbb">dark&nbsp;|&nbsp;light</span> tile, plus a true 16px size each.</p>
+  <p class="hint">Pick any swatch (or give me a hex). I'll ship it to <code style="color:var(--mut)">app/icon.svg</code> on transparent.</p>
+
+  <h2>Flat colors</h2>
+  <div class="grid" id="flat"></div>
+
+  <h2>Duotone / gradient <span style="font-family:var(--body);text-transform:none;letter-spacing:0;color:var(--dim);font-size:12px">— a single clean stroke, so gradients stay tasteful here</span></h2>
+  <div class="grid" id="grad"></div>
+
+  <p class="note">Tell me the color name or hex (flat or one of the gradients) and I'll finalize <code style="color:var(--mut)">app/icon.svg</code>. Want it thicker/thinner or a different color entirely? Say so.</p>
+</div>
+
+<script>
+  const D = "M2 16 C4 16 4 23 6 23 C8 23 8 6 10.5 6 C13 6 13 27 16 27 C19 27 19 8 21.5 8 C24 8 24 22 26 22 C28 22 28 16 30 16";
+  function line(stroke) {
+    return `<svg viewBox="0 0 32 32"><path d="${D}" fill="none" stroke="${stroke}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  function lineGrad(id, stops) {
+    const s = stops.map(([o,c]) => `<stop offset="${o}" stop-color="${c}"/>`).join("");
+    return `<svg viewBox="0 0 32 32"><defs><linearGradient id="${id}" x1="2" y1="16" x2="30" y2="16" gradientUnits="userSpaceOnUse">${s}</linearGradient></defs><path d="${D}" fill="none" stroke="url(#${id})" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  const FLAT = [
+    ["Accent (brand)","#dd8a6a"],["Coral","#ea8a63"],["Terracotta","#c2704f"],["Burnt orange","#d2691e"],["Amber","#e0a458"],
+    ["Gold","#d8b07a"],["Peach","#f3b58a"],["Cream","#f3d9c6"],["Off-white","#e9e3d8"],["White","#ffffff"],
+    ["Red","#e0584a"],["Rose","#d98a9e"],["Pink","#e89bb4"],["Magenta","#d36b9e"],["Lemon","#e8d57a"],
+    ["Sage","#9cc7a4"],["Mint","#8fd4b0"],["Green","#7bbf6a"],["Teal","#6fc1b1"],["Emerald","#5bbf8f"],
+    ["Sky","#93a6c9"],["Blue","#6f93d6"],["Cyan","#6fc4d6"],["Steel","#7d9bb0"],["Violet","#b89cc9"],
+    ["Lavender","#c3a8e0"],["Purple","#9d7fd0"],["Indigo","#8a8fd0"],["Slate","#8a8a8a"],["Charcoal","#3c3833"],
+  ];
+  const GRAD = [
+    ["Sunset","g1",[["0","#f3d9c6"],["0.5","#dd8a6a"],["1","#c2704f"]]],
+    ["Coral→Rose","g2",[["0","#ea8a63"],["1","#d36b9e"]]],
+    ["Peach→Gold","g3",[["0","#f3b58a"],["1","#d8b07a"]]],
+    ["Teal→Sky","g4",[["0","#6fc1b1"],["1","#93a6c9"]]],
+    ["Violet→Coral","g5",[["0","#b89cc9"],["1","#dd8a6a"]]],
+  ];
+  document.getElementById("flat").innerHTML = FLAT.map(([n,h]) => `
+    <div class="sw"><div class="tile">${line(h)}</div><div class="small"><span class="t16">${line(h)}</span></div><div class="label"><b>${n}</b><br>${h}</div></div>`).join("");
+  document.getElementById("grad").innerHTML = GRAD.map(([n,id,stops]) => `
+    <div class="sw"><div class="tile">${lineGrad(id,stops)}</div><div class="small"><span class="t16">${lineGrad(id+"b",stops)}</span></div><div class="label"><b>${n}</b></div></div>`).join("");
+</script>
+</body>
+</html>
