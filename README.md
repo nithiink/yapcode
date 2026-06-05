@@ -20,12 +20,18 @@ Claude TUI to the browser (and your phone).
 
 ## Prerequisites
 
-- Python 3.12+ and Node 20+.
+- macOS or Linux. On **Windows**, run it under WSL2 — see
+  [Windows (WSL2)](#windows-wsl2).
+- `tmux`, Python 3.12+, and Node 20+ — macOS: `brew install tmux node` (and
+  `python@3.12` if your `python3` is older); Ubuntu 24.04:
+  `sudo apt install tmux python3 python3-venv` plus Node 20 via
+  [nvm](https://github.com/nvm-sh/nvm). (The
+  [Homebrew install](#install-with-homebrew-recommended) handles all three for
+  you.)
 - A Claude Code login (the CLI uses your existing subscription — no Anthropic API
   key needed).
-- A realtime voice provider key: Azure OpenAI, OpenAI, or Google Gemini.
-- macOS or Linux (it needs `tmux`). On **Windows**, run it under WSL2 — see
-  [Windows (WSL2)](#windows-wsl2).
+- A realtime voice provider key: OpenAI, Azure OpenAI, or Google Gemini
+  ([Gemini has a free API tier](https://aistudio.google.com/apikey)).
 
 ## Install with Homebrew (recommended)
 
@@ -70,10 +76,29 @@ For LAN/phone access, set up your config first with `yapcode up`, then see
 [LAN / phone (network mode)](#lan--phone-network-mode) — that path uses the
 `VC_AUTH_TOKEN` the wizard already generated.
 
-## Setup (from source)
+## Quick start (from a clone)
 
-Prefer to run from a clone — for development, or to hack on the code? Install the
-dependencies manually (you'll also need `tmux` on your `PATH`):
+Running from source? One command does the whole setup:
+
+```bash
+git clone https://github.com/nithiink/yapcode.git
+cd yapcode
+./bin/yapcode up
+```
+
+The first run walks you through the same **setup wizard** as the Homebrew
+install (voice provider, API key, allowed folders → `~/.config/yapcode/.env`),
+then installs the backend venv and frontend dependencies automatically, starts
+both servers, and opens <http://localhost:3000>. Press Ctrl-C to stop. Later
+runs skip straight to launch — config and dependencies are only set up once.
+
+`./bin/yapcode config` and `./bin/yapcode session` work from a clone too.
+
+## Manual setup (for development)
+
+Prefer to wire up every moving part yourself — or hacking on the code and want
+the dev servers under your own control? Install the dependencies manually
+(you'll also need `tmux` on your `PATH`):
 
 > **Check your Python first:** `python3 --version` must print **3.12+**. With an
 > older default (Ubuntu 20.04 ships 3.8) pip fails with the misleading error
@@ -99,7 +124,11 @@ npm ci
 
 ## Running
 
-### Localhost (simplest)
+> If you use the launcher (`yapcode up` / `./bin/yapcode up`), localhost running
+> is already handled — this section is the manual equivalent, useful for
+> development. Network mode applies to everyone.
+
+### Localhost (manual)
 
 ```bash
 # terminal 1 — backend on http://localhost:8000
@@ -177,14 +206,14 @@ side, not Windows. Install per <https://claude.com/claude-code>, then run
 Either use the launcher from a clone:
 
 ```bash
-git clone <repo-url> ~/yapcode     # clone into your Linux home (see below)
+git clone https://github.com/nithiink/yapcode.git ~/yapcode   # into your Linux home (see below)
 cd ~/yapcode
 ./bin/yapcode up                   # first run = setup wizard, then starts both servers
 ```
 
-…or follow [Setup (from source)](#setup-from-source) + [Running](#running)
-manually. ([Homebrew](#install-with-homebrew-recommended) also works under WSL2
-via Linuxbrew once the repo is public.)
+…or follow [Manual setup (for development)](#manual-setup-for-development) +
+[Running](#running). ([Homebrew](#install-with-homebrew-recommended) also works
+under WSL2 via Linuxbrew once the repo is public.)
 
 Then open **`http://localhost:3000` in your Windows browser** (Chrome/Edge).
 
@@ -220,8 +249,10 @@ terminal). See the plugin README for install/config.
 
 ## Configuration
 
-All backend config lives in `backend/.env` (copy from `.env.example`). Key
-settings:
+If you used the launcher's wizard, config lives in `~/.config/yapcode/.env` —
+edit it anytime (`yapcode config`); it's the single source of truth and wins
+over `backend/.env`. For manual setups, config lives in `backend/.env` (copy
+from `.env.example`). Same variables either way. Key settings:
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
