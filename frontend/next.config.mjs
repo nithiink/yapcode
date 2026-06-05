@@ -6,9 +6,9 @@ const nextConfig = {
   // Allow loading the dev server's /_next/* resources (JS chunks, HMR) when the
   // app is opened from another device on the LAN — otherwise Next 16 blocks them
   // as cross-origin and the client never hydrates (toggles/buttons do nothing).
-  // Add your laptop's LAN IP(s) here; private-range wildcards cover IP changes.
+  // Private-range wildcards cover any LAN IP; add a specific origin here only
+  // if your network uses something outside these ranges.
   allowedDevOrigins: [
-    "192.168.29.81",
     "192.168.*.*",
     "10.*.*.*",
     "172.16.*.*",
