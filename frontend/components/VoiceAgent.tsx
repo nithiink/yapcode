@@ -299,7 +299,7 @@ const MODEL_OPTIONS: Record<VoiceProvider, { value: string; label: string }[]> =
   ],
   gemini: [
     { value: "gemini-3.1-flash-live-preview", label: "Gemini 3.1 Flash Live · best" },
-    { value: "gemini-2.5-flash-native-audio-preview-12-2025", label: "Gemini 2.5 Native Audio · economy" },
+    { value: "gemini-2.5-flash-native-audio-preview-12-2025", label: "Gemini 2.5 Native Audio" },
   ],
 };
 
