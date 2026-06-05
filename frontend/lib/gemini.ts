@@ -414,18 +414,10 @@ export class GeminiSession implements VoiceSession {
       tools: toGeminiTools(this.tools),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      // Server VAD tuning (mirrors the OpenAI-side fix): default sensitivity
-      // barged in on echo/breath and cut the assistant off mid-sentence. LOW
-      // start-sensitivity needs real speech to interrupt; LOW end-sensitivity +
-      // 600ms silence stops a mid-sentence pause from ending the user's turn.
-      realtimeInputConfig: {
-        automaticActivityDetection: {
-          startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
-          endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
-          prefixPaddingMs: 300,
-          silenceDurationMs: 600,
-        },
-      },
+      // Activity detection stays at Gemini defaults — long real-world testing
+      // found them good; tuned values added 2026-06-05 made it feel laggy and
+      // were reverted same day. The echo/noise DSP on getUserMedia is the layer
+      // that handles self-interruption.
       // Resume the prior conversation when reconnecting (handle preserves
       // context); otherwise start a fresh resumable session.
       sessionResumption: resumeHandle ? { handle: resumeHandle } : {},

@@ -285,16 +285,7 @@ def _mint_config(
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
             "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
-            "audio": {
-                # Mirrors the frontend's session.update VAD tuning (which Azure
-                # ignores — config binds at mint): the default threshold (0.5)
-                # barged in on echo/noise and cut the assistant off mid-sentence.
-                "input": {"turn_detection": {
-                    "type": "server_vad", "threshold": 0.7,
-                    "prefix_padding_ms": 300, "silence_duration_ms": 600,
-                }},
-                "output": {"voice": voice},
-            },
+            "audio": {"output": {"voice": voice}},
         }
         if req.instructions:
             session_cfg["instructions"] = req.instructions

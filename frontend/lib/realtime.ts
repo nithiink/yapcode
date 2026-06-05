@@ -216,18 +216,9 @@ export class RealtimeSession implements VoiceSession {
       audio: {
         // Input transcription stays off to avoid the separate per-minute
         // transcription charge — the model understands speech directly.
-        // VAD: default threshold (0.5) barged in on echo/breath and cut the
-        // assistant off mid-sentence. Raise it and require a longer silence
-        // before treating the turn as over; barge-in still works, it just
-        // needs real speech.
-        input: {
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.7,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 600,
-          },
-        },
+        // VAD stays at server defaults (tested-good); explicit DSP on
+        // getUserMedia handles echo so the assistant doesn't barge itself in.
+        input: { turn_detection: { type: "server_vad" } },
         output: { voice: this.opts.voice },
       },
     };
