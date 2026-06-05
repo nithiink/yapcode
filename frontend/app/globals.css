@@ -177,7 +177,7 @@ body {
    still can't grow the row — only the session list stretches it beyond the
    floor, and the conversation follows. The scroll area then flexes to fill
    whatever height the cell receives. */
-.conv-panel { display: flex; flex-direction: column; min-height: 360px; }
+.conv-panel { display: flex; flex-direction: column; min-height: 520px; }
 .conv-panel .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .conv-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-right: 10px; }
 /* Keep items at their natural height and let the panel scroll. Without this, a

@@ -1008,13 +1008,30 @@ export default function VoiceAgent() {
       setTimeline((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        // Coalesce streaming deltas into the in-progress turn only if it's still
-        // the most recent item (nothing — including a tool row — came in between).
+        // Fast path: streaming deltas coalesce into the in-progress turn while
+        // it's still the most recent item.
         if (last && last.kind === "turn" && last.role === e.role && !last.final) {
           next[next.length - 1] = { kind: "turn", role: e.role, text: e.text, final: e.final };
-        } else {
-          next.push({ kind: "turn", role: e.role, text: e.text, final: e.final });
+          return next.slice(-80);
         }
+        // Otherwise a tool row interleaved between this turn's deltas and now, or
+        // the provider re-sent a final. Walk back to the most recent turn for
+        // this role rather than blindly pushing (which duplicated the message).
+        for (let k = next.length - 1; k >= 0; k--) {
+          const it = next[k];
+          if (it.kind !== "turn" || it.role !== e.role) continue;
+          if (!it.final) {
+            // In-progress turn for this role exists earlier — finalize it in
+            // place instead of pushing a second copy.
+            next[k] = { kind: "turn", role: e.role, text: e.text, final: e.final };
+            return next.slice(-80);
+          }
+          // Most recent turn for this role is already final. A repeated final
+          // with identical text is a provider echo — drop it.
+          if (e.final && it.text === e.text) return next;
+          break;
+        }
+        next.push({ kind: "turn", role: e.role, text: e.text, final: e.final });
         return next.slice(-80);
       });
     } else if (e.type === "tool_call" && e.result !== undefined) {
