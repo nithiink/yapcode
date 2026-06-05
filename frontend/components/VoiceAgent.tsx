@@ -1276,13 +1276,18 @@ export default function VoiceAgent() {
             reports back — while you keep talking.
           </p>
           <div className="actions">
-            {!connected ? (
-              <button className="talk" onClick={connect}>
-                Connect &amp; talk
-              </button>
-            ) : (
+            {connected ? (
               <button className="talk stop" onClick={disconnect}>
                 Disconnect
+              </button>
+            ) : vstate === "connecting" ? (
+              <button className="talk connecting" disabled aria-busy="true">
+                <span className="spinner" aria-hidden />
+                Connecting…
+              </button>
+            ) : (
+              <button className="talk" onClick={connect}>
+                Connect &amp; talk
               </button>
             )}
             {connected && (
