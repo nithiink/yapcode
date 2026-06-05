@@ -17,7 +17,7 @@ frontend/.certs/
 
 # Interactive CLI session control dirs (runtime storage rehydration reads).
 # Default location is inside the project; override with VC_SESSION_STORE.
-.voice-claude/
+.yapcode/
 
 # Cost log (per-connection voice + Claude session cost JSONL; for analysis,
 # not source). Override path with VC_COST_LOG_PATH.

@@ -39,7 +39,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
-log = logging.getLogger("voice-claude.events")
+log = logging.getLogger("yapcode.events")
 
 # Repo root = backend/.. (this file lives in backend/), matching cost_log.py.
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "debug-log.jsonl"

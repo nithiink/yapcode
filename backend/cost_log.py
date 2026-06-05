@@ -37,7 +37,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("voice-claude.cost_log")
+log = logging.getLogger("yapcode.cost_log")
 
 # Repo root = backend/.. (this file lives in backend/).
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "cost-log.jsonl"

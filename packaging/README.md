@@ -6,14 +6,14 @@ private. Publish only after the repo is public and a release tag exists.
 
 ## Files
 
-- **`voice-claude.rb`** — the formula (source-of-truth draft). Declares the
+- **`yapcode.rb`** — the formula (source-of-truth draft). Declares the
   `node` / `python@3.12` / `tmux` dependencies, builds the Python venv and the
-  Next.js production bundle at install time, and installs a `voice-claude`
+  Next.js production bundle at install time, and installs a `yapcode`
   launcher on `PATH`. The launcher redirects the backend's runtime writes
-  (session store, cost/debug logs) into `~/.local/state/voice-claude` so nothing
+  (session store, cost/debug logs) into `~/.local/state/yapcode` so nothing
   is written into the read-only Cellar.
 - **`release.sh`** — tags a release, computes the tarball `sha256`, and stamps
-  `url` + `sha256` into `voice-claude.rb`.
+  `url` + `sha256` into `yapcode.rb`.
 
 ## Going-live sequence (after the repo is public)
 
@@ -25,23 +25,23 @@ private. Publish only after the repo is public and a release tag exists.
    ```bash
    packaging/release.sh v0.1.0
    ```
-4. **Create the tap repo** `github.com/nithiink/homebrew-voice-claude` (public),
-   copy the stamped `voice-claude.rb` to `Formula/voice-claude.rb`, and push.
+4. **Create the tap repo** `github.com/nithiink/homebrew-yapcode` (public),
+   copy the stamped `yapcode.rb` to `Formula/yapcode.rb`, and push.
 5. **Users install:**
    ```bash
-   brew tap nithiink/voice-claude
-   brew install voice-claude
-   voice-claude up
+   brew tap nithiink/yapcode
+   brew install yapcode
+   yapcode up
    ```
 
 ## Updating later
 
 Bump the version, re-run `packaging/release.sh vX.Y.Z`, and copy the stamped
-formula into the tap. Users upgrade with `brew upgrade voice-claude`.
+formula into the tap. Users upgrade with `brew upgrade yapcode`.
 
 ## Prerequisites the formula can't remove
 
 `brew install` handles the system dependencies, but every user still needs
 **Claude Code installed and logged in** and a **voice-provider key** — the
-formula's `caveats` block tells them so, and the first `voice-claude up` runs the
+formula's `caveats` block tells them so, and the first `yapcode up` runs the
 setup wizard.

@@ -37,9 +37,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # mode, settings.json, decisions/) — the on-disk storage rehydration reads.
 # Defaults to a folder inside the project so it's easy to find, inspect, and
 # edit (gitignored). Override with VC_SESSION_STORE to point anywhere, e.g.
-# back to ~/.voice-claude/tmux.
+# back to ~/.yapcode/tmux.
 SESSION_STORE_DIR: str = os.path.abspath(os.path.expanduser(
-    os.getenv("VC_SESSION_STORE") or os.path.join(_REPO_ROOT, ".voice-claude", "tmux")
+    os.getenv("VC_SESSION_STORE") or os.path.join(_REPO_ROOT, ".yapcode", "tmux")
 ))
 
 

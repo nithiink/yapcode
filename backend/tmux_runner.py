@@ -46,7 +46,7 @@ from claude_runner import (
 from permissions import classify
 from event_log import log_event
 
-log = logging.getLogger("voice-claude.tmux")
+log = logging.getLogger("yapcode.tmux")
 
 
 def _slabel(s: "_TmuxSession") -> str:
