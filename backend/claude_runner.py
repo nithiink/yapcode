@@ -33,6 +33,7 @@ Status = Literal["running", "needs_permission", "needs_choice", "completed", "er
 _ALLOW_WORDS = {
     "allow", "yes", "approve", "approved", "y", "ok", "okay", "sure",
     "go", "go ahead", "do it", "yep", "yeah", "confirm", "accept",
+    "proceed",  # natural "yes" for the ExitPlanMode plan-approval prompt
 }
 
 
@@ -519,6 +520,15 @@ class SDKClaudeRunner(ClaudeRunner):
 
 def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
     """Human, speakable description of a tool request."""
+    if tool_name == "ExitPlanMode":
+        # The plan-mode "how do you want to proceed?" approval. Phrase it as the
+        # plan decision so the voice agent recognizes it and the user can answer
+        # naturally ("proceed" / "keep planning") rather than seeing an opaque
+        # "use the ExitPlanMode tool" permission. Approve -> allow (leave plan
+        # mode, start making changes); decline -> deny (stay in plan mode).
+        return ("proceed with the plan it just laid out — approving leaves plan "
+                "mode and starts making the changes; declining keeps it in plan "
+                "mode so you can refine the plan")
     if tool_name == "Bash":
         cmd = ti.get("command", "")
         return f"run the command: {cmd}"
