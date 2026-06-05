@@ -104,13 +104,32 @@ body {
 .orbcap { text-align: center; margin-top: 30px; font-size: 14px; color: var(--mut); max-width: 26ch; transition: opacity 0.3s ease, color 0.3s ease; }
 
 /* ---- controls row ---- */
-.controls-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end; padding: 24px 0; border-bottom: 1px solid var(--line); }
+/* The section's bottom border lives on the caption/hint line below the row,
+   so no divider cuts between the pickers and the "✓ Recommended" caption. */
+.controls-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end; padding: 24px 0 0; }
 .ctl .lab { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--mut); margin-bottom: 9px; }
 .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
 .seg.locked { opacity: 0.6; }
 .segbtn { font-family: var(--body); font-weight: 500; font-size: 14px; background: transparent; color: var(--mut); border: 0; padding: 8px 18px; border-radius: 999px; cursor: pointer; }
 .segbtn.on { background: var(--panel2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
 .segbtn:disabled { cursor: default; }
+/* Labeled picker groups: a micro-label naming each group's role (VOICE /
+   ROUTE / CLAUDE), with an optional ⓘ popover for the choices that need a
+   sentence of explanation. The recommended pairing lives in one short caption
+   under the row (.ctrlcap) instead of badges on the buttons. */
+.grp { display: flex; flex-direction: column; gap: 7px; position: relative; }
+.grplab { display: flex; align-items: center; gap: 6px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); padding-left: 14px; }
+.ctrlcap { font-size: 11.5px; color: var(--dim); padding: 10px 0 22px; }
+.ctrlcap .ck { color: var(--good); }
+.ctrlcap b { color: var(--mut); font-weight: 600; }
+.infobtn { width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--line2); background: transparent; color: var(--dim); font-size: 9px; font-weight: 600; font-style: italic; cursor: pointer; line-height: 1; padding: 0; display: inline-grid; place-items: center; }
+.infobtn:hover { color: var(--ink); border-color: var(--mut); }
+.infopop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 308px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 4px 14px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
+.infopop .prow { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.infopop .prow:last-child { border-bottom: 0; }
+.infopop .pname { flex: none; width: 40px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.infopop .pname .r { display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.08em; color: var(--good); text-transform: uppercase; margin-top: 2px; }
+.infopop .pdesc { font-size: 11.5px; color: var(--mut); line-height: 1.5; }
 /* Model picker: a labeled, segmented pill ("Model │ value ⌄") sized to match
    the provider/backend toggle groups beside it. */
 .modelpick { display: inline-flex; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding-left: 16px; transition: border-color 0.15s ease; }
@@ -120,7 +139,7 @@ body {
 .modelpick-lab { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mut); white-space: nowrap; pointer-events: none; }
 .modelsel { font-family: var(--body); font-weight: 500; font-size: 14px; color: var(--ink); background-color: transparent; border: 0; border-left: 1px solid var(--line); margin-left: 14px; padding: 12px 34px 12px 15px; cursor: pointer; appearance: none; -webkit-appearance: none; outline: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23928c81' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
 .modelsel option { background: var(--panel2); color: var(--ink); }
-.togglehint { font-size: 11px; color: var(--dim); padding-top: 10px; }
+.togglehint { font-size: 11px; color: var(--dim); padding: 10px 0 22px; }
 .togglehint.warn { color: var(--warn); }
 
 /* ---- permission card ---- */

@@ -287,8 +287,9 @@ type TxEvent =
   | { kind: "tool_result"; ok: boolean; text: string };
 
 // Realtime models the user can pick per provider, best/most-capable first.
-// Azure has none: its model is the server-side deployment (AZURE_OPENAI_DEPLOYMENT),
-// not a client choice — so no dropdown is shown for it.
+// Azure's list is dynamic: its "models" are the server-side deployment names
+// (AZURE_OPENAI_DEPLOYMENTS env), fetched from /api/voice/models at mount —
+// the static entry stays empty so no dropdown shows until they load.
 const MODEL_OPTIONS: Record<VoiceProvider, { value: string; label: string }[]> = {
   azure: [],
   openai: [
@@ -302,27 +303,26 @@ const MODEL_OPTIONS: Record<VoiceProvider, { value: string; label: string }[]> =
   ],
 };
 
-// The default (first) model for a provider, or "" when it isn't client-selectable.
-const defaultModelFor = (provider: VoiceProvider): string =>
-  MODEL_OPTIONS[provider][0]?.value ?? "";
-
-// Per-provider connection params. `model` is the user's dropdown choice; for
-// Azure it's ignored (the deployment name is set server-side).
+// Per-provider connection params. `model` is the user's dropdown choice.
 function connectionParams(provider: VoiceProvider, model: string): Partial<RealtimeOptions> {
   if (provider === "gemini") {
     return { provider: "gemini", model, voice: "Kore" };
   }
   if (provider === "azure") {
-    // Azure-hosted OpenAI realtime. The model is the Azure *deployment* name set
-    // server-side (AZURE_OPENAI_DEPLOYMENT), so the client doesn't pick one.
-    return { provider: "azure", voice: "marin" };
+    // Azure-hosted OpenAI realtime. `model` is an Azure *deployment* name from
+    // /api/voice/models; the backend only honors allowlisted names and falls
+    // back to its default deployment otherwise (e.g. empty before the fetch).
+    return { provider: "azure", model: model || undefined, voice: "marin" };
   }
   // OpenAI direct — the "native" option, kept switchable alongside Azure.
   return { provider: "openai", model, voice: "marin" };
 }
 
+// "azure" and "openai" are the same engine family reached over different
+// routes (Azure-hosted deployment vs OpenAI direct) — the UI presents them as
+// OpenAI with a route sub-choice, not as separate top-level providers.
 const PROVIDER_LABEL: Record<VoiceProvider, string> = {
-  azure: "Azure",
+  azure: "OpenAI · Azure",
   openai: "OpenAI",
   gemini: "Gemini",
 };
@@ -345,7 +345,38 @@ function orbCaption(connected: boolean, muted: boolean, vstate: VoiceState): str
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
-  const [provider, setProvider] = useState<VoiceProvider>("azure");
+  const [provider, setProvider] = useState<VoiceProvider>("gemini");
+  // The OpenAI-family route (native vs Azure) last used, so toggling away to
+  // Gemini and back lands on the same route instead of resetting.
+  const openaiRouteRef = useRef<Exclude<VoiceProvider, "gemini">>("azure");
+  useEffect(() => {
+    if (provider !== "gemini") openaiRouteRef.current = provider;
+  }, [provider]);
+
+  // CLI-vs-SDK explainer popover (the ⓘ next to the CLAUDE group label).
+  // Opens on hover (transient) AND on press (pinned, for touch/keyboard); the
+  // short leave-delay lets the cursor cross the gap into the popover.
+  const [claudeInfoPinned, setClaudeInfoPinned] = useState(false);
+  const [claudeInfoHover, setClaudeInfoHover] = useState(false);
+  const claudeInfoOpen = claudeInfoPinned || claudeInfoHover;
+  const claudeGrpRef = useRef<HTMLDivElement | null>(null);
+  const infoHoverTimer = useRef<number | null>(null);
+  const infoHoverEnter = () => {
+    if (infoHoverTimer.current) clearTimeout(infoHoverTimer.current);
+    setClaudeInfoHover(true);
+  };
+  const infoHoverLeave = () => {
+    if (infoHoverTimer.current) clearTimeout(infoHoverTimer.current);
+    infoHoverTimer.current = window.setTimeout(() => setClaudeInfoHover(false), 140);
+  };
+  useEffect(() => {
+    if (!claudeInfoPinned) return;
+    const onDown = (e: MouseEvent) => {
+      if (!claudeGrpRef.current?.contains(e.target as Node)) setClaudeInfoPinned(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [claudeInfoPinned]);
   const [backend, setBackend] = useState<ClaudeBackend>("cli");
   // The user's chosen model per provider; falls back to that provider's default.
   const [modelByProvider, setModelByProvider] = useState<Partial<Record<VoiceProvider, string>>>({});
@@ -422,15 +453,28 @@ export default function VoiceAgent() {
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 
+  // Azure deployment names are server infra (env-configured), so the dropdown
+  // options come from the backend rather than being hardcoded here.
+  const [azureModels, setAzureModels] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    fetch("/api/voice/models", { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const names: string[] = d?.azure || [];
+        setAzureModels(names.map((n) => ({ value: n, label: n })));
+      })
+      .catch(() => undefined); // no dropdown for Azure, same as before
+  }, []);
+
   // The model to connect with for the current provider. Validate the stored
   // choice against the current option list so a model id that's since been
   // removed from the API (or a stale localStorage value) falls back to the
   // provider's default instead of leaving the select on a dead value.
-  const modelOptions = MODEL_OPTIONS[provider];
+  const modelOptions = provider === "azure" ? azureModels : MODEL_OPTIONS[provider];
   const storedModel = modelByProvider[provider];
   const model = modelOptions.some((o) => o.value === storedModel)
     ? (storedModel as string)
-    : defaultModelFor(provider);
+    : (modelOptions[0]?.value ?? "");
 
   const filteredLog = debugEvents.filter((ev) => {
     if (logErrorsOnly && ev.kind !== "error") return false;
@@ -1194,18 +1238,13 @@ export default function VoiceAgent() {
             reports back — while you keep talking.
           </p>
           <div className="actions">
-            {connected ? (
-              <button className="talk stop" onClick={disconnect}>
-                Disconnect
-              </button>
-            ) : vstate === "connecting" ? (
-              <button className="talk connecting" disabled aria-busy="true">
-                <span className="spinner" aria-hidden />
-                Connecting…
-              </button>
-            ) : (
+            {!connected ? (
               <button className="talk" onClick={connect}>
                 Connect &amp; talk
+              </button>
+            ) : (
+              <button className="talk stop" onClick={disconnect}>
+                Disconnect
               </button>
             )}
             {connected && (
@@ -1233,30 +1272,96 @@ export default function VoiceAgent() {
       </section>
 
       <div className="controls-row">
-          <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
-            {(["azure", "openai", "gemini"] as VoiceProvider[]).map((p) => (
+          <div className="grp">
+            <span className="grplab">Voice</span>
+            <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Voice provider">
               <button
-                key={p}
-                className={`segbtn ${provider === p ? "on" : ""}`}
+                className={`segbtn ${provider === "gemini" ? "on" : ""}`}
                 disabled={connected}
-                onClick={() => setProvider(p)}
+                onClick={() => setProvider("gemini")}
+                title="Best price and tool-call reliability"
               >
-                {PROVIDER_LABEL[p]}
+                Gemini
               </button>
-            ))}
+              <button
+                className={`segbtn ${provider !== "gemini" ? "on" : ""}`}
+                disabled={connected}
+                onClick={() => setProvider(openaiRouteRef.current)}
+              >
+                OpenAI
+              </button>
+            </div>
           </div>
-          <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Claude backend">
-            {(["cli", "sdk"] as ClaudeBackend[]).map((b) => (
+          {provider !== "gemini" && (
+            <div className="grp">
+              <span className="grplab">Route</span>
+              <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="OpenAI route">
+                <button
+                  className={`segbtn ${provider === "openai" ? "on" : ""}`}
+                  disabled={connected}
+                  onClick={() => setProvider("openai")}
+                  title="OpenAI API directly"
+                >
+                  Native
+                </button>
+                <button
+                  className={`segbtn ${provider === "azure" ? "on" : ""}`}
+                  disabled={connected}
+                  onClick={() => setProvider("azure")}
+                  title="Azure-hosted OpenAI deployment"
+                >
+                  via Azure
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="grp" ref={claudeGrpRef}>
+            <span className="grplab">
+              Claude
               <button
-                key={b}
-                className={`segbtn ${backend === b ? "on" : ""}`}
-                disabled={connected}
-                onClick={() => setBackend(b)}
-                title={b === "cli" ? "Interactive CLI: Max subscription + Chrome" : "Claude Agent SDK"}
+                className="infobtn"
+                aria-label="What are CLI and SDK?"
+                aria-expanded={claudeInfoOpen}
+                onClick={() => {
+                  setClaudeInfoPinned((v) => !v);
+                  if (claudeInfoPinned) setClaudeInfoHover(false); // unpin closes even mid-hover
+                }}
+                onMouseEnter={infoHoverEnter}
+                onMouseLeave={infoHoverLeave}
               >
-                {BACKEND_LABEL[b]}
+                i
               </button>
-            ))}
+            </span>
+            {claudeInfoOpen && (
+              <div className="infopop" role="note" onMouseEnter={infoHoverEnter} onMouseLeave={infoHoverLeave}>
+                <div className="prow">
+                  <span className="pname">CLI<span className="r">✓ Rec.</span></span>
+                  <span className="pdesc">
+                    Runs the real Claude Code terminal — you can watch the work live or take
+                    over in your own terminal anytime, and it supports Claude in Chrome.
+                  </span>
+                </div>
+                <div className="prow">
+                  <span className="pname">SDK</span>
+                  <span className="pdesc">
+                    Programmatic (Agent SDK) — chat history is kept, so you can find a past
+                    session and continue it when needed.
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className={`seg ${connected ? "locked" : ""}`} role="group" aria-label="Claude backend">
+              {(["cli", "sdk"] as ClaudeBackend[]).map((b) => (
+                <button
+                  key={b}
+                  className={`segbtn ${backend === b ? "on" : ""}`}
+                  disabled={connected}
+                  onClick={() => setBackend(b)}
+                >
+                  {BACKEND_LABEL[b]}
+                </button>
+              ))}
+            </div>
           </div>
           {modelOptions.length > 0 && (
             <div
@@ -1293,11 +1398,15 @@ export default function VoiceAgent() {
             </div>
           )}
         </div>
-      {connected && (
+      {connected ? (
         <div className={`togglehint ${modelLockHint ? "warn" : ""}`}>
           {modelLockHint
             ? "You’re connected — disconnect first, then change the model."
             : "Disconnect to change provider, backend, or model."}
+        </div>
+      ) : (
+        <div className="ctrlcap">
+          <span className="ck">✓</span> Recommended: <b>Gemini</b> voice + <b>Claude CLI</b>
         </div>
       )}
 

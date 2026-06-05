@@ -81,7 +81,12 @@ OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
 
 # Azure OpenAI (GA realtime)
 AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
-AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")  # realtime model deployment name
+AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")  # default realtime deployment name
+# All deployments the client may choose between (comma-separated, best first).
+# Falls back to the single default so existing setups need no new env.
+AZURE_DEPLOYMENTS: list[str] = [
+    d.strip() for d in os.getenv("AZURE_OPENAI_DEPLOYMENTS", AZURE_DEPLOYMENT).split(",") if d.strip()
+]
 
 # Google Gemini Live (WebSocket). Native-audio preview is the cheapest viable model.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
@@ -247,6 +252,13 @@ async def list_tools() -> dict[str, Any]:
     return {"tools": TOOL_DEFINITIONS}
 
 
+@app.get("/voice/models", dependencies=[Depends(require_auth)])
+async def voice_models() -> dict[str, Any]:
+    """Provider model options that are server infra rather than client knowledge:
+    Azure's choices are the env-configured deployment names."""
+    return {"azure": AZURE_DEPLOYMENTS}
+
+
 def _mint_config(
     provider: str, req: SessionRequest
 ) -> tuple[str, dict[str, str], dict[str, Any], str, str]:
@@ -261,7 +273,9 @@ def _mint_config(
         key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
         if not key:
             raise HTTPException(status_code=500, detail="AZURE_OPENAI_API_KEY is not set on the server")
-        model = AZURE_DEPLOYMENT
+        # Honor the client's deployment pick only when allowlisted — deployment
+        # names are server infra; anything else falls back to the default.
+        model = req.model if req.model in AZURE_DEPLOYMENTS else (AZURE_DEPLOYMENT or AZURE_DEPLOYMENTS[0])
         # Azure's ephemeral WebRTC session locks its config at mint time and
         # ignores the browser's later session.update — so tools/instructions
         # have to be baked in here, or the model connects with no tools (it can
@@ -271,7 +285,16 @@ def _mint_config(
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
             "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
-            "audio": {"output": {"voice": voice}},
+            "audio": {
+                # Mirrors the frontend's session.update VAD tuning (which Azure
+                # ignores — config binds at mint): the default threshold (0.5)
+                # barged in on echo/noise and cut the assistant off mid-sentence.
+                "input": {"turn_detection": {
+                    "type": "server_vad", "threshold": 0.7,
+                    "prefix_padding_ms": 300, "silence_duration_ms": 600,
+                }},
+                "output": {"voice": voice},
+            },
         }
         if req.instructions:
             session_cfg["instructions"] = req.instructions

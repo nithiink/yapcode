@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Provider &amp; backend pickers — recommended + clarity options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #1a1917; --panel: #211f1d; --panel2: #272421;
+    --ink: #e9e3d8; --mut: #928c81; --dim: #6f6a61;
+    --acc: #dd8a6a; --acc-ink: #241813;
+    --line: #322f2b; --line2: #3c3833;
+    --good: #9cc7a4; --plan: #93a6c9;
+    --disp: "Anton", "Arial Narrow", sans-serif;
+    --body: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); margin: 0; padding: 44px 28px 90px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 30px; letter-spacing: .02em; margin: 0 0 6px; }
+  .sub { color: var(--mut); font-size: 14px; margin: 0 0 8px; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 0 0 34px; }
+  h2.sect { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 17px; letter-spacing: .05em; color: var(--acc); margin: 44px 0 14px; }
+  h2.sect:first-of-type { margin-top: 0; }
+
+  .opt { border: 1px solid var(--line2); border-radius: 14px; padding: 18px 18px 16px; margin-bottom: 18px; }
+  .opt .lbl { font-family: var(--disp); text-transform: uppercase; font-weight: 400; font-size: 14px; letter-spacing: .03em; margin: 0 0 2px; }
+  .opt .lbl .tag { color: var(--acc); }
+  .opt .desc { color: var(--mut); font-size: 12px; margin: 0 0 16px; }
+
+  /* ---- base segmented control, replicated from the app ---- */
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  .segbtn { position: relative; font-family: var(--body); font-weight: 500; font-size: 14px; background: transparent; color: var(--mut); border: 0; padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+  .segbtn.on { background: var(--panel2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
+
+  /* ====================== SECTION 1 · recommended markers ====================== */
+
+  /* A — corner dot */
+  .a .segbtn.is-rec::after { content: ""; position: absolute; top: 7px; right: 9px; width: 4.5px; height: 4.5px; border-radius: 50%; background: var(--good); }
+
+  /* B — caption under the row, nothing in the buttons */
+  .b .cap { font-size: 11.5px; color: var(--dim); margin-top: 9px; }
+  .b .cap .ck { color: var(--good); }
+
+  /* C — check prefix in the label */
+  .c .segbtn.is-rec::before { content: "✓ "; color: var(--good); font-weight: 600; }
+
+  /* D — tinted recommended segment */
+  .d .segbtn.is-rec { box-shadow: inset 0 0 0 1px rgba(156,199,164,.28); background: rgba(156,199,164,.05); }
+  .d .segbtn.is-rec.on { box-shadow: inset 0 0 0 1px rgba(156,199,164,.45); background: rgba(156,199,164,.09); color: var(--ink); }
+
+  /* E — micro-tag "PICK" */
+  .e .rec { font-size: 7.5px; font-weight: 700; letter-spacing: .1em; color: var(--good); margin-left: 6px; vertical-align: 2px; }
+
+  /* F — asterisk + legend at the row end */
+  .f .ast { color: var(--good); margin-left: 2px; }
+  .f .legend { font-size: 11px; color: var(--dim); margin-left: 2px; }
+  .f .legend .ast { margin: 0 2px 0 0; }
+
+  /* ====================== SECTION 2 · explaining the choices ====================== */
+
+  /* G — group micro-labels + live caption */
+  .g .grp { display: flex; flex-direction: column; gap: 6px; }
+  .g .grplab { font-size: 9.5px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); padding-left: 14px; }
+  .g .cap { font-size: 12px; color: var(--mut); margin-top: 10px; min-height: 17px; }
+  .g .cap b { color: var(--ink); font-weight: 600; }
+
+  /* H — rich hover tooltip cards */
+  .h .segbtn .tip { position: absolute; left: 50%; transform: translateX(-50%) translateY(4px); top: calc(100% + 9px); width: 215px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; text-align: left; opacity: 0; pointer-events: none; transition: opacity .14s, transform .14s; z-index: 4; box-shadow: 0 10px 28px rgba(0,0,0,.45); }
+  .h .segbtn:hover .tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .h .tip .t { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+  .h .tip .d { font-size: 11px; color: var(--mut); line-height: 1.45; }
+  .h .tip .r { font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--good); margin-top: 5px; }
+
+  /* I — info popover per group */
+  .i .infobtn { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line2); background: transparent; color: var(--dim); font-size: 11px; font-weight: 600; cursor: pointer; margin-left: 6px; line-height: 1; }
+  .i .infobtn:hover { color: var(--ink); border-color: var(--mut); }
+  .i .pop { display: none; margin-top: 12px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel); padding: 4px 14px; max-width: 430px; }
+  .i .pop.open { display: block; }
+  .i .pop .prow { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .i .pop .prow:last-child { border-bottom: 0; }
+  .i .pop .pname { flex: none; width: 64px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  .i .pop .pname .r { display: block; font-size: 8.5px; font-weight: 700; letter-spacing: .09em; color: var(--good); text-transform: uppercase; margin-top: 2px; }
+  .i .pop .pdesc { font-size: 12px; color: var(--mut); line-height: 1.5; }
+
+  /* J — two-line buttons with sublabels */
+  .j .segbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 18px 8px; text-align: left; }
+  .j .segbtn .sublab { font-size: 10px; font-weight: 500; color: var(--dim); letter-spacing: .02em; }
+  .j .segbtn.on .sublab { color: var(--mut); }
+  .j .segbtn .sublab .r { color: var(--good); }
+
+  /* K — one-time explainer card */
+  .k .card { border: 1px solid var(--line2); background: var(--panel); border-radius: 12px; padding: 13px 16px; margin-bottom: 14px; max-width: 560px; }
+  .k .card .t { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+  .k .card .d { font-size: 12px; color: var(--mut); line-height: 1.55; }
+  .k .card .d b { color: var(--ink); font-weight: 600; }
+  .k .card .gotit { margin-top: 9px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--acc); background: none; border: 0; padding: 0; cursor: pointer; }
+
+  /* ====================== SECTION 3 · combined compositions ====================== */
+  .combo-note { font-size: 11px; color: var(--dim); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Picker clarity <span style="color:var(--acc)">·</span> options</h1>
+  <p class="sub">Two problems: (1) marking Gemini + CLI as recommended without shouting, (2) telling a new user what Gemini/OpenAI and CLI/SDK actually are.</p>
+  <p class="hint">Everything below is live — click segments, hover buttons, open the ⓘ popovers. Mix &amp; match: pick one marker + one explainer (or a combo from section 3).</p>
+
+  <h2 class="sect">1 · Marking “recommended”</h2>
+
+  <div class="opt a">
+    <p class="lbl"><span class="tag">A</span> — Corner dot</p>
+    <p class="desc">A 4px green dot tucked in the pill’s corner. Quietest possible signal; meaning arrives via tooltip on hover.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec" title="Recommended">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec" title="Recommended">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt b">
+    <p class="lbl"><span class="tag">B</span> — Caption under the row</p>
+    <p class="desc">Buttons stay untouched; one quiet line beneath the controls names the recommended pairing in plain words.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+    <p class="cap"><span class="ck">✓</span> Recommended setup: <b style="color:var(--mut)">Gemini</b> voice + <b style="color:var(--mut)">CLI</b> engine</p>
+  </div>
+
+  <div class="opt c">
+    <p class="lbl"><span class="tag">C</span> — Check prefix</p>
+    <p class="desc">A small green ✓ baked into the recommended label. Legible without a legend, adds no width chrome.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt d">
+    <p class="lbl"><span class="tag">D</span> — Tinted segment</p>
+    <p class="desc">The recommended pill carries a faint green wash + hairline — felt more than read. Strongest when paired with a tooltip.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec" title="Recommended">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec" title="Recommended">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt e">
+    <p class="lbl"><span class="tag">E</span> — Micro-tag “PICK”</p>
+    <p class="desc">Like the current badge but a single short word, no border, 7.5px. About a third the footprint of “RECOMMENDED”.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini<span class="rec">PICK</span></button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI<span class="rec">PICK</span></button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt f">
+    <p class="lbl"><span class="tag">F</span> — Asterisk + legend</p>
+    <p class="desc">Editorial style: a green * on the options, decoded once at the end of the row.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini<span class="ast">*</span></button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI<span class="ast">*</span></button>
+        <button class="segbtn">SDK</button>
+      </div>
+      <span class="legend"><span class="ast">*</span>recommended</span>
+    </div>
+  </div>
+
+  <h2 class="sect">2 · Explaining what the choices are</h2>
+
+  <div class="opt g">
+    <p class="lbl"><span class="tag">G</span> — Group labels + live caption</p>
+    <p class="desc">Each group gets a micro-label naming its role; one caption line under the row describes the current selection and updates as you click.</p>
+    <div class="row" style="align-items:flex-end">
+      <div class="grp">
+        <span class="grplab">Voice</span>
+        <div class="seg" data-seg data-cap="voice">
+          <button class="segbtn on" data-d="<b>Gemini</b> — Google’s live voice model. Cheapest to run, reliable tool calls.">Gemini</button>
+          <button class="segbtn" data-d="<b>OpenAI</b> — gpt-realtime voices, native API or via your Azure deployment.">OpenAI</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="grplab">Engine</span>
+        <div class="seg" data-seg data-cap="engine">
+          <button class="segbtn on" data-d="<b>CLI</b> — drives the real Claude Code terminal on your Max subscription, with Chrome control.">CLI</button>
+          <button class="segbtn" data-d="<b>SDK</b> — headless Agent SDK. No terminal, billed per token.">SDK</button>
+        </div>
+      </div>
+    </div>
+    <p class="cap" data-capline>
+      <b>Gemini</b> — Google’s live voice model. Cheapest to run, reliable tool calls. &nbsp;·&nbsp; <b>CLI</b> — drives the real Claude Code terminal on your Max subscription, with Chrome control.
+    </p>
+  </div>
+
+  <div class="opt h">
+    <p class="lbl"><span class="tag">H</span> — Tooltip cards</p>
+    <p class="desc">Hover any option (try it): a small card explains it in one line, with the recommendation inside the card instead of on the button.</p>
+    <div class="row" style="padding-bottom:84px">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini
+          <span class="tip"><span class="t">Gemini Live</span><span class="d">Google’s realtime voice model. Cheapest to run; the most reliable tool-calling in our testing.</span><span class="r">✓ Recommended</span></span>
+        </button>
+        <button class="segbtn">OpenAI
+          <span class="tip"><span class="t">OpenAI Realtime</span><span class="d">gpt-realtime voices — premium audio quality. Connect natively or via your Azure deployment.</span></span>
+        </button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI
+          <span class="tip"><span class="t">Claude Code CLI</span><span class="d">Drives the real terminal app — uses your Max subscription and can control Chrome.</span><span class="r">✓ Recommended</span></span>
+        </button>
+        <button class="segbtn">SDK
+          <span class="tip"><span class="t">Claude Agent SDK</span><span class="d">Headless engine, no terminal UI. Billed per token on the API.</span></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt i">
+    <p class="lbl"><span class="tag">I</span> — ⓘ popover per group</p>
+    <p class="desc">A small ⓘ next to each group opens a two-row comparison (click it). Zero ambient noise; help is there when asked for.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <button class="infobtn" data-pop="pop1">i</button>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+      <button class="infobtn" data-pop="pop2">i</button>
+    </div>
+    <div class="pop" id="pop1">
+      <div class="prow"><span class="pname">Gemini<span class="r">✓ Rec.</span></span><span class="pdesc">Google’s live voice model. Cheapest to run, reliable tool calls.</span></div>
+      <div class="prow"><span class="pname">OpenAI</span><span class="pdesc">gpt-realtime voices — premium audio. Native API or via your Azure deployment.</span></div>
+    </div>
+    <div class="pop" id="pop2">
+      <div class="prow"><span class="pname">CLI<span class="r">✓ Rec.</span></span><span class="pdesc">Drives the real Claude Code terminal — your Max subscription, Chrome control.</span></div>
+      <div class="prow"><span class="pname">SDK</span><span class="pdesc">Headless Agent SDK — no terminal UI, billed per token.</span></div>
+    </div>
+  </div>
+
+  <div class="opt j">
+    <p class="lbl"><span class="tag">J</span> — Sublabels inside the buttons</p>
+    <p class="desc">Two-line pills: the choice plus a 10px hint of what it means. Self-explanatory at a glance; the row gets a little taller.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini<span class="sublab"><span class="r">✓</span> cheap · reliable</span></button>
+        <button class="segbtn">OpenAI<span class="sublab">premium voices</span></button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI<span class="sublab"><span class="r">✓</span> your Max plan</span></button>
+        <button class="segbtn">SDK<span class="sublab">API · per token</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt k">
+    <p class="lbl"><span class="tag">K</span> — One-time explainer card</p>
+    <p class="desc">Shown above the controls on first visit only; “Got it” dismisses it forever (localStorage). The controls themselves stay pristine.</p>
+    <div class="card" data-explainer>
+      <p class="t">Two choices before you talk</p>
+      <p class="d"><b>Voice</b> is who you speak with — <b>Gemini</b> (cheapest, most reliable) or <b>OpenAI</b> (premium voices, native or via Azure). <b>Engine</b> is who does the work — <b>CLI</b> (the real Claude Code terminal on your Max plan) or <b>SDK</b> (headless, per-token billing). Gemini + CLI is the recommended pairing.</p>
+      <button class="gotit">Got it</button>
+    </div>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on">Gemini</button>
+        <button class="segbtn">OpenAI</button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on">CLI</button>
+        <button class="segbtn">SDK</button>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="sect">3 · Combined compositions</h2>
+
+  <div class="opt g b">
+    <p class="lbl"><span class="tag">L</span> — G + B, corrected labels <span style="color:var(--dim);font-family:var(--body);font-size:11px">(VOICE / CLAUDE groups + live caption with ✓)</span></p>
+    <p class="desc">The full row as it would ship. The second group is labeled CLAUDE — its options read as “Claude · CLI” vs “Claude · SDK”, which is what they actually are. Click around: the caption follows.</p>
+    <div class="row" style="align-items:flex-end">
+      <div class="grp">
+        <span class="grplab">Voice</span>
+        <div class="seg" data-seg data-cap="voice2">
+          <button class="segbtn on" data-d="<span class='ck' style='color:var(--good)'>✓</span> <b>Gemini</b> — cheapest, most reliable voice (recommended)">Gemini</button>
+          <button class="segbtn" data-d="<b>OpenAI</b> — premium voices, native or via Azure">OpenAI</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="grplab">Claude</span>
+        <div class="seg" data-seg data-cap="claude2">
+          <button class="segbtn on" data-d="<span class='ck' style='color:var(--good)'>✓</span> <b>Claude CLI</b> — the real Claude Code terminal, on your Max plan (recommended)">CLI</button>
+          <button class="segbtn" data-d="<b>Claude SDK</b> — headless Agent SDK, billed per token">SDK</button>
+        </div>
+      </div>
+    </div>
+    <p class="cap" data-capline><span class="ck" style="color:var(--good)">✓</span> <b>Gemini</b> — cheapest, most reliable voice (recommended) &nbsp;·&nbsp; <span class="ck" style="color:var(--good)">✓</span> <b>Claude CLI</b> — the real Claude Code terminal, on your Max plan (recommended)</p>
+    <p class="combo-note">Picking a non-recommended option drops its ✓ from the caption — gentle, continuous feedback instead of a static badge.</p>
+  </div>
+
+  <div class="opt g b">
+    <p class="lbl"><span class="tag">L2</span> — same row with OpenAI selected <span style="color:var(--dim);font-family:var(--body);font-size:11px">(route sub-picker + model dropdown appear)</span></p>
+    <p class="desc">What the row looks like in its busiest state: OpenAI chosen, so the route group (Native / via Azure) and the model dropdown join the row. The caption keeps narrating.</p>
+    <div class="row" style="align-items:flex-end">
+      <div class="grp">
+        <span class="grplab">Voice</span>
+        <div class="seg" data-seg data-cap="voice3">
+          <button class="segbtn" data-d="<span class='ck' style='color:var(--good)'>✓</span> <b>Gemini</b> — cheapest, most reliable voice (recommended)">Gemini</button>
+          <button class="segbtn on" data-d="<b>OpenAI</b> — premium voices">OpenAI</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="grplab">Route</span>
+        <div class="seg" data-seg data-cap="route3">
+          <button class="segbtn on" data-d="<b>via Azure</b> — your Azure deployment">via Azure</button>
+          <button class="segbtn" data-d="<b>Native</b> — OpenAI API directly">Native</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="grplab">Claude</span>
+        <div class="seg" data-seg data-cap="claude3">
+          <button class="segbtn on" data-d="<span class='ck' style='color:var(--good)'>✓</span> <b>Claude CLI</b> — the real Claude Code terminal, on your Max plan (recommended)">CLI</button>
+          <button class="segbtn" data-d="<b>Claude SDK</b> — headless Agent SDK, billed per token">SDK</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="grplab">Model</span>
+        <div class="seg">
+          <button class="segbtn on">gpt-realtime-2 <span style="color:var(--dim)">⌄</span></button>
+        </div>
+      </div>
+    </div>
+    <p class="cap" data-capline><b>OpenAI</b> — premium voices &nbsp;·&nbsp; <b>via Azure</b> — your Azure deployment &nbsp;·&nbsp; <span class="ck" style="color:var(--good)">✓</span> <b>Claude CLI</b> — the real Claude Code terminal, on your Max plan (recommended)</p>
+  </div>
+
+  <div class="opt j d">
+    <p class="lbl"><span class="tag">M</span> — J + D <span style="color:var(--dim);font-family:var(--body);font-size:11px">(sublabels + tinted recommended)</span></p>
+    <p class="desc">Self-explanatory two-line pills with the recommended ones faintly green. Most informative at rest; tallest row.</p>
+    <div class="row">
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec">Gemini<span class="sublab">cheap · reliable</span></button>
+        <button class="segbtn">OpenAI<span class="sublab">premium voices</span></button>
+      </div>
+      <div class="seg" data-seg>
+        <button class="segbtn on is-rec">CLI<span class="sublab">your Max plan</span></button>
+        <button class="segbtn">SDK<span class="sublab">API · per token</span></button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  // Segment toggling — one .on per group.
+  document.querySelectorAll("[data-seg]").forEach((seg) => {
+    seg.querySelectorAll(".segbtn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        seg.querySelectorAll(".segbtn").forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        updateCaption(seg);
+      });
+    });
+  });
+
+  // Live captions (options G and L): rebuild from each group's selected button.
+  function updateCaption(seg) {
+    const opt = seg.closest(".opt");
+    const line = opt && opt.querySelector("[data-capline]");
+    if (!line) return;
+    const parts = [];
+    opt.querySelectorAll("[data-seg]").forEach((s) => {
+      const on = s.querySelector(".segbtn.on");
+      if (on && on.dataset.d) parts.push(on.dataset.d);
+    });
+    line.innerHTML = parts.join(" &nbsp;·&nbsp; ");
+  }
+
+  // Info popovers (option I).
+  document.querySelectorAll(".infobtn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pop = document.getElementById(btn.dataset.pop);
+      const open = pop.classList.contains("open");
+      btn.closest(".opt").querySelectorAll(".pop").forEach((p) => p.classList.remove("open"));
+      if (!open) pop.classList.add("open");
+    });
+  });
+
+  // Explainer dismiss (option K) — session-scoped here so you can refresh to see it again.
+  document.querySelector(".gotit")?.addEventListener("click", (e) => {
+    e.target.closest("[data-explainer]").style.display = "none";
+  });
+</script>
+</body>
+</html>
