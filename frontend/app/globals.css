@@ -36,14 +36,14 @@ body {
 .logo { font-family: var(--disp); font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
 .logo .sep { color: var(--acc); }
 /* Speaking dot: a small equalizer that's always animating, so the brand always
-   shows the voice signal. Resting (idle) it pulses dim; when live it goes accent
-   with a soft glow. */
+   shows the voice signal. Always in the accent color; going live just adds the
+   soft glow. */
 .brand .speakdot { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 22px; height: 20px; flex: none; }
-.brand .speakdot i { width: 3px; border-radius: 2px; background: var(--mut); transition: background 0.3s ease, box-shadow 0.3s ease; animation: speak 1.05s ease-in-out infinite; transform-origin: center; }
+.brand .speakdot i { width: 3px; border-radius: 2px; background: var(--acc); transition: box-shadow 0.3s ease; animation: speak 1.05s ease-in-out infinite; transform-origin: center; }
 .brand .speakdot i:nth-child(1) { height: 9px; animation-delay: 0s; }
 .brand .speakdot i:nth-child(2) { height: 18px; animation-delay: 0.16s; }
 .brand .speakdot i:nth-child(3) { height: 11px; animation-delay: 0.32s; }
-.brand.live .speakdot i { background: var(--acc); box-shadow: 0 0 8px rgba(221,138,106,0.5); }
+.brand.live .speakdot i { box-shadow: 0 0 8px rgba(221,138,106,0.5); }
 @keyframes speak { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .brand .speakdot i { animation: none; } }
 .topmeta { font-size: 12.5px; color: var(--mut); text-align: right; letter-spacing: 0.01em; }
@@ -171,11 +171,13 @@ body {
 /* Conversation (chat history) panel: make its height track the session-list
    panel beside it instead of using a fixed cap. The two panels are siblings in
    the same grid row, and grid stretches both cells to the row's (taller) height
-   — which the session list drives as sessions are added/removed. min-height: 0
-   lets this column shrink to the row height instead of growing it with its own
-   content, so the session list dictates the height and the conversation follows.
-   The scroll area then flexes to fill whatever height the cell receives. */
-.conv-panel { display: flex; flex-direction: column; min-height: 0; }
+   — which the session list drives as sessions are added/removed. The min-height
+   is a FLOOR, not a cap: with no/few sessions the row stays at least this tall
+   (otherwise the conversation collapses to a sliver), while its own content
+   still can't grow the row — only the session list stretches it beyond the
+   floor, and the conversation follows. The scroll area then flexes to fill
+   whatever height the cell receives. */
+.conv-panel { display: flex; flex-direction: column; min-height: 360px; }
 .conv-panel .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .conv-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-right: 10px; }
 /* Keep items at their natural height and let the panel scroll. Without this, a
