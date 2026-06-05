@@ -304,7 +304,13 @@ export class GeminiSession implements VoiceSession {
 
   // --- audio setup --------------------------------------------------------
   private async initAudio() {
-    this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Explicit DSP constraints — Gemini playback goes through a WebAudio
+    // AudioContext (not an <audio> element), the case where Chrome's echo
+    // canceller is least dependable, so don't rely on defaults: the assistant
+    // hearing itself reads as user speech and trips barge-in.
+    this.micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
     this.opts.onLocalStream?.(this.micStream); // feed the user's mic to the orb analyser
 
     this.inCtx = new AudioContext({ sampleRate: INPUT_RATE });
@@ -408,6 +414,18 @@ export class GeminiSession implements VoiceSession {
       tools: toGeminiTools(this.tools),
       inputAudioTranscription: {},
       outputAudioTranscription: {},
+      // Server VAD tuning (mirrors the OpenAI-side fix): default sensitivity
+      // barged in on echo/breath and cut the assistant off mid-sentence. LOW
+      // start-sensitivity needs real speech to interrupt; LOW end-sensitivity +
+      // 600ms silence stops a mid-sentence pause from ending the user's turn.
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
+          endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
+          prefixPaddingMs: 300,
+          silenceDurationMs: 600,
+        },
+      },
       // Resume the prior conversation when reconnecting (handle preserves
       // context); otherwise start a fresh resumable session.
       sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
