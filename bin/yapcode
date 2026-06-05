@@ -52,12 +52,30 @@ read_secret() { # read_secret "Prompt" -> echoes secret, never echoes keystrokes
 }
 
 # Like read_secret, but a plain Enter (empty input) returns "" instead of
-# re-prompting — used for the two optional voice-provider keys. Whitespace is
-# trimmed from both ends (spaces/tabs/CR/LF) because pasted keys often carry a
-# trailing newline. EOF still aborts so we never write a half-baked config.
+# re-prompting — used for the two optional voice-provider keys. Reads ONE
+# character at a time (-rsn1) so we can echo a live `•` mask as each keystroke
+# arrives: a paste instantly renders one bullet per pasted character, giving
+# visual feedback AT PASTE TIME rather than only after Enter. Backspace/DEL
+# erases the last bullet. Enter (with -n1, c is "") finishes; an empty buffer
+# still returns "". Whitespace is trimmed from both ends (spaces/tabs/CR/LF)
+# because pasted keys often carry a trailing newline (which also naturally
+# terminates the read, equivalent to pressing Enter). EOF before any Enter
+# aborts so we never write a half-baked config.
 read_secret_optional() { # read_secret_optional "Prompt" -> echoes (possibly empty) secret
-  local q="$1" s=""
-  if ! read -rsp "$q: " s; then # EOF (Ctrl-D / closed pipe)
+  local q="$1" s="" c="" got_enter=0
+  printf '%s: ' "$q" >&2
+  # With -n1, `read` returns success on Enter (delivering c="") and on any
+  # normal key; it returns non-zero only at EOF. So we loop, and the moment we
+  # see an empty c from a *successful* read we know it was Enter and stop.
+  while IFS= read -rsn1 c; do
+    if [ -z "$c" ]; then got_enter=1; break; fi # Enter
+    case "$c" in
+      $'\x7f'|$'\b') # Backspace / DEL: drop last char, erase one bullet
+        if [ -n "$s" ]; then s="${s%?}"; printf '\b \b' >&2; fi ;;
+      *) s="$s$c"; printf '•' >&2 ;;
+    esac
+  done
+  if [ "$got_enter" -eq 0 ]; then # loop ended via read failure = EOF, never Enter
     printf '\n' >&2; err "yapcode: no input — aborting setup"; exit 1
   fi
   printf '\n' >&2
