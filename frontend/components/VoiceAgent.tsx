@@ -1014,27 +1014,34 @@ export default function VoiceAgent() {
           next[next.length - 1] = { kind: "turn", role: e.role, text: e.text, final: e.final };
           return next.slice(-80);
         }
-        // Otherwise a tool row interleaved between this turn's deltas and now, or
-        // the provider re-sent a final. Walk back to the most recent turn for
-        // this role rather than blindly pushing (which duplicated the message).
-        // CRITICAL: walk over NON-turn rows (tool cards) only — crossing a turn
-        // from the OTHER role means this is a new utterance, not a continuation
-        // or echo of the older one. Merging across that boundary rewrote the
-        // user's previous bubble in place (the new "You" row never appeared at
-        // the bottom) and "deduped" away genuine repeats of the same phrase.
+        // Otherwise this event belongs to an earlier row (or is genuinely new).
+        // Walk back to the most recent turn for this role — over tool rows AND
+        // the other role's turns, because Gemini's input transcription keeps
+        // streaming after the assistant starts replying, so same-utterance
+        // updates legitimately arrive from beyond the role boundary.
+        // The discriminator between "same utterance, still streaming" and "new
+        // utterance" is cumulative text: a continuation always EXTENDS the
+        // draft (startsWith); a new utterance never does. Role-boundary or
+        // text-equality rules alone each broke one side of this (overwritten /
+        // missing "You" rows vs duplicated rows).
+        let crossedOtherRole = false;
         for (let k = next.length - 1; k >= 0; k--) {
           const it = next[k];
           if (it.kind !== "turn") continue;
-          if (it.role !== e.role) break;
-          if (!it.final) {
-            // In-progress turn for this role exists earlier — finalize it in
-            // place instead of pushing a second copy.
+          if (it.role !== e.role) {
+            crossedOtherRole = true;
+            continue;
+          }
+          if (!it.final && e.text.startsWith(it.text)) {
+            // Same accumulator generation — update/finalize the draft in place,
+            // wherever it sits in the timeline.
             next[k] = { kind: "turn", role: e.role, text: e.text, final: e.final };
             return next.slice(-80);
           }
-          // Most recent turn for this role is already final. A repeated final
-          // with identical text is a provider echo — drop it.
-          if (e.final && it.text === e.text) return next;
+          // A final re-sent verbatim IMMEDIATELY (nothing from the other role
+          // in between) is a provider echo — drop it. The same text after the
+          // other role replied is a genuine repeat — keep it.
+          if (it.final && e.final && it.text === e.text && !crossedOtherRole) return next;
           break;
         }
         next.push({ kind: "turn", role: e.role, text: e.text, final: e.final });
