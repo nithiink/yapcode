@@ -55,6 +55,9 @@ export class RealtimeSession implements VoiceSession {
   // call_id -> tool name (so a later arguments.done can find the name).
   private callArgs = new Map<string, string>();
   private callNames = new Map<string, string>();
+  // Grace timers for calls surfaced by conversation.item.added with EMPTY args
+  // (see that case for the per-provider ordering story). Cleared on stop().
+  private callFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(opts: RealtimeOptions) {
     this.opts = opts;
@@ -114,7 +117,12 @@ export class RealtimeSession implements VoiceSession {
       this.opts.onRemoteStream?.(ev.streams[0]);
     };
 
-    this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Explicit DSP constraints: echo of the assistant's own voice re-entering
+    // the mic reads as user speech to server VAD, which cancels the response
+    // mid-sentence (observed as 4x output_audio_buffer.cleared in one session).
+    this.localStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
     this.opts.onLocalStream?.(this.localStream); // feed the user's mic to the orb analyser
     for (const track of this.localStream.getTracks()) pc.addTrack(track, this.localStream);
 
@@ -143,6 +151,8 @@ export class RealtimeSession implements VoiceSession {
   }
 
   stop(): void {
+    for (const t of this.callFallbackTimers.values()) clearTimeout(t);
+    this.callFallbackTimers.clear();
     this.dc?.close();
     this.pc?.getSenders().forEach((s) => s.track?.stop());
     this.localStream?.getTracks().forEach((t) => t.stop());
@@ -206,7 +216,18 @@ export class RealtimeSession implements VoiceSession {
       audio: {
         // Input transcription stays off to avoid the separate per-minute
         // transcription charge — the model understands speech directly.
-        input: { turn_detection: { type: "server_vad" } },
+        // VAD: default threshold (0.5) barged in on echo/breath and cut the
+        // assistant off mid-sentence. Raise it and require a longer silence
+        // before treating the turn as over; barge-in still works, it just
+        // needs real speech.
+        input: {
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.7,
+            prefix_padding_ms: 300,
+            silence_duration_ms: 600,
+          },
+        },
         output: { voice: this.opts.voice },
       },
     };
@@ -255,11 +276,18 @@ export class RealtimeSession implements VoiceSession {
         }
         break;
       }
-      // Azure's WebRTC realtime omits response.created/response.done and
-      // surfaces the model's function call as a conversation.item.added/created
-      // item — but with EMPTY arguments (those arrive via the delta stream
-      // above). Dispatch with the accumulated args. runFunctionCall dedupes by
-      // call_id, so OpenAI surfacing the same call via response.done is harmless.
+      // Providers disagree on how a function call surfaces, so this case is a
+      // conditional dispatcher:
+      //  - Azure WebRTC omits the whole response.* lifecycle (no argument
+      //    deltas, no arguments.done, no output_item.done, no response.done —
+      //    verified in debug-log traces) and announces the call ONLY here.
+      //  - OpenAI sends this item FIRST with EMPTY arguments; the deltas stream
+      //    after, then arguments.done / output_item.done / response.done carry
+      //    the complete string. Dispatching here ran tools with {} (backend
+      //    KeyError 'session_id') and the dedup then blocked the real dispatch.
+      // So: dispatch now only if we already have args; otherwise register the
+      // name and let a completion event dispatch — with a grace-timer fallback
+      // so a provider that sends nothing else (Azure no-arg calls) can't stall.
       case "conversation.item.added":
       case "conversation.item.created": {
         const item = evt.item;
@@ -269,9 +297,26 @@ export class RealtimeSession implements VoiceSession {
             item.arguments && item.arguments.trim()
               ? item.arguments
               : this.callArgs.get(item.call_id) || "";
-          this.trace(`conversation.item → function_call ${item.name} args=${argsStr.slice(0, 60)}`);
-          emit({ type: "state", state: "thinking" });
-          await this.runFunctionCall(item.name, item.call_id, argsStr);
+          if (argsStr) {
+            this.trace(`conversation.item → function_call ${item.name} args=${argsStr.slice(0, 60)}`);
+            emit({ type: "state", state: "thinking" });
+            await this.runFunctionCall(item.name, item.call_id, argsStr);
+          } else if (!this.dispatchedCalls.has(item.call_id) && !this.callFallbackTimers.has(item.call_id)) {
+            this.trace(`conversation.item → function_call ${item.name} awaiting args (fallback armed)`);
+            const callId = item.call_id;
+            const name = item.name;
+            this.callFallbackTimers.set(
+              callId,
+              setTimeout(() => {
+                this.callFallbackTimers.delete(callId);
+                if (this.dispatchedCalls.has(callId)) return; // completion event won
+                const late = this.callArgs.get(callId) || "";
+                this.trace(`fallback dispatch ${name} args=${late.slice(0, 60)}`);
+                emit({ type: "state", state: "thinking" });
+                void this.runFunctionCall(name, callId, late);
+              }, 1200),
+            );
+          }
         }
         break;
       }
@@ -459,7 +504,14 @@ export class RealtimeSession implements VoiceSession {
     // Each function_call can surface on several paths (conversation.item.added,
     // arguments.done, output_item.done, response.done) — run it exactly once.
     if (callId && this.dispatchedCalls.has(callId)) return;
-    if (callId) this.dispatchedCalls.add(callId);
+    if (callId) {
+      this.dispatchedCalls.add(callId);
+      const t = this.callFallbackTimers.get(callId);
+      if (t) {
+        clearTimeout(t);
+        this.callFallbackTimers.delete(callId);
+      }
+    }
     this.trace(`dispatch tool ${name} (call_id=${callId}) args=${(argsStr || "").slice(0, 60)}`);
     let args: any = {};
     try {
