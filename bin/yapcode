@@ -51,6 +51,30 @@ read_secret() { # read_secret "Prompt" -> echoes secret, never echoes keystrokes
   printf '%s' "$s"
 }
 
+# Like read_secret, but a plain Enter (empty input) returns "" instead of
+# re-prompting — used for the two optional voice-provider keys. Whitespace is
+# trimmed from both ends (spaces/tabs/CR/LF) because pasted keys often carry a
+# trailing newline. EOF still aborts so we never write a half-baked config.
+read_secret_optional() { # read_secret_optional "Prompt" -> echoes (possibly empty) secret
+  local q="$1" s=""
+  if ! read -rsp "$q: " s; then # EOF (Ctrl-D / closed pipe)
+    printf '\n' >&2; err "yapcode: no input — aborting setup"; exit 1
+  fi
+  printf '\n' >&2
+  trim "$s"
+}
+
+# Print a masked receipt of a just-entered secret to stderr (never the full key).
+# >12 chars: first 4 + … + last 4 and the length; otherwise just the length.
+secret_receipt() { # secret_receipt "<secret>"
+  local s="$1" n=${#1}
+  if [ "$n" -gt 12 ]; then
+    err "  ✓ key received (${s:0:4}…${s: -4}, $n chars)"
+  else
+    err "  ✓ key received ($n chars)"
+  fi
+}
+
 gen_token() { # cryptographically-strong, URL-safe
   if command -v python3 >/dev/null 2>&1; then
     python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
@@ -61,7 +85,12 @@ gen_token() { # cryptographically-strong, URL-safe
   fi
 }
 
-trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+trim() { # strip spaces/tabs/CR/LF from both ends (pasted keys often carry a trailing newline)
+  local s="$1"
+  s="${s#"${s%%[![:space:]$'\r'$'\n']*}"}"
+  s="${s%"${s##*[![:space:]$'\r'$'\n']}"}"
+  printf '%s' "$s"
+}
 
 # Load config into the environment WITHOUT sourcing it. Sourcing (`. file`) would
 # execute any backticks/$(...) in a value and choke on spaces; we parse KEY=VALUE
@@ -86,6 +115,9 @@ load_env() {
 # this is the agent's command-execution sandbox, so being strict here matters.
 validate_roots() { # validate_roots "a,b" -> 0 if all OK
   local roots="$1" ok=1 r oldifs="$IFS"
+  if [ -z "$(trim "$roots")" ]; then
+    err "  please enter at least one folder (e.g. ~/projects)"; return 1
+  fi
   IFS=','
   for r in $roots; do
     IFS="$oldifs"
@@ -107,27 +139,32 @@ run_wizard() {
   err "Writes $ENV_FILE (chmod 600). Edit that file anytime; it's the source of truth."
   err ""
 
-  local provider
-  while :; do
-    provider="$(prompt_default "Voice provider (openai/azure/gemini)" "openai")"
-    case "$provider" in openai|azure|gemini) break ;; *) err "  type openai, azure, or gemini" ;; esac
-  done
-
+  # Two optional voice-provider keys. Either (or both) can be skipped with Enter;
+  # the receipt confirms a paste landed without ever echoing the full key. Azure
+  # stays config-file-only (template below keeps its empty AZURE_* section).
   local openai_key="" gemini_key="" az_endpoint="" az_key="" az_deploy=""
-  case "$provider" in
-    openai)
-      openai_key="$(read_secret "OpenAI API key (sk-...)")" ;;
-    gemini)
-      gemini_key="$(read_secret "Gemini API key (from https://aistudio.google.com/apikey)")" ;;
-    azure)
-      az_endpoint="$(prompt_default "Azure OpenAI endpoint (https://<resource>.openai.azure.com)" "")"
-      az_deploy="$(prompt_default  "Azure realtime deployment name" "")"
-      az_key="$(read_secret        "Azure OpenAI API key")" ;;
-  esac
+
+  gemini_key="$(read_secret_optional "Gemini API key — free tier at https://aistudio.google.com/apikey [Enter to skip]")"
+  if [ -n "$gemini_key" ]; then secret_receipt "$gemini_key"; else err "  – skipped"; fi
+
+  openai_key="$(read_secret_optional "OpenAI API key (sk-...) [Enter to skip]")"
+  if [ -n "$openai_key" ]; then secret_receipt "$openai_key"; else err "  – skipped"; fi
+
+  # Provider derivation: Gemini wins if present, else OpenAI, else a placeholder.
+  local provider
+  if   [ -n "$gemini_key" ]; then provider="gemini"
+  elif [ -n "$openai_key" ]; then provider="openai"
+  else provider="openai"; fi
+
+  if [ -z "$gemini_key" ] && [ -z "$openai_key" ]; then
+    err ""
+    err "  ⚠ No voice key set — the app needs a Gemini or OpenAI key to talk."
+    err "    Add one later by running: yapcode config"
+  fi
 
   local roots
   while :; do
-    roots="$(prompt_default "Folder(s) the agent may edit (comma-separated)" "$HOME/Development")"
+    roots="$(prompt_default "Folder(s) the agent may edit (comma-separated, e.g. ~/projects)" "")"
     roots="${roots/#\~/$HOME}" # expand a leading ~
     validate_roots "$roots" && break
   done
@@ -174,6 +211,7 @@ EOF
   err ""
   err "✓ Wrote $ENV_FILE  (provider=$provider, roots=$roots)"
   err "  Generated a VC_AUTH_TOKEN for later network/phone use."
+  err "  Azure OpenAI instead? Edit the file: yapcode config"
 }
 
 ensure_env() {

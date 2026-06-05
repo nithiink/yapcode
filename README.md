@@ -50,8 +50,8 @@ Then launch it:
 yapcode up
 ```
 
-The first `up` runs a short **setup wizard**: it asks for your voice provider and
-API key and the folder(s) the agent may edit, auto-generates a `VC_AUTH_TOKEN`
+The first `up` runs a short **setup wizard**: it asks for a Gemini and/or OpenAI
+key (both skippable) and the folder(s) the agent may edit, auto-generates a `VC_AUTH_TOKEN`
 (for later network/phone use), and writes everything to
 `~/.config/yapcode/.env` with `600` permissions. It then starts the backend
 and frontend and opens the app in your browser. Press Ctrl-C to stop both. That
@@ -87,7 +87,8 @@ cd yapcode
 ```
 
 The first run walks you through the same **setup wizard** as the Homebrew
-install (voice provider, API key, allowed folders → `~/.config/yapcode/.env`),
+install (Gemini and/or OpenAI key — both skippable — and allowed folders →
+`~/.config/yapcode/.env`; Azure OpenAI via the config file),
 then installs the backend venv and frontend dependencies automatically, starts
 both servers, and opens <http://localhost:3000>. Press Ctrl-C to stop. Later
 runs skip straight to launch — config and dependencies are only set up once.
