@@ -85,7 +85,7 @@ A quick tour of the ways people actually use it:
 
 3. **🤝 Co-drive — type *and* talk** — voice and keyboard share one tmux session. Type a precise edit, lean back, steer by voice — same session, one transcript.
 
-4. **📱 Code from mobile** — run [network mode](#lan--phone-network-mode-tls--token-required), open the app on your phone (same Wi-Fi), and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine.
+4. **📱 Code from mobile** — open the app on your phone (same Wi-Fi) and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine. Setup: [use it from your phone](#use-it-from-your-phone-local-network).
 
 5. **✅ Approve permissions with voice, switch modes** — Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode"*.
 
@@ -107,6 +107,7 @@ A quick tour of the ways people actually use it:
 - [Install with Homebrew (recommended)](#install-with-homebrew-recommended)
 - [Install from source](#install-from-source)
 - [Running](#running)
+- [Use it from your phone (local network)](#use-it-from-your-phone-local-network)
 - [Windows (WSL2)](#windows-wsl2)
 - [Configuration reference](#configuration-reference)
 - [Security & access control (details)](#security--access-control-details)
@@ -373,6 +374,44 @@ can generate one with:
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+---
+
+## Use it from your phone (local network)
+
+The full experience — talk to Claude **and watch the live terminal** — from your phone, as long
+as it's on the same Wi-Fi as your computer. The work always happens on your machine; the phone
+is just a remote.
+
+**On your computer (once):**
+
+1. Start [network mode](#lan--phone-network-mode-tls--token-required) — both servers over TLS,
+   with the cert's SAN matching your LAN IP.
+2. Find your LAN IP: `ipconfig getifaddr en0` (macOS) or `hostname -I` (Linux) — say it's
+   `192.168.1.42`.
+3. Have your `VC_AUTH_TOKEN` handy — the wizard already wrote one to `~/.config/yapcode/.env`
+   (`yapcode config` to view).
+
+**On your phone (once per device):**
+
+1. Join the **same Wi-Fi** as your computer.
+2. Open `https://192.168.1.42:8000` and **accept the self-signed certificate**. Skip this and
+   the live terminal is *silently* blocked (the `wss:` connection fails without any visible
+   error).
+3. Open `https://192.168.1.42:3000/#vc_token=<your token>` — the app stores the token and strips
+   it from the address bar. Allow **microphone** access when prompted.
+
+**Every time after that:** just open `https://192.168.1.42:3000` — talk, watch the terminal,
+approve permission prompts from the couch, the kitchen, anywhere on the network.
+
+If something doesn't work:
+
+- **Mic button does nothing** → you opened `http://` or used a hostname not in the cert — the
+  mic needs a secure context (`https://`).
+- **Terminal stays blank** → re-visit `https://<ip>:8000` and accept the cert again.
+- **Nothing loads after a router change** → your LAN IP changed; regenerate the certs with the
+  new IP (see [network mode](#lan--phone-network-mode-tls--token-required)) and re-accept on the
+  phone.
 
 ---
 
