@@ -13,8 +13,6 @@ approving permission prompts, running slash commands, and narrating the results 
 terminal streams the actual Claude TUI to your browser and your phone, so you can watch (and
 take over by keyboard) at any time.
 
-<!-- DEMO: 30-60s GIF/video goes here — show: speak an instruction → Claude Code works in the live terminal → result narrated back; include phone view -->
-
 ### What it does
 
 - 🎙️ **Hands-free Claude Code** — speak an instruction; the voice agent relays it to a real `claude` session and reads the answer back.
