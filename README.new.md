@@ -85,11 +85,11 @@ A quick tour of the ways people actually use it:
 
 3. **🤝 Co-drive — type *and* talk** — voice and keyboard share one tmux session. Type a precise edit, lean back, steer by voice — same session, one transcript.
 
-4. **📱 Code from the couch** — run [network mode](#lan--phone-network-mode-tls--token-required), open the app on your phone (same Wi-Fi), and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine.
+4. **📱 Code from mobile** — run [network mode](#lan--phone-network-mode-tls--token-required), open the app on your phone (same Wi-Fi), and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine.
 
-5. **✅ Approve without walking over** — Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode"*.
+5. **✅ Approve permissions with voice, switch modes** — Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode"*.
 
-6. **🖥️ Drive the real TUI** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
+6. **🖥️ Control the real TUI via voice** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
 
 7. **🗂️ Juggle projects** — list, start, rename, switch, and close sessions across all your allowed folders — entirely by voice.
 
