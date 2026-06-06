@@ -15,11 +15,15 @@ watch (and take over by keyboard) at any time.
 
 ### What it does
 
-- 🎙️ **Hands-free Claude Code** — speak an instruction; the voice agent relays it to a real `claude` session and reads the answer back.
-- 🖥️ **Live terminal, anywhere** — the interactive Claude TUI streams to your browser and phone via xterm.js; watch it work or grab the keyboard.
-- 🔀 **OpenAI Realtime or Gemini Live** — pick your voice model; OpenAI works direct or via Azure. Gemini has a free tier. Provider keys stay server-side; the browser only gets a short-lived token.
-- ✅ **Approve by voice** — Claude pauses for permission; say "yes" / "allow" / "switch to auto mode" without touching the keyboard.
-- 🤝 **Co-drive** — voice and keyboard share one `tmux` session, so you can type and talk on the same Claude session simultaneously.
+- 🎙️ **Hands-free Claude Code** — speak; the agent drives a real `claude` session and reads the answer back.
+- 🖥️ **Live terminal, anywhere** — the Claude TUI streams to browser and phone via xterm.js; watch it work or grab the keyboard.
+- 🔀 **OpenAI Realtime or Gemini Live** — pick your voice model (OpenAI direct or via Azure; Gemini has a free tier). Keys stay server-side.
+- 📱 **Code from mobile (on your local network, for now)** — talk to Claude and watch the live terminal from anywhere in the house. Setup: [use it from your phone](#use-it-from-your-phone-local-network).
+- ✅ **Approve by voice** — say *"yes"*, *"allow"*, or *"switch to auto mode"* without touching the keyboard.
+- 🤝 **Co-drive** — voice and keyboard share one `tmux` session; type and talk on the same session simultaneously.
+- 🔁 **Hand off in either direction** — `/voice-handoff` continues a terminal session by voice; the printed `tmux attach` takes the keyboard on a voice one. Details: [co-driving](#co-driving-voice--keyboard-on-one-session).
+- 🖥️ **Control the real TUI via voice** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"*
+- 🗂️ **Juggle projects** — list, start, rename, and close sessions across your allowed folders, by name, entirely by voice.
 
 > [!WARNING]
 > **The backend executes real commands on your computer** — it drives `claude`, which runs
@@ -51,31 +55,8 @@ agent may edit; after that, `yapcode up` just launches. Homebrew (`brew install 
 
 ---
 
-## Getting the most out of yapcode
-
-A quick tour of the ways people actually use it:
-
-1. **🎙️ Start everything by voice** — open the app and just talk: *"start a session in my blog repo"*. The agent launches a real Claude session, relays your instructions, and narrates results back — while the live terminal streams in your browser.
-
-2. **🔁 Hand off in either direction** — in a terminal `claude` session, type `/voice-handoff` to continue **that exact session** by voice; started by voice in the app? Run the printed `tmux attach` to take the keyboard. Details: [co-driving](#co-driving-voice--keyboard-on-one-session).
-
-3. **🤝 Co-drive — type *and* talk** — voice and keyboard share one tmux session. Type a precise edit, lean back, steer by voice — same session, one transcript.
-
-4. **📱 Code from mobile** — open the app on your phone (same Wi-Fi) and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine. Setup: [use it from your phone](#use-it-from-your-phone-local-network).
-
-5. **✅ Approve permissions with voice, switch modes** — Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode"*.
-
-6. **🖥️ Control the real TUI via voice** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
-
-7. **🗂️ Juggle projects** — list, start, rename, and close sessions across all your allowed folders, addressing any session by name — entirely by voice.
-
-8. **☕ Kick off and walk away** — start a long refactor, go make coffee, then ask *"how's it going?"* — the agent peeks at the session and tells you. Approve the next prompt from wherever you are.
-
----
-
 ## Contents
 
-- [Getting the most out of yapcode](#getting-the-most-out-of-yapcode)
 - [How it works](#how-it-works)
 - [Security model (read this first)](#security-model-read-this-first)
 - [What's in the box](#whats-in-the-box)
