@@ -1077,6 +1077,14 @@ export default function VoiceAgent() {
       ) {
         pollSession(res.session_id);
       }
+      // Answering by voice must dismiss the prompt card just like clicking the
+      // card's buttons does (answerPrompt clears it before the fetch). Without
+      // this it lingered for the whole post-answer turn — minutes for a plan
+      // execution — looking stuck. If a follow-up prompt arrives (e.g. the next
+      // question of a form), the poll re-raises a fresh card.
+      if (e.name === "answer_prompt") {
+        setPending((p) => (p && p.sessionId === res?.session_id ? null : p));
+      }
       if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
