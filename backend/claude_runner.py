@@ -36,6 +36,9 @@ _ALLOW_WORDS = {
     "proceed",  # natural "yes" for the ExitPlanMode plan-approval prompt
 }
 
+# Bare declines (no feedback attached) for the plan-approval dialog.
+_DENY_WORDS = {"deny", "no", "nope", "decline", "declined", "cancel", "reject", "rejected", "n"}
+
 
 @dataclass
 class Prompt:
@@ -532,10 +535,12 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
         # naturally ("proceed" / "keep planning") rather than seeing an opaque
         # "use the ExitPlanMode tool" permission. Approve -> allow (leave plan
         # mode, start making changes); decline -> deny (stay in plan mode).
-        text = ("proceed with the plan it just laid out — approving starts the "
-                "work in auto mode (no further permission prompts); answer "
-                "'manual' to approve but keep approving each edit by voice; "
-                "declining keeps it in plan mode so you can refine the plan")
+        text = ("proceed with the plan it just laid out (now shown in the "
+                "session's terminal) — approving starts the work in auto mode "
+                "(no further permission prompts); answer 'manual' to approve "
+                "but keep approving each edit by voice; declining keeps it in "
+                "plan mode, and any feedback in the answer is passed to Claude "
+                "to revise the plan")
         # The prompt text is the only channel the voice agent reliably gets —
         # the plan scrolls off the pane before it can peek.
         plan = str(ti.get("plan") or "").strip()

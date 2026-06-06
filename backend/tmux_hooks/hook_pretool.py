@@ -62,6 +62,15 @@ def main() -> None:
         emit("allow")  # let the question menu render; runner drives it
         return
 
+    if tool_name == "ExitPlanMode":
+        # Same pattern as questions: allow the tool so the TUI renders the plan
+        # and its own approval dialog immediately (a parked hook would leave the
+        # terminal on a spinner while the user is asked by voice). The dialog is
+        # the gate; the runner drives it for both approve and decline.
+        append_event({"event": "needs_permission", **base})
+        emit("allow")
+        return
+
     # risky: honor the session's permission mode so we don't ask for things the
     # mode already auto-approves (this hook runs independently of the CLI's own
     # mode handling, so without this it would prompt by voice even in auto).

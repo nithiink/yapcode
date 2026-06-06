@@ -39,6 +39,7 @@ from claude_runner import (
     Prompt,
     Status,
     _ALLOW_WORDS,
+    _DENY_WORDS,
     _parse_questions,
     _summarize_tool,
     normalize_mode,
@@ -529,9 +530,12 @@ class TmuxClaudeRunner(ClaudeRunner):
             s._stop.clear()
             s.status = "running"
             if kind == "permission":
-                allowed = self._write_decision(s, choice)
-                if allowed and pending_tool == "ExitPlanMode":
+                if pending_tool == "ExitPlanMode":
+                    # No decision file: the hook already allowed the tool so the
+                    # plan renders on screen; the TUI dialog is the actual gate.
                     await self._drive_plan_dialog(s, choice)
+                else:
+                    self._write_decision(s, choice)
             else:  # choice / AskUserQuestion menu
                 more = await self._answer_question(s, choice)
                 if more:
@@ -614,29 +618,40 @@ class TmuxClaudeRunner(ClaudeRunner):
         return allow
 
     async def _drive_plan_dialog(self, s: _TmuxSession, choice: str) -> None:
-        """An ALLOWED ExitPlanMode still renders the CLI's own 'ready to
-        execute. Would you like to proceed?' menu, which needs a keyboard
-        selection: 'manual…' -> manually approve edits, otherwise auto mode.
-        The session's mode file is synced so the hook policy matches the CLI.
-        (A denied ExitPlanMode never shows this dialog — the hook blocks it.)"""
+        """Answer the CLI's plan dialog ('ready to execute. Would you like to
+        proceed?'). Approve: 'manual…' -> manually approve edits, otherwise auto
+        mode; the session's mode file is synced so the hook policy matches the
+        CLI. Decline: Escape dismisses the dialog (stays in plan mode), then the
+        user's words are sent as feedback so Claude can revise the plan."""
+        c = (choice or "").strip().lower()
+        allow = c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS)
         for _ in range(80):  # ~12s grace for the dialog to render
             pane = await self._capture(s)
             if "Would you like to proceed?" in pane or "ready to execute" in pane:
                 break
             await asyncio.sleep(0.15)
         else:
-            log.warning("ExitPlanMode allowed for %s but the plan dialog never "
-                        "appeared; leaving the TUI as-is", s.handle)
+            log.warning("no plan dialog appeared for %s; leaving the TUI as-is", s.handle)
             return
-        manual = "manual" in (choice or "").lower()
-        await self._select_row(s, 1 if manual else 0)
-        s.mode = "default" if manual else "auto"
-        self._write_mode(s)
-        self._write_meta(s)
-        log_event("backend", "claude", "decision",
-                  f"plan approved ({'manually approve edits' if manual else 'auto mode'})",
-                  session=_slabel(s),
-                  detail={"handle": s.handle, "mode": s.mode})
+        if allow:
+            manual = "manual" in c
+            await self._select_row(s, 1 if manual else 0)
+            s.mode = "default" if manual else "auto"
+            self._write_mode(s)
+            self._write_meta(s)
+            log_event("backend", "claude", "decision",
+                      f"plan approved ({'manually approve edits' if manual else 'auto mode'})",
+                      session=_slabel(s),
+                      detail={"handle": s.handle, "mode": s.mode})
+            return
+        await self._tmux("send-keys", "-t", s.pane, "Escape")
+        await asyncio.sleep(0.6)
+        bare = c in _DENY_WORDS
+        feedback = ("The user declined executing this plan for now. Stay in plan "
+                    "mode and wait." if bare else choice)
+        log_event("backend", "claude", "decision", f"plan declined ({choice})",
+                  session=_slabel(s), detail={"handle": s.handle})
+        await self._send_message(s, feedback)
 
     async def _answer_question(self, s: _TmuxSession, choice: str) -> bool:
         """Drive one question of the AskUserQuestion menu.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
@@ -14,6 +14,61 @@ import { Icon } from "./ui/Icon";
 type TimelineItem =
   | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
   | { kind: "tool"; id: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
+
+// A plan-approval prompt carries the plan markdown after this marker (set in
+// the backend's _summarize_tool); split it off so the card can render it
+// formatted instead of as one raw blob.
+function splitPlan(text: string): { lead: string; plan: string | null } {
+  const i = text.indexOf("The full plan follows");
+  if (i < 0) return { lead: text, plan: null };
+  const nl = text.indexOf("\n", i);
+  return {
+    lead: text.slice(0, i).replace(/[—.\s]+$/, ""),
+    plan: nl < 0 ? null : text.slice(nl).trim(),
+  };
+}
+
+// Minimal markdown rendering (headings, lists, bold, inline code, fences) as
+// React elements — no innerHTML, so prompt content can't inject markup.
+function MarkdownLite({ md }: { md: string }) {
+  let key = 0;
+  const inline = (s: string): ReactNode[] => {
+    const nodes: ReactNode[] = [];
+    const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+    let last = 0;
+    for (let m = re.exec(s); m; m = re.exec(s)) {
+      if (m.index > last) nodes.push(s.slice(last, m.index));
+      const t = m[0];
+      nodes.push(t.startsWith("`") ? <code key={key++}>{t.slice(1, -1)}</code> : <b key={key++}>{t.slice(2, -2)}</b>);
+      last = m.index + t.length;
+    }
+    if (last < s.length) nodes.push(s.slice(last));
+    return nodes;
+  };
+  const out: ReactElement[] = [];
+  const lines = md.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.startsWith("```")) {
+      const buf: string[] = [];
+      while (++i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i]);
+      out.push(<pre key={key++}>{buf.join("\n")}</pre>);
+      continue;
+    }
+    const h = l.match(/^(#{1,4})\s+(.*)/);
+    if (h) {
+      out.push(<div key={key++} className={`mdh mdh${h[1].length}`}>{inline(h[2])}</div>);
+      continue;
+    }
+    const li = l.match(/^\s*([-*]|\d+\.)\s+(.*)/);
+    if (li) {
+      out.push(<div key={key++} className="mdli"><span className="mdb">{li[1] === "-" || li[1] === "*" ? "•" : li[1]}</span>{inline(li[2])}</div>);
+      continue;
+    }
+    out.push(l.trim() ? <div key={key++} className="mdp">{inline(l)}</div> : <div key={key++} className="mdgap" />);
+  }
+  return <div className="planmd">{out}</div>;
+}
 
 // Pretty-print a tool call's input/output for the expandable detail view.
 // Strings pass through; objects are JSON-formatted; nullish renders as a dash.
@@ -1478,9 +1533,15 @@ export default function VoiceAgent() {
             {pending.kind === "choice" ? (
               pending.text
             ) : (
-              <>
-                Claude wants to <code>{pending.text}</code>
-              </>
+              (() => {
+                const { lead, plan } = splitPlan(pending.text);
+                return (
+                  <>
+                    Claude wants to <code>{lead}</code>
+                    {plan && <MarkdownLite md={plan} />}
+                  </>
+                );
+              })()
             )}
           </div>
           <div className="permbtns">
