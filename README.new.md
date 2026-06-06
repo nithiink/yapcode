@@ -42,6 +42,9 @@ curl -fsSL https://claude.ai/install.sh | bash   # or see https://claude.com/cla
 claude                                      # run once to sign in
 ```
 
+You'll also need `tmux`, Python 3.12+, and Node 20+ — `yapcode up` checks for them and tells
+you exactly what to install if anything's missing (full list: [Prerequisites](#prerequisites)).
+
 ### Works today — install from source
 
 ```sh
