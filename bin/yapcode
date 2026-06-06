@@ -274,6 +274,14 @@ bootstrap() {
     err "  then run \`claude\` once to sign in."
     exit 1
   fi
+  local node_major
+  node_major="$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
+  if [ -z "$node_major" ] || [ "$node_major" -lt 20 ] 2>/dev/null; then
+    err "yapcode: Node 20+ is required (found: $(node -v 2>/dev/null || echo 'no node'))."
+    err "  macOS:           brew install node"
+    err "  Debian/Ubuntu:   install via nvm — https://github.com/nvm-sh/nvm (apt's node is too old)"
+    exit 1
+  fi
   if [ ! -x "$APP_ROOT/backend/.venv/bin/python" ]; then
     local py
     if ! py="$(find_python)"; then

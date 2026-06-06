@@ -91,7 +91,7 @@ A quick tour of the ways people actually use it:
 
 6. **🖥️ Control the real TUI via voice** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
 
-7. **🗂️ Juggle projects** — list, start, rename, switch, and close sessions across all your allowed folders — entirely by voice.
+7. **🗂️ Juggle projects** — list, start, rename, and close sessions across all your allowed folders, addressing any session by name — entirely by voice.
 
 8. **☕ Kick off and walk away** — start a long refactor, go make coffee, then ask *"how's it going?"* — the agent peeks at the session and tells you. Approve the next prompt from wherever you are.
 
@@ -180,7 +180,8 @@ yapcode/
 │   └── claude-code-plugin/
 ├── packaging/                 # Homebrew formula + release script
 │   ├── yapcode.rb
-│   └── release.sh
+│   ├── release.sh
+│   └── README.md
 ├── bin/                       # the `yapcode` CLI launcher (bash)
 ├── LICENSE                    # MIT
 └── README.md
@@ -573,8 +574,8 @@ Because each session runs in a tmux session named `vc_<id>` and tmux allows mult
 one pane, you can drive a single Claude session by **voice and keyboard at the same time** —
 single process, single transcript, no conflicts.
 
-The bridge is the **`/voice-handoff`** slash command, shipped as a Claude Code plugin in
-`integrations/claude-code-plugin/`. It registers the terminal session you're sitting in with
+The bridge is the **`/voice-handoff`** command (a skill shipped in the Claude Code plugin at
+`integrations/claude-code-plugin/`). It registers the terminal session you're sitting in with
 your local yapcode backend, so the voice agent can co-drive that exact session. Install the
 plugin once (user scope, available in every session):
 
@@ -674,7 +675,8 @@ The high-level pipeline is in [How it works](#how-it-works); below is the path t
    PTY-over-WebSocket to the same tmux pane — closing it just *detaches*; the session keeps
    running. (This shared pane is what enables [co-driving](#co-driving-voice--keyboard-on-one-session).)
 
-**Two Claude execution backends** share a `ClaudeRunner` interface (`backend/session_manager.py`):
+**Two Claude execution backends** share a `ClaudeRunner` interface (`backend/claude_runner.py`;
+routing between backends lives in `backend/session_manager.py`):
 `cli` → `TmuxClaudeRunner` (default; real interactive CLI, uses your Max subscription, supports
 `--chrome`) and `sdk` → `SDKClaudeRunner` (Claude Agent SDK). Each session handle is a uuid owned
 by one backend.
@@ -723,7 +725,8 @@ npm ci                                                                    # lock
 | `backend/main.py` | FastAPI app, endpoints, auth (`_access_ok`, `require_auth`, WS auth), lifespan/rehydration. |
 | `backend/tools.py` | The voice-model tool list (`TOOL_DEFINITIONS`) + `dispatch_tool`. |
 | `backend/tmux_runner.py` | The CLI runner — spawns/drives tmux + the `claude` CLI. |
-| `backend/session_manager.py` | `ClaudeRunner` interface, session handles, routing (cli vs sdk). |
+| `backend/claude_runner.py` | `ClaudeRunner` interface + the SDK runner. |
+| `backend/session_manager.py` | Session handles, project resolution, routing (cli vs sdk). |
 | `backend/permissions.py` | Classifies tools as safe / question / risky. |
 | `backend/slash_commands.py` | Slash-command discovery + execution. |
 | `backend/event_log.py`, `cost_log.py` | Pipeline event bus + cost JSONL logging. |
