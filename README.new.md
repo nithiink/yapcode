@@ -499,18 +499,34 @@ Because each session runs in a tmux session named `vc_<id>` and tmux allows mult
 one pane, you can drive a single Claude session by **voice and keyboard at the same time** —
 single process, single transcript, no conflicts.
 
-Install the Claude Code plugin in `integrations/claude-code-plugin/`, then:
+The bridge is the **`/voice-handoff`** slash command, shipped as a Claude Code plugin in
+`integrations/claude-code-plugin/`. It registers the terminal session you're sitting in with
+your local yapcode backend, so the voice agent can co-drive that exact session. Install the
+plugin once (user scope, available in every session):
 
-- Run **the plugin's launcher** (installed by the Claude Code plugin in
-  `integrations/claude-code-plugin/`, distinct from the top-level `yapcode` CLI) instead of the
-  plain `claude` command, and type `/voice-handoff` to enable voice on a running session — no
-  restart, keep typing, open the app to talk; **or**
-- From a plain `claude` session, type `/voice-handoff` to reopen it under management — it returns
-  a `tmux attach -t vc_…` command.
+```sh
+claude plugin marketplace add nithiink/yapcode
+claude plugin install yapcode@yapcode
+```
 
-Press **Ctrl-D** to leave the registration terminal first (single writer per session), then run
-the `tmux attach` command to co-drive. Both share one pane, so **take turns** — don't type and
-talk in the exact same instant. See the plugin README for install/config.
+Then, with the backend running, either:
+
+- **Start voice-ready (recommended):** run the plugin's `yapcode` launcher
+  (`integrations/claude-code-plugin/bin/yapcode` — distinct from the top-level `yapcode` CLI)
+  instead of plain `claude`. Work normally; type `/voice-handoff` whenever you want voice — it
+  switches on instantly, no restart. Keep typing there, and open the app to talk.
+- **From a plain `claude` session:** type `/voice-handoff`; yapcode reopens the session under
+  voice management and prints a `tmux attach -t vc_…` command. Press **Ctrl-D** to leave the
+  old process (single writer per session), then run the attach command to keep typing in the
+  same session while the voice agent drives it too. Only want to drive by voice? Just open the
+  app — no attach needed.
+
+Reaching a **remote or tunneled backend** instead of localhost: set `YAPCODE_URL` (default
+`http://localhost:8000`) and `YAPCODE_TOKEN` (required when the backend has `VC_AUTH_TOKEN`
+set).
+
+Both clients share one pane, so **take turns** — don't type and talk in the exact same instant.
+More detail in the [plugin README](integrations/claude-code-plugin/README.md).
 
 ---
 
