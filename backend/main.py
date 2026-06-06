@@ -103,6 +103,15 @@ TOOL_TIMEOUT_S = float(os.getenv("TOOL_TIMEOUT_S", "600"))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Config provenance banner: which .env supplied what (names only, no
+    # secrets) — turns "API key is not there" mysteries into one log line.
+    log.info("config: %s", config.summary())
+    if not config.voice_keys_found():
+        log.warning(
+            "no voice provider key found (%s) — voice sessions WILL fail to start. "
+            "Looked in %s. Fix: run `yapcode config`, or re-run the setup wizard "
+            "(`yapcode up`).",
+            " / ".join(config.VOICE_KEY_VARS), config.env_files_checked())
     event_log.start_writer()
     try:
         restored = await rehydrate_cli_sessions()
@@ -269,10 +278,11 @@ def _mint_config(
     voice = req.voice or REALTIME_VOICE
     if provider == "azure":
         if not AZURE_ENDPOINT or not AZURE_DEPLOYMENT:
-            raise HTTPException(status_code=500, detail="AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_DEPLOYMENT not set")
+            raise HTTPException(status_code=500,
+                                detail=config.missing_key_detail("AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_DEPLOYMENT"))
         key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
         if not key:
-            raise HTTPException(status_code=500, detail="AZURE_OPENAI_API_KEY is not set on the server")
+            raise HTTPException(status_code=500, detail=config.missing_key_detail("AZURE_OPENAI_API_KEY"))
         # Honor the client's deployment pick only when allowlisted — deployment
         # names are server infra; anything else falls back to the default.
         model = req.model if req.model in AZURE_DEPLOYMENTS else (AZURE_DEPLOYMENT or AZURE_DEPLOYMENTS[0])
@@ -298,7 +308,7 @@ def _mint_config(
     # OpenAI direct
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set on the server")
+        raise HTTPException(status_code=500, detail=config.missing_key_detail("OPENAI_API_KEY"))
     model = req.model or OPENAI_REALTIME_MODEL
     payload = {"session": {"type": "realtime", "model": model,
                            "audio": {"output": {"voice": voice}}}}
@@ -319,7 +329,7 @@ def _mint_gemini_token(model: str) -> str:
     """
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set on the server")
+        raise HTTPException(status_code=500, detail=config.missing_key_detail("GEMINI_API_KEY"))
     from google import genai  # imported lazily so the rest of the app loads without it
 
     client = genai.Client(api_key=key, http_options={"api_version": "v1alpha"})
