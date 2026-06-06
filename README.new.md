@@ -38,7 +38,7 @@ yapcode can do anything — yapcode drives your existing Claude Code subscriptio
 key). Install it and sign in once:
 
 ```sh
-npm install -g @anthropic-ai/claude-code   # or see https://claude.com/claude-code
+curl -fsSL https://claude.ai/install.sh | bash   # or see https://claude.com/claude-code
 claude                                      # run once to sign in
 ```
 
@@ -166,7 +166,7 @@ yapcode/
 | **Python 3.12+** | An older default `python3` fails with a *misleading* `No matching distribution found for claude-agent-sdk` error. |
 | **Node 20+** | For the frontend. |
 | **Git** | To clone (for the from-source path). |
-| **Claude Code** | Installed and **logged in** separately: [claude.com/claude-code](https://claude.com/claude-code), or `npm install -g @anthropic-ai/claude-code` then run `claude` once to sign in. Uses your existing subscription — no Anthropic API key. Homebrew cannot install or log you into it. |
+| **Claude Code** | Installed and **logged in** separately: [claude.com/claude-code](https://claude.com/claude-code), or `curl -fsSL https://claude.ai/install.sh | bash` then run `claude` once to sign in. Uses your existing subscription — no Anthropic API key. Homebrew cannot install or log you into it. |
 | **A voice provider key** | OpenAI, Azure OpenAI, or Google Gemini. **Gemini has a free API tier** ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)). |
 
 ```sh

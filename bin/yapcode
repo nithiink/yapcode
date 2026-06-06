@@ -259,6 +259,21 @@ find_python() {
 }
 
 bootstrap() {
+  # Runtime preflight (cheap, no installs yet): both tmux and the `claude` CLI
+  # are hard requirements to drive sessions. Check them BEFORE any venv/npm work
+  # so we fail fast instead of after a slow first-run dependency install.
+  if ! command -v tmux >/dev/null 2>&1; then
+    err "yapcode: tmux is required. Install it:"
+    err "  macOS:           brew install tmux"
+    err "  Debian/Ubuntu:   sudo apt install tmux"
+    exit 1
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    err "yapcode: the \`claude\` CLI is not on PATH. Install Claude Code first:"
+    err "  curl -fsSL https://claude.ai/install.sh | bash"
+    err "  then run \`claude\` once to sign in."
+    exit 1
+  fi
   if [ ! -x "$APP_ROOT/backend/.venv/bin/python" ]; then
     local py
     if ! py="$(find_python)"; then
