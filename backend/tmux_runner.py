@@ -864,19 +864,29 @@ class TmuxClaudeRunner(ClaudeRunner):
             self._write_mode(s)  # keep the hook's view of the mode in sync
         return s.mode
 
+    # read_session output lands in a voice model's context (Gemini Live runs a
+    # small window), so cap it to the most recent ~5k tokens of conversation.
+    READ_CAP_CHARS = 20_000
+
     async def read(self, handle: str) -> str:
         s = self._get(handle)
         text = "".join(s._transcript)
-        if text.strip():
+        if not text.strip():
+            # Adopted (handoff/rehydrated) session with no turns since: rebuild
+            # the conversation from the on-disk jsonl so "what is this session
+            # about?" has an answer.
+            from transcript import read_timeline
+            text = "\n\n".join(
+                f"[{ev['kind']}] {ev['text']}"
+                for ev in read_timeline(handle).get("events", [])
+                if ev.get("kind") in ("user", "assistant") and ev.get("text", "").strip())
+        if len(text) <= self.READ_CAP_CHARS:
             return text
-        # Adopted (handoff/rehydrated) session with no turns since: rebuild the
-        # conversation from the on-disk jsonl so "what is this session about?"
-        # has an answer.
-        from transcript import read_timeline
-        lines = [f"[{ev['kind']}] {ev['text']}"
-                 for ev in read_timeline(handle).get("events", [])
-                 if ev.get("kind") in ("user", "assistant") and ev.get("text", "").strip()]
-        return "\n\n".join(lines)[-20000:]
+        cut = text[-self.READ_CAP_CHARS:]
+        nl = cut.find("\n")  # resync to a line boundary
+        if 0 <= nl < 2000:
+            cut = cut[nl + 1:]
+        return f"(older conversation trimmed)\n{cut}"
 
     def pane_for(self, handle: str) -> str | None:
         """tmux pane target for a live-terminal attach, or None if unknown."""
