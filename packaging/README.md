@@ -1,8 +1,8 @@
 # Packaging — Homebrew distribution
 
-Staged Homebrew formula and release tooling. **Not live yet:** a formula installs
-by fetching the source tarball over anonymous HTTPS, which 404s while the repo is
-private. Publish only after the repo is public and a release tag exists.
+Homebrew formula and release tooling. **Live** since `v0.1.0`: the tap is
+[`nithiink/homebrew-yapcode`](https://github.com/nithiink/homebrew-yapcode), and users install
+with `brew tap nithiink/yapcode && brew install yapcode`.
 
 ## Files
 
