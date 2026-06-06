@@ -79,35 +79,21 @@ yapcode up                # first run: setup wizard → starts servers → opens
 
 A quick tour of the ways people actually use it:
 
-1. **🎙️ Start everything by voice** — open the app and just talk: *"start a session in my blog
-   repo."* The agent launches a real Claude session, relays your instructions, and narrates
-   results back — while the live terminal streams in your browser.
+1. **🎙️ Start everything by voice** — open the app and just talk: *"start a session in my blog repo"*. The agent launches a real Claude session, relays your instructions, and narrates results back — while the live terminal streams in your browser.
 
-2. **🔁 Hand off in either direction** — in a terminal `claude` session, type `/voice-handoff`
-   to continue **that exact session** by voice; started by voice in the app? Run the printed
-   `tmux attach` to take the keyboard. Details:
-   [co-driving](#co-driving-voice--keyboard-on-one-session).
+2. **🔁 Hand off in either direction** — in a terminal `claude` session, type `/voice-handoff` to continue **that exact session** by voice; started by voice in the app? Run the printed `tmux attach` to take the keyboard. Details: [co-driving](#co-driving-voice--keyboard-on-one-session).
 
-3. **🤝 Co-drive — type *and* talk** — voice and keyboard share one tmux session. Type a
-   precise edit, lean back, steer by voice — same session, one transcript.
+3. **🤝 Co-drive — type *and* talk** — voice and keyboard share one tmux session. Type a precise edit, lean back, steer by voice — same session, one transcript.
 
-4. **📱 Code from the couch** — run
-   [network mode](#lan--phone-network-mode-tls--token-required), open the app on your phone
-   (same Wi-Fi), and you have the full experience anywhere in the house: talk to Claude **and
-   watch the live terminal**, while the work happens on your machine.
+4. **📱 Code from the couch** — run [network mode](#lan--phone-network-mode-tls--token-required), open the app on your phone (same Wi-Fi), and you have the full experience anywhere in the house: talk to Claude **and watch the live terminal**, while the work happens on your machine.
 
-5. **✅ Approve without walking over** — Claude pauses for permission? Just say *"yes"*,
-   *"allow"*, or *"switch to auto mode."*
+5. **✅ Approve without walking over** — Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode"*.
 
-6. **🖥️ Drive the real TUI** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"*
-   — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
+6. **🖥️ Drive the real TUI** — *"run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands, stops runaway tasks, and reads you the actual terminal.
 
-7. **🗂️ Juggle projects** — list, start, rename, switch, and close sessions across all your
-   allowed folders — entirely by voice.
+7. **🗂️ Juggle projects** — list, start, rename, switch, and close sessions across all your allowed folders — entirely by voice.
 
-8. **☕ Kick off and walk away** — start a long refactor, go make coffee, then ask *"how's it
-   going?"* — the agent peeks at the session and tells you. Approve the next prompt from
-   wherever you are.
+8. **☕ Kick off and walk away** — start a long refactor, go make coffee, then ask *"how's it going?"* — the agent peeks at the session and tells you. Approve the next prompt from wherever you are.
 
 ---
 
