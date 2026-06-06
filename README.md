@@ -17,7 +17,7 @@ watch (and take over by keyboard) at any time.
 
 - 🎙️ **Hands-free Claude Code** — speak an instruction; the voice agent relays it to a real `claude` session and reads the answer back.
 - 🖥️ **Live terminal, anywhere** — the interactive Claude TUI streams to your browser and phone via xterm.js; watch it work or grab the keyboard.
-- 🔀 **Bring your own voice provider** — OpenAI realtime (direct or via Azure) or Google Gemini Live. Gemini has a free tier. Provider keys stay server-side; the browser only gets a short-lived token.
+- 🔀 **Choose your voice model** — OpenAI realtime (direct or via Azure) or Google Gemini Live. Gemini has a free tier. Provider keys stay server-side; the browser only gets a short-lived token.
 - ✅ **Approve by voice** — Claude pauses for permission; say "yes" / "allow" / "switch to auto mode" without touching the keyboard.
 - 🤝 **Co-drive** — voice and keyboard share one `tmux` session, so you can type and talk on the same Claude session simultaneously.
 
