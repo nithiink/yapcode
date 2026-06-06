@@ -29,14 +29,15 @@ watch (and take over by keyboard) at any time.
 
 ---
 
-## 60-second quickstart
+## Quickstart
 
-> [!IMPORTANT]
-> You'll need **[Claude Code](https://claude.com/claude-code)** installed and logged in
-> (`curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` once), a **voice key**
-> (Gemini has a [free tier](https://aistudio.google.com/apikey); OpenAI and Azure work too),
-> and **`tmux` / Python 3.12+ / Node 20+** — `yapcode up` checks and tells you what's missing.
-> Full list: [Prerequisites](#prerequisites).
+You'll need ([details](#prerequisites) — `yapcode up` checks and tells you what's missing):
+
+- [Claude Code](https://claude.com/claude-code), installed and logged in
+- A voice key — Gemini ([free tier](https://aistudio.google.com/apikey)), OpenAI, or Azure
+- `tmux`
+- Python 3.12+
+- Node 20+
 
 ```sh
 git clone https://github.com/nithiink/yapcode.git
@@ -195,7 +196,7 @@ sudo apt install tmux git python3 python3-venv
 ## Install with Homebrew (recommended)
 
 > **Not live yet** — the formula needs the repo public + a release tag. Until then, use the
-> [from-source path](#60-second-quickstart); it's the same wizard and just as fast. The steps
+> [from-source path](#quickstart); it's the same wizard and just as fast. The steps
 > below describe the published experience.
 
 Works on macOS and Linuxbrew:
@@ -253,7 +254,7 @@ subcommand prints usage to stderr and exits `2`.
 ## Install from source
 
 This is the path that works today. The commands are in the
-[quickstart](#60-second-quickstart); the details unique to a clone:
+[quickstart](#quickstart); the details unique to a clone:
 
 - On first `up` the launcher **bootstraps dependencies**: if `backend/.venv` is missing it picks
   a Python 3.12+ interpreter and `pip install`s `backend/requirements.txt`; if
