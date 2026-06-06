@@ -3,7 +3,7 @@
 **Talk to your laptop. Watch Claude Code write the code.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](#prerequisites)
+[![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](#prerequisites-1)
 [![Works with Claude Code](https://img.shields.io/badge/works%20with-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
 
 **yapcode is one voice agent for all your [Claude Code](https://claude.com/claude-code)
@@ -35,13 +35,17 @@ watch (and take over by keyboard) at any time.
 
 ## Quickstart
 
-You'll need ([details](#prerequisites) — `yapcode up` checks and tells you what's missing):
+### Prerequisites
+
+`yapcode up` checks these and tells you what's missing ([full list](#prerequisites-1)):
 
 - [Claude Code](https://claude.com/claude-code), installed and logged in
-- A voice key — Gemini ([free tier](https://aistudio.google.com/apikey)), OpenAI, or Azure
-- `tmux`
+- Voice API key — Gemini ([free tier](https://aistudio.google.com/apikey)), OpenAI native, or OpenAI via Azure
+- tmux
 - Python 3.12+
 - Node 20+
+
+### Installation
 
 ```sh
 git clone https://github.com/nithiink/yapcode.git
@@ -60,7 +64,7 @@ agent may edit; after that, `yapcode up` just launches. Homebrew (`brew install 
 - [How it works](#how-it-works)
 - [Security model (read this first)](#security-model-read-this-first)
 - [What's in the box](#whats-in-the-box)
-- [Prerequisites](#prerequisites)
+- [Prerequisites](#prerequisites-1)
 - [Install with Homebrew (recommended)](#install-with-homebrew-recommended)
 - [Install from source](#install-from-source)
 - [Running](#running)
