@@ -13,7 +13,8 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
-frontend/.certs/
+frontend/.certs/*
+!frontend/.certs/san.cnf.example
 
 # Interactive CLI session control dirs (runtime storage rehydration reads).
 # Default location is inside the project; override with VC_SESSION_STORE.

@@ -14,8 +14,8 @@ tmux's multi-client attach) — no second process, no jumbled history.
 
 ## Prerequisites
 
-- The yapcode backend running on this machine (`backend/ ./run.sh`, default
-  `http://localhost:8000`).
+- The yapcode backend running on this machine (`yapcode up` — or, for development,
+  `cd backend && ./run.sh`; default `http://localhost:8000`).
 - `tmux` installed.
 
 ## Install

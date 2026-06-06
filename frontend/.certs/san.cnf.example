@@ -1,0 +1,14 @@
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+[dn]
+CN = yapcode-dev
+[v3_req]
+subjectAltName = @alt
+[alt]
+# Set IP.1 to your machine's LAN IP (macOS: ipconfig getifaddr en0; Linux: hostname -I).
+# Re-generate the certs whenever this IP changes — see README "LAN / phone (network mode)".
+IP.1 = 192.168.1.42
+IP.2 = 127.0.0.1
+DNS.1 = localhost

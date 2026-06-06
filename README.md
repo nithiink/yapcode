@@ -319,11 +319,12 @@ cd frontend && npm run dev:network
 One-time per device:
 
 1. **Generate dev TLS certs** at `frontend/.certs/dev-key.pem` and `dev-cert.pem`. The cert's
-   SANs must include the device's IP. Edit `frontend/.certs/san.cnf` to set your LAN IP (it
-   hard-codes one under `[alt]`), then:
+   SANs must include the device's IP. Copy the template and set your LAN IP under `[alt]`,
+   then:
 
    ```bash
    cd frontend/.certs
+   cp san.cnf.example san.cnf      # then edit: set IP.1 to your LAN IP
    openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
      -keyout dev-key.pem -out dev-cert.pem -config san.cnf
    ```
@@ -583,7 +584,7 @@ More detail in the [plugin README](integrations/claude-code-plugin/README.md).
 | `run-network.sh` exits `1` immediately | Network mode **fails closed without `VC_AUTH_TOKEN`** in `backend/.env`. Generate one and set it, then open the app once with `/#vc_token=<token>`. |
 | `yapcode up` exits `1` on startup | **Port 8000 or 3000 is already in use.** Free the port and retry. |
 | Live terminal connects but stays blank / silently fails (LAN/phone) | You skipped the one-time self-signed-cert accept at `https://<host>:8000`, so the `wss` terminal is blocked. Visit it once and accept. Also: an HTTPS page must use `wss` (no mixed content). |
-| Mic doesn't work on phone | `getUserMedia` needs a secure context. Use `npm run dev:network` (HTTPS on `0.0.0.0`); plain `npm run dev` is HTTP + loopback-only. The device's IP must be in the cert SANs (`frontend/.certs/san.cnf`); regenerate the cert for a new IP. |
+| Mic doesn't work on phone | `getUserMedia` needs a secure context. Use `npm run dev:network` (HTTPS on `0.0.0.0`); plain `npm run dev` is HTTP + loopback-only. The device's IP must be in the cert SANs (`frontend/.certs/san.cnf`, copied from `san.cnf.example`); regenerate the cert for a new IP. |
 | App loads on a phone but toggles/buttons appear dead | Your LAN IP is outside the `192.168` / `10` / `172.16` private ranges, so Next 16 blocked `/_next/*` assets. Add the specific origin to `allowedDevOrigins` in `frontend/next.config.mjs`. |
 | Voice model select is greyed out | The model is **locked while connected** — disconnect first to change it. |
 | Token I set in config has no effect on localhost | Intentional: `yapcode up` **unsets `VC_AUTH_TOKEN` on localhost** so loopback stays zero-config. The token still applies in network mode. |

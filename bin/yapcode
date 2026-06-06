@@ -324,9 +324,11 @@ cmd_up() {
   ensure_env
   bootstrap
 
-  # Load the canonical config into the environment. python-dotenv (override
-  # defaults to False) defers to real env vars, so these win over any stale
-  # backend/.env. Then drop VC_AUTH_TOKEN: on localhost, setting it would force
+  # Load the canonical config into the environment so the launcher can act on it.
+  # Note: backend/config.py calls load_dotenv(override=True), so in a clone a
+  # present backend/.env is authoritative and overrides these exported values
+  # for any key set in both; the config-dir file rules only when no backend/.env
+  # exists (e.g. Homebrew). Then drop VC_AUTH_TOKEN: on localhost, setting it would force
   # even loopback callers to present the token (per the access-control model),
   # breaking the zero-config localhost flow. It stays in the file for run-network.
   load_env
