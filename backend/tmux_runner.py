@@ -524,11 +524,14 @@ class TmuxClaudeRunner(ClaudeRunner):
             if s.pending is None:
                 return self._err(s, "no pending prompt to answer")
             kind = s.pending.kind
+            pending_tool = s.pending.tool_name
             s._delta.clear()
             s._stop.clear()
             s.status = "running"
             if kind == "permission":
-                self._write_decision(s, choice)
+                allowed = self._write_decision(s, choice)
+                if allowed and pending_tool == "ExitPlanMode":
+                    await self._drive_plan_dialog(s, choice)
             else:  # choice / AskUserQuestion menu
                 more = await self._answer_question(s, choice)
                 if more:
@@ -594,7 +597,7 @@ class TmuxClaudeRunner(ClaudeRunner):
         if probe in input_line:
             await self._tmux("send-keys", "-t", s.pane, "Enter")
 
-    def _write_decision(self, s: _TmuxSession, choice: str) -> None:
+    def _write_decision(self, s: _TmuxSession, choice: str) -> bool:
         c = (choice or "").strip().lower()
         allow = c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS)
         path = os.path.join(s.ctrl, "decisions", f"{s.pending_tool_use_id or 'none'}.json")
@@ -608,6 +611,41 @@ class TmuxClaudeRunner(ClaudeRunner):
                   session=_slabel(s),
                   detail={"handle": s.handle, "decision": "allow" if allow else "deny",
                           "choice": choice, "tool_use_id": s.pending_tool_use_id})
+        return allow
+
+    async def _drive_plan_dialog(self, s: _TmuxSession, choice: str) -> None:
+        """Drive the TUI dialog that follows an ALLOWED ExitPlanMode.
+
+        Allowing the hook permission is not enough: the CLI then renders its own
+        menu — 'Claude has written up a plan and is ready to execute. Would you
+        like to proceed? 1. Yes, and use auto mode / 2. Yes, manually approve
+        edits / …' — and waits for a keyboard selection. Without driving it the
+        plan sat unapproved after the user already said yes (verified live,
+        CLI v2.1.165). Map the user's words to a row: 'manual…' -> manually
+        approve edits, anything else allow-ish -> auto mode (the CLI's default
+        highlight). Then sync our mode file so the voice permission policy
+        matches what the CLI is now doing — picking auto while the hook still
+        parked every edit would re-introduce the prompts the user just opted
+        out of. (A DENIED ExitPlanMode never shows this dialog: the hook blocks
+        the tool and Claude stays in plan mode.)"""
+        for _ in range(80):  # the dialog renders shortly after the hook allows; ~12s grace
+            pane = await self._capture(s)
+            if "Would you like to proceed?" in pane or "ready to execute" in pane:
+                break
+            await asyncio.sleep(0.15)
+        else:
+            log.warning("ExitPlanMode allowed for %s but the plan dialog never "
+                        "appeared; leaving the TUI as-is", s.handle)
+            return
+        manual = "manual" in (choice or "").lower()
+        await self._select_row(s, 1 if manual else 0)
+        s.mode = "default" if manual else "auto"
+        self._write_mode(s)
+        self._write_meta(s)
+        log_event("backend", "claude", "decision",
+                  f"plan approved ({'manually approve edits' if manual else 'auto mode'})",
+                  session=_slabel(s),
+                  detail={"handle": s.handle, "mode": s.mode})
 
     async def _answer_question(self, s: _TmuxSession, choice: str) -> bool:
         """Drive one question of the AskUserQuestion menu.

@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import claude_agent_sdk as sdk
 
-from permissions import classify
+from permissions import classify, is_plan_file_write
 from event_log import log_event
 
 log = logging.getLogger("yapcode.runner")
@@ -460,7 +460,7 @@ class SDKClaudeRunner(ClaudeRunner):
     async def _can_use_tool(self, s: _Session, tool_name: str,
                             tool_input: dict[str, Any], context: Any):
         kind = classify(tool_name)
-        if kind == "safe":
+        if kind == "safe" or is_plan_file_write(tool_name, tool_input):
             return sdk.PermissionResultAllow()
 
         async with s._perm_lock:           # serialize concurrent risky/question asks
@@ -532,9 +532,10 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
         # naturally ("proceed" / "keep planning") rather than seeing an opaque
         # "use the ExitPlanMode tool" permission. Approve -> allow (leave plan
         # mode, start making changes); decline -> deny (stay in plan mode).
-        text = ("proceed with the plan it just laid out — approving leaves plan "
-                "mode and starts making the changes; declining keeps it in plan "
-                "mode so you can refine the plan")
+        text = ("proceed with the plan it just laid out — approving starts the "
+                "work in auto mode (no further permission prompts); answer "
+                "'manual' to approve but keep approving each edit by voice; "
+                "declining keeps it in plan mode so you can refine the plan")
         # Include the plan itself: the prompt text is the ONLY channel the voice
         # agent reliably receives — by the time it reacts, the plan has usually
         # scrolled out of the visible pane, so peek_screen can't recover it and

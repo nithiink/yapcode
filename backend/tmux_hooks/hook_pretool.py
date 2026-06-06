@@ -18,7 +18,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from permissions import classify, is_edit_tool  # noqa: E402
+from permissions import classify, is_edit_tool, is_plan_file_write  # noqa: E402
 from _common import append_event, decision_path, read_input, read_mode  # noqa: E402
 
 POLL_SECONDS = 590.0  # stay under the 600s hook timeout
@@ -50,7 +50,9 @@ def main() -> None:
         "session_id": session_id,
     }
 
-    if kind == "safe":
+    if kind == "safe" or is_plan_file_write(tool_name, tool_input):
+        # Plan-file writes (~/.claude/plans) are how plan mode saves its plan —
+        # the vanilla CLI never prompts for them; neither do we.
         append_event({"event": "tool", **base})
         emit("allow")
         return
