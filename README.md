@@ -6,12 +6,12 @@
 [![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](#prerequisites)
 [![Works with Claude Code](https://img.shields.io/badge/works%20with-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
 
-**yapcode is a voice front-end for [Claude Code](https://claude.com/claude-code).** A realtime
-voice agent becomes Claude's **mouth and ears**: you speak, and it drives **real** Claude Code
-sessions on your machine via `tmux` — starting sessions in your projects, sending instructions,
-approving permission prompts, running slash commands, and narrating the results back. A live
-terminal streams the actual Claude TUI to your browser and your phone, so you can watch (and
-take over by keyboard) at any time.
+**yapcode is a voice agent for [Claude Code](https://claude.com/claude-code).** It becomes
+Claude's **mouth and ears**: you speak, and it drives **real** Claude Code sessions on your
+machine via `tmux` — starting sessions in your projects, sending instructions, approving
+permission prompts, running slash commands, and narrating the results back. A live terminal
+streams the actual Claude TUI to your browser and your phone, so you can watch (and take over
+by keyboard) at any time.
 
 ### What it does
 
