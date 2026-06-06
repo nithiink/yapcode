@@ -315,6 +315,9 @@ brew install python@3.12
 
 ## Running
 
+> Using the launcher? `yapcode up` already handles localhost running — this section is the
+> manual equivalent, useful for development. **Network mode applies to everyone.**
+
 ### Localhost (zero-config, trusted loopback)
 
 ```bash
@@ -361,8 +364,11 @@ One-time per device:
    token in `localStorage` and strips it from the URL. (The token is never baked into the JS
    bundle.)
 
-A phone needs HTTPS (a "secure context") for the microphone to work off localhost. Generate a
-token with:
+A phone needs HTTPS (a "secure context") for the microphone to work off localhost.
+
+If you ran the [first-run wizard](#first-run-setup-wizard), **a `VC_AUTH_TOKEN` was already
+generated for you** — it's in `~/.config/yapcode/.env` (`yapcode config` to view). Manual setups
+can generate one with:
 
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -465,6 +471,8 @@ config-dir file for any key set in both; the config-dir file is authoritative on
 
 Frontend-side: `BACKEND_URL` (default `http://localhost:8000`) is what the Next `/api/*` proxy
 forwards to; `dev:network` sets it to `https://localhost:8000` and `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
+See [`backend/.env.example`](backend/.env.example) for the full annotated list of every variable.
 
 > Under Homebrew, the launcher wrapper exports `YAPCODE_ROOT` (pins the install tree) and
 > redirects runtime writes out of the read-only Cellar: `VC_SESSION_STORE` points at
