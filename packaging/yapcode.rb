@@ -9,7 +9,7 @@
 # tarball over anonymous HTTPS, which 404s on a private repo. Publish only after
 # the repo is public and a release tag exists.
 class Yapcode < Formula
-  desc "Voice front-end for Claude Code — talk to drive real Claude Code sessions"
+  desc "Voice agent for Claude Code — talk to drive real Claude Code sessions"
   homepage "https://github.com/nithiink/yapcode"
   url "https://github.com/nithiink/yapcode/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # PLACEHOLDER — release.sh stamps this
