@@ -21,11 +21,13 @@ tmux's multi-client attach) — no second process, no jumbled history.
 ## Install
 
 ```bash
-# from a marketplace (once published):
-/plugin marketplace add nithiink/yapcode
-/plugin install yapcode
+# once, from any terminal — installs at user scope, available in every session:
+claude plugin marketplace add nithiink/yapcode
+claude plugin install yapcode@yapcode
 
-# or for local testing, point Claude Code at this folder:
+# (same thing from inside a session: /plugin marketplace add … then /plugin install …)
+
+# or, for plugin development, load for one session only:
 claude --plugin-dir /path/to/yapcode/integrations/claude-code-plugin
 ```
 

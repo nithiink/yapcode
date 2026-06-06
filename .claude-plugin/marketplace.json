@@ -1,0 +1,12 @@
+{
+  "name": "yapcode",
+  "owner": { "name": "yapcode", "url": "https://github.com/nithiink/yapcode" },
+  "plugins": [
+    {
+      "name": "yapcode",
+      "source": "./integrations/claude-code-plugin",
+      "description": "Hand off a terminal Claude Code session to the yapcode voice agent — continue your work by voice while still typing in the same session.",
+      "version": "0.1.0"
+    }
+  ]
+}
