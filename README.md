@@ -32,44 +32,21 @@ watch (and take over by keyboard) at any time.
 ## 60-second quickstart
 
 > [!IMPORTANT]
-> **You need three things before yapcode can do anything:**
->
-> 1. **[Claude Code](https://claude.com/claude-code), installed and logged in** — yapcode
->    drives your existing Claude Code subscription (no Anthropic API key needed):
->    ```sh
->    curl -fsSL https://claude.ai/install.sh | bash   # or see https://claude.com/claude-code
->    claude                                           # run once to sign in
->    ```
-> 2. **`tmux`, Python 3.12+, and Node 20+** — `yapcode up` checks for them and tells you
->    exactly what to install if anything's missing.
-> 3. **A voice-provider API key** — Google **Gemini** (has a free tier), **OpenAI**, or
->    **Azure OpenAI**. The first-run wizard asks for it.
->
-> Full details: [Prerequisites](#prerequisites).
-
-### Works today — install from source
+> You'll need **[Claude Code](https://claude.com/claude-code)** installed and logged in
+> (`curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` once), a **voice key**
+> (Gemini has a [free tier](https://aistudio.google.com/apikey); OpenAI and Azure work too),
+> and **`tmux` / Python 3.12+ / Node 20+** — `yapcode up` checks and tells you what's missing.
+> Full list: [Prerequisites](#prerequisites).
 
 ```sh
 git clone https://github.com/nithiink/yapcode.git
 cd yapcode
-./bin/yapcode up          # first run: setup wizard → auto-installs deps → opens http://localhost:3000
+./bin/yapcode up    # first run: setup wizard → installs deps → opens http://localhost:3000
 ```
 
-On first run a short wizard asks for an (optional) **Gemini** key, an (optional) **OpenAI** key,
-and the **folder(s)** the agent may edit — then writes `~/.config/yapcode/.env` (mode `600`).
-After that, `yapcode up` just starts both servers and opens the app. See the
-[first-run wizard](#first-run-setup-wizard) for details.
-
-### Coming soon — Homebrew
-
-> **Homebrew distribution is not live yet** (the formula needs the repo public + a release tag).
-> Until then, use the from-source path above — it's the same wizard and just as fast.
-
-```sh
-brew tap nithiink/yapcode
-brew install yapcode      # pulls in tmux, python@3.12, node; builds the app
-yapcode up                # first run: setup wizard → starts servers → opens browser
-```
+The [first-run wizard](#first-run-setup-wizard) asks for a voice key and the folder(s) the
+agent may edit; after that, `yapcode up` just launches. Homebrew (`brew install yapcode`) is
+[coming soon](#install-with-homebrew-recommended).
 
 ---
 
@@ -217,11 +194,19 @@ sudo apt install tmux git python3 python3-venv
 
 ## Install with Homebrew (recommended)
 
-> Not live yet — see [Coming soon — Homebrew](#coming-soon--homebrew) in the quickstart. The
-> steps below describe the published experience.
+> **Not live yet** — the formula needs the repo public + a release tag. Until then, use the
+> [from-source path](#60-second-quickstart); it's the same wizard and just as fast. The steps
+> below describe the published experience.
 
-Works on macOS and Linuxbrew. The two install commands are the
-[same as the quickstart](#coming-soon--homebrew); the details unique to Homebrew:
+Works on macOS and Linuxbrew:
+
+```sh
+brew tap nithiink/yapcode
+brew install yapcode      # pulls in tmux, python@3.12, node; builds the app
+yapcode up                # first run: setup wizard → starts servers → opens browser
+```
+
+Details unique to Homebrew:
 
 - The formula `depends_on` node, python@3.12, and tmux, copies the source into the **Cellar**,
   builds the backend virtualenv and a **production** frontend build (so the launcher runs
@@ -267,8 +252,8 @@ subcommand prints usage to stderr and exits `2`.
 
 ## Install from source
 
-This is the path that works today. The two install commands are the
-[same as the quickstart](#works-today--install-from-source); the details unique to a clone:
+This is the path that works today. The commands are in the
+[quickstart](#60-second-quickstart); the details unique to a clone:
 
 - On first `up` the launcher **bootstraps dependencies**: if `backend/.venv` is missing it picks
   a Python 3.12+ interpreter and `pip install`s `backend/requirements.txt`; if
