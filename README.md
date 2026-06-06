@@ -48,14 +48,20 @@ watch (and take over by keyboard) at any time.
 ### Installation
 
 ```sh
+brew tap nithiink/yapcode && brew install yapcode   # macOS / Linuxbrew
+yapcode up    # first run: setup wizard → opens http://localhost:3000
+```
+
+Or [from source](#install-from-source):
+
+```sh
 git clone https://github.com/nithiink/yapcode.git
 cd yapcode
-./bin/yapcode up    # first run: setup wizard → installs deps → opens http://localhost:3000
+./bin/yapcode up    # same wizard; installs deps on first run
 ```
 
 The [first-run wizard](#first-run-setup-wizard) asks for a voice key and the folder(s) the
-agent may edit; after that, `yapcode up` just launches. Homebrew (`brew install yapcode`) is
-[coming soon](#install-with-homebrew-recommended).
+agent may edit; after that, `yapcode up` just launches.
 
 ---
 
@@ -180,10 +186,6 @@ sudo apt install tmux git python3 python3-venv
 
 ## Install with Homebrew (recommended)
 
-> **Not live yet** — the formula needs the repo public + a release tag. Until then, use the
-> [from-source path](#quickstart); it's the same wizard and just as fast. The steps
-> below describe the published experience.
-
 Works on macOS and Linuxbrew:
 
 ```sh
@@ -238,7 +240,7 @@ subcommand prints usage to stderr and exits `2`.
 
 ## Install from source
 
-This is the path that works today. The commands are in the
+For development, or to run latest `main` instead of a release. The commands are in the
 [quickstart](#quickstart); the details unique to a clone:
 
 - On first `up` the launcher **bootstraps dependencies**: if `backend/.venv` is missing it picks
