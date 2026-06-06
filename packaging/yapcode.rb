@@ -12,7 +12,7 @@ class Yapcode < Formula
   desc "Voice agent for Claude Code — talk to drive real Claude Code sessions"
   homepage "https://github.com/nithiink/yapcode"
   url "https://github.com/nithiink/yapcode/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000" # PLACEHOLDER — release.sh stamps this
+  sha256 "eb6de7ead927a435763bc0bd3e3689918ebd9fbb3c51a8fcc896e2e26d7fa26e"
   license "MIT"
 
   depends_on "node"
