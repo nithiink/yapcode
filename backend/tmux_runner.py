@@ -865,7 +865,18 @@ class TmuxClaudeRunner(ClaudeRunner):
         return s.mode
 
     async def read(self, handle: str) -> str:
-        return "".join(self._get(handle)._transcript)
+        s = self._get(handle)
+        text = "".join(s._transcript)
+        if text.strip():
+            return text
+        # Adopted (handoff/rehydrated) session with no turns since: rebuild the
+        # conversation from the on-disk jsonl so "what is this session about?"
+        # has an answer.
+        from transcript import read_timeline
+        lines = [f"[{ev['kind']}] {ev['text']}"
+                 for ev in read_timeline(handle).get("events", [])
+                 if ev.get("kind") in ("user", "assistant") and ev.get("text", "").strip()]
+        return "\n\n".join(lines)[-20000:]
 
     def pane_for(self, handle: str) -> str | None:
         """tmux pane target for a live-terminal attach, or None if unknown."""
