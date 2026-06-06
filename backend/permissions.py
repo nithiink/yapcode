@@ -27,6 +27,19 @@ def is_edit_tool(tool_name: str) -> bool:
     return tool_name in EDIT_TOOLS
 
 
+def mode_covers(mode: str, tool_name: str) -> bool:
+    """True when a permission mode would auto-approve this tool's permission
+    prompt — used to resolve a prompt that's already pending when the user
+    switches modes mid-prompt ('switch to auto mode' shouldn't leave the
+    prompt hanging). auto approves everything; acceptEdits approves file
+    edits only."""
+    if mode == "auto":
+        return True
+    if mode == "acceptEdits":
+        return tool_name in EDIT_TOOLS
+    return False
+
+
 _PLANS_DIR = os.path.realpath(os.path.expanduser("~/.claude/plans"))
 
 

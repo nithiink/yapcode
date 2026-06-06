@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from permissions import mode_covers
 from session_manager import (
     backend_of,
     cli_pane_for,
@@ -169,7 +170,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "set_mode",
-        "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect.",
+        "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect. If a permission prompt is pending and the new mode would auto-approve that tool (auto: anything; acceptEdits: file edits), the prompt is approved automatically and the session continues — the result message says which happened, so relay it.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -320,8 +321,22 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     if name == "set_mode":
         sid = resolve_session(args["session_id"])
+        # Snapshot any pending permission BEFORE the switch: the runner resolves
+        # a covered prompt asynchronously, so checking afterwards would race.
+        sess = next((x for x in list_all_sessions() if x["handle"] == sid), None)
+        prompt = (sess or {}).get("prompt")
         mode = await set_session_mode(sid, args["mode"])
-        return {"session_id": sid, "mode": mode}
+        out = {"session_id": sid, "mode": mode}
+        if prompt and prompt.get("kind") == "permission":
+            if mode_covers(mode, prompt.get("tool_name", "")):
+                out["message"] = (f"Mode is now '{mode}'. The pending permission "
+                                  f"({prompt['text']}) was approved under the new mode — "
+                                  "the session is continuing.")
+            else:
+                out["message"] = (f"Mode is now '{mode}', but the pending permission "
+                                  f"({prompt['text']}) is NOT covered by it and still "
+                                  "needs an allow/deny from the user.")
+        return out
 
     if name == "list_slash_commands":
         cwd: str | None = None

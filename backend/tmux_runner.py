@@ -44,7 +44,7 @@ from claude_runner import (
     _summarize_tool,
     normalize_mode,
 )
-from permissions import classify
+from permissions import classify, mode_covers
 from event_log import log_event
 
 log = logging.getLogger("yapcode.tmux")
@@ -885,6 +885,15 @@ class TmuxClaudeRunner(ClaudeRunner):
         reach the target — no blind guessing."""
         s = self._get(handle)
         target = normalize_mode(mode)
+        if (s.pending and s.pending.kind == "permission"
+                and s.pending.tool_name == "ExitPlanMode"):
+            # The plan-approval dialog is on screen; BTab presses would land in
+            # the dialog, not the footer. The dialog itself offers the mode
+            # change (option 1 is 'auto mode'), so route through answer instead.
+            raise ValueError(
+                "a plan-approval dialog is open — answer it instead "
+                "(e.g. 'auto mode' to approve the plan and auto-apply, or "
+                "'manually approve edits')")
         async with s._turn_lock:  # don't toggle mid-turn
             if not await self._alive(s):
                 raise ValueError("session is not running")
@@ -896,6 +905,18 @@ class TmuxClaudeRunner(ClaudeRunner):
             await asyncio.sleep(0.2)
             s.mode = self._detect_mode(await self._capture(s))
             self._write_mode(s)  # keep the hook's view of the mode in sync
+        # The mode file only affects FUTURE tool calls — a PreToolUse hook
+        # already parked on a permission prompt keeps waiting for its decision
+        # file. If the new mode would have auto-approved that tool, approve it
+        # now so 'switch to auto mode' doesn't leave the prompt hanging; the
+        # resumed turn's output is delivered via poll_status like any answer.
+        if (s.pending and s.pending.kind == "permission"
+                and mode_covers(s.mode, s.pending.tool_name)):
+            log_event("backend", "claude", "decision",
+                      f"allow (pending prompt covered by switch to {s.mode})",
+                      session=_slabel(s),
+                      detail={"handle": s.handle, "tool_name": s.pending.tool_name})
+            self.start_answer(handle, "allow")
         return s.mode
 
     # read_session output lands in a voice model's context (Gemini Live runs a
@@ -989,7 +1010,8 @@ class TmuxClaudeRunner(ClaudeRunner):
             # expose it here so a later-connecting agent can still see it.
             if s.pending is not None:
                 d["prompt"] = {"kind": s.pending.kind, "text": s.pending.text,
-                               "options": list(s.pending.options or [])}
+                               "options": list(s.pending.options or []),
+                               "tool_name": s.pending.tool_name}
             out.append(d)
         return out
 

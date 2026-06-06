@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import claude_agent_sdk as sdk
 
-from permissions import classify, is_plan_file_write
+from permissions import classify, is_plan_file_write, mode_covers
 from event_log import log_event
 
 log = logging.getLogger("yapcode.runner")
@@ -353,6 +353,13 @@ class SDKClaudeRunner(ClaudeRunner):
         if s.client:
             await s.client.set_permission_mode(mode)
         s.mode = mode
+        # set_permission_mode affects FUTURE tool calls only — a can_use_tool
+        # callback already parked on s._decision keeps waiting. If the new mode
+        # would have auto-approved that tool, resolve the prompt now so
+        # 'switch to auto mode' doesn't leave it hanging.
+        if (s.pending and s.pending.kind == "permission"
+                and mode_covers(mode, s.pending.tool_name)):
+            self.start_answer(handle, "allow")
         return mode
 
     async def read(self, handle: str) -> str:
@@ -397,7 +404,8 @@ class SDKClaudeRunner(ClaudeRunner):
             # agent that wasn't connected when it fired can still see it.
             if s.pending is not None:
                 d["prompt"] = {"kind": s.pending.kind, "text": s.pending.text,
-                               "options": list(s.pending.options or [])}
+                               "options": list(s.pending.options or []),
+                               "tool_name": s.pending.tool_name}
             out.append(d)
         return out
 
