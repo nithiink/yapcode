@@ -33,17 +33,21 @@ take over by keyboard) at any time.
 
 ## 60-second quickstart
 
-**You also need [Claude Code](https://claude.com/claude-code) installed and logged in** before
-yapcode can do anything — yapcode drives your existing Claude Code subscription (no Anthropic API
-key). Install it and sign in once:
-
-```sh
-curl -fsSL https://claude.ai/install.sh | bash   # or see https://claude.com/claude-code
-claude                                      # run once to sign in
-```
-
-You'll also need `tmux`, Python 3.12+, and Node 20+ — `yapcode up` checks for them and tells
-you exactly what to install if anything's missing (full list: [Prerequisites](#prerequisites)).
+> [!IMPORTANT]
+> **You need three things before yapcode can do anything:**
+>
+> 1. **[Claude Code](https://claude.com/claude-code), installed and logged in** — yapcode
+>    drives your existing Claude Code subscription (no Anthropic API key needed):
+>    ```sh
+>    curl -fsSL https://claude.ai/install.sh | bash   # or see https://claude.com/claude-code
+>    claude                                           # run once to sign in
+>    ```
+> 2. **`tmux`, Python 3.12+, and Node 20+** — `yapcode up` checks for them and tells you
+>    exactly what to install if anything's missing.
+> 3. **A voice-provider API key** — Google **Gemini** (has a free tier), **OpenAI**, or
+>    **Azure OpenAI**. The first-run wizard asks for it.
+>
+> Full details: [Prerequisites](#prerequisites).
 
 ### Works today — install from source
 
