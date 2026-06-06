@@ -617,14 +617,30 @@ class TmuxClaudeRunner(ClaudeRunner):
                           "choice": choice, "tool_use_id": s.pending_tool_use_id})
         return allow
 
+    def _classify_plan_choice(self, c: str) -> str:
+        """Map the spoken answer to one of the plan dialog's outcomes:
+        'auto' (1. auto mode), 'manual' (2. manually approve edits), 'web'
+        (3. refine with Ultraplan on the web), or 'decline' (stay in plan mode,
+        forward any feedback). Order matters: 'manually approve' contains an
+        approve-word, so the more specific intents are checked first."""
+        if "manual" in c or "approve edit" in c or "each edit" in c or "review edit" in c:
+            return "manual"
+        if "ultraplan" in c or "on the web" in c or "refine on" in c:
+            return "web"
+        if c in _DENY_WORDS or c.startswith(("no", "don't", "do not", "stop", "keep planning")):
+            return "decline"
+        if "auto" in c or c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS):
+            return "auto"
+        return "decline"  # unrecognized -> treat as feedback to refine the plan
+
     async def _drive_plan_dialog(self, s: _TmuxSession, choice: str) -> None:
         """Answer the CLI's plan dialog ('ready to execute. Would you like to
-        proceed?'). Approve: 'manual…' -> manually approve edits, otherwise auto
-        mode; the session's mode file is synced so the hook policy matches the
-        CLI. Decline: Escape dismisses the dialog (stays in plan mode), then the
-        user's words are sent as feedback so Claude can revise the plan."""
+        proceed?') by selecting the row matching the spoken choice. Approvals
+        sync the session's mode file so the hook policy matches the CLI; a
+        decline dismisses the dialog (stays in plan mode) and forwards any
+        feedback so Claude can revise the plan."""
         c = (choice or "").strip().lower()
-        allow = c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS)
+        intent = self._classify_plan_choice(c)
         for _ in range(80):  # ~12s grace for the dialog to render
             pane = await self._capture(s)
             if "Would you like to proceed?" in pane or "ready to execute" in pane:
@@ -633,16 +649,19 @@ class TmuxClaudeRunner(ClaudeRunner):
         else:
             log.warning("no plan dialog appeared for %s; leaving the TUI as-is", s.handle)
             return
-        if allow:
-            manual = "manual" in c
-            await self._select_row(s, 1 if manual else 0)
-            s.mode = "default" if manual else "auto"
+        if intent in ("auto", "manual"):
+            await self._select_row(s, 1 if intent == "manual" else 0)
+            s.mode = "default" if intent == "manual" else "auto"
             self._write_mode(s)
             self._write_meta(s)
             log_event("backend", "claude", "decision",
-                      f"plan approved ({'manually approve edits' if manual else 'auto mode'})",
-                      session=_slabel(s),
-                      detail={"handle": s.handle, "mode": s.mode})
+                      f"plan approved ({'manually approve edits' if intent == 'manual' else 'auto mode'})",
+                      session=_slabel(s), detail={"handle": s.handle, "mode": s.mode})
+            return
+        if intent == "web":
+            await self._select_row(s, 2)
+            log_event("backend", "claude", "decision", "plan -> refine with Ultraplan (web)",
+                      session=_slabel(s), detail={"handle": s.handle})
             return
         await self._tmux("send-keys", "-t", s.pane, "Escape")
         await asyncio.sleep(0.6)

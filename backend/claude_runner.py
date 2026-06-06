@@ -535,12 +535,13 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
         # naturally ("proceed" / "keep planning") rather than seeing an opaque
         # "use the ExitPlanMode tool" permission. Approve -> allow (leave plan
         # mode, start making changes); decline -> deny (stay in plan mode).
-        text = ("proceed with the plan it just laid out (now shown in the "
-                "session's terminal) — approving starts the work in auto mode "
-                "(no further permission prompts); answer 'manual' to approve "
-                "but keep approving each edit by voice; declining keeps it in "
-                "plan mode, and any feedback in the answer is passed to Claude "
-                "to revise the plan")
+        text = ("decide how to proceed with the plan it just laid out (now shown "
+                "in the session's terminal). The choices: say 'auto' to approve "
+                "and let it run without further prompts; 'manual' to approve but "
+                "keep approving each edit by voice; or decline to keep it in plan "
+                "mode — and if you give a reason or change, that feedback is "
+                "passed to Claude to revise the plan. Offer these to the user and "
+                "pass their pick (or their feedback) to answer_prompt")
         # The prompt text is the only channel the voice agent reliably gets —
         # the plan scrolls off the pane before it can peek.
         plan = str(ti.get("plan") or "").strip()
