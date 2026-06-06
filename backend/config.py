@@ -2,8 +2,16 @@
 
 Single place where environment-driven settings are resolved: each setting reads
 its environment variable when present, otherwise falls back to the default
-defined here. `.env` is loaded first so values placed there are honored
-regardless of which module imports config first.
+defined here. The `.env` files are loaded first so values placed there are
+honored regardless of which module imports config first.
+
+Two .env files, in precedence order:
+
+  1. backend/.env            — repo-local developer override (gitignored).
+  2. ~/.config/yapcode/.env  — the wizard's canonical config, as a fill-gaps
+                               fallback, so the key the user entered in the
+                               setup wizard works no matter how the backend
+                               was started (run.sh, bare uvicorn, launcher).
 """
 from __future__ import annotations
 
@@ -11,14 +19,89 @@ import os
 import re
 import secrets
 
-try:  # dotenv is present in the venv; stay importable without it (e.g. in tests)
-    from dotenv import load_dotenv
+# backend/.env lives next to this file — resolved explicitly instead of by
+# CWD discovery so `uvicorn main:app` from any directory behaves the same.
+_BACKEND_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
-    # override=True so .env is authoritative: empty/stale vars exported in the
-    # shell environment must NOT shadow the values configured in .env.
-    load_dotenv(override=True)
+# The wizard's config dir. Mirrors bin/yapcode's CONF_DIR resolution
+# (YAPCODE_CONFIG_DIR > XDG_CONFIG_HOME > ~/.config).
+_CONFIG_DIR = os.path.expanduser(
+    os.getenv("YAPCODE_CONFIG_DIR")
+    or os.path.join(os.getenv("XDG_CONFIG_HOME") or "~/.config", "yapcode"))
+_CONFIG_ENV = os.path.join(_CONFIG_DIR, ".env")
+_CONFIG_ENV_DISPLAY = _CONFIG_ENV.replace(os.path.expanduser("~"), "~", 1)
+
+# Where each .env-provided variable came from, for the startup summary and
+# actionable error messages. Values are display labels, never secrets.
+ENV_SOURCES: dict[str, str] = {}
+
+try:  # dotenv is present in the venv; stay importable without it (e.g. in tests)
+    from dotenv import dotenv_values, load_dotenv
+
+    # 1) backend/.env — developer override. override=True so empty/stale vars
+    #    exported in the shell environment must NOT shadow the values
+    #    configured here (long-standing behavior; fresh users have no file).
+    if os.path.isfile(_BACKEND_ENV):
+        for _k in (dotenv_values(_BACKEND_ENV) or {}):
+            ENV_SOURCES[_k] = "backend/.env"
+        load_dotenv(_BACKEND_ENV, override=True)
+
+    # 2) Config-dir .env — fill-gaps fallback (never overrides). VC_AUTH_TOKEN
+    #    is deliberately SKIPPED: the token is opt-in per run mode — `yapcode
+    #    up` unsets it for zero-config localhost and `yapcode network` exports
+    #    it explicitly. Reading it here would force token auth onto every
+    #    localhost run.sh user.
+    if os.path.isfile(_CONFIG_ENV):
+        for _k, _v in (dotenv_values(_CONFIG_ENV) or {}).items():
+            if _k == "VC_AUTH_TOKEN" or _v is None or (os.getenv(_k) or "").strip():
+                continue
+            os.environ[_k] = _v
+            ENV_SOURCES[_k] = _CONFIG_ENV_DISPLAY
 except Exception:
     pass
+
+
+# --- config provenance (startup summary + actionable errors) -----------------
+
+# Provider API keys the voice layer can mint sessions with (any one suffices).
+VOICE_KEY_VARS: tuple[str, ...] = ("GEMINI_API_KEY", "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY")
+
+
+def _source_of(var: str) -> str:
+    """Display label for where a variable's effective value came from."""
+    if not (os.getenv(var) or "").strip():
+        return "not set"
+    return ENV_SOURCES.get(var, "process environment")
+
+
+def voice_keys_found() -> list[tuple[str, str]]:
+    """(var, source) for each configured voice provider key."""
+    return [(v, _source_of(v)) for v in VOICE_KEY_VARS if (os.getenv(v) or "").strip()]
+
+
+def env_files_checked() -> str:
+    """Human-readable list of the .env locations consulted, with presence."""
+    return (f"backend/.env ({'present' if os.path.isfile(_BACKEND_ENV) else 'not present'}) "
+            f"and {_CONFIG_ENV_DISPLAY} "
+            f"({'present' if os.path.isfile(_CONFIG_ENV) else 'not found'})")
+
+
+def missing_key_detail(var: str) -> str:
+    """Actionable error body for a missing provider key/setting — says where we
+    looked and how to fix it, instead of a bare 'not set'."""
+    return (f"{var} is not set on the server. Looked in {env_files_checked()}. "
+            f"Add it with `yapcode config`, or re-run the setup wizard (`yapcode up`).")
+
+
+def summary() -> str:
+    """One-line config provenance banner for startup logs. Names and sources
+    only — never secret values."""
+    keys = voice_keys_found()
+    voice = ", ".join(f"{v} (from {src})" for v, src in keys) if keys else "NONE FOUND"
+    token = (f"set (from {_source_of('VC_AUTH_TOKEN')}; required from ALL callers, "
+             "including localhost)" if AUTH_TOKEN else "not set (loopback-only access)")
+    roots = (os.getenv("ALLOWED_PROJECT_ROOTS") or "").strip() or "(not set)"
+    return f"voice keys: {voice} · auth token: {token} · allowed roots: {roots}"
 
 
 def _env_bool(name: str, default: bool) -> bool:
