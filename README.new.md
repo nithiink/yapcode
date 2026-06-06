@@ -79,28 +79,42 @@ yapcode up                # first run: setup wizard → starts servers → opens
 
 A quick tour of the ways people actually use it:
 
-- **Voice-first.** Open the app and just talk: *"start a session in my blog repo"* → the agent
-  launches a real Claude session, relays your instructions, and narrates results back — while
-  the live terminal streams in the browser so you can watch every keystroke.
-- **Terminal-first, voice later.** Already deep in a `claude` session in your terminal? Type
-  `/voice-handoff` and continue that exact session by voice — and it works in the other
-  direction too: start by voice in the app, then `tmux attach` from any terminal to take the
-  keyboard. See [co-driving](#co-driving-voice--keyboard-on-one-session).
-- **Co-drive.** Voice and keyboard share one tmux session — type a precise edit, then lean back
-  and steer by voice, on the same session, with one transcript.
-- **From your phone, on your couch.** Run [network mode](#lan--phone-network-mode-tls--token-required), open the
-  app on your phone (same Wi-Fi), and you have the full experience — talk to Claude *and watch
-  the live terminal* — from anywhere in the house while the work happens on your machine.
-- **Hands-free permission prompts.** When Claude pauses for approval, just say *"yes"*,
-  *"allow"*, or *"switch to auto mode"* — no walking back to the keyboard.
-- **Drive it like the real TUI (it is one).** Ask the agent to run slash commands (*"run
-  /init"*), interrupt a runaway task, or read you what's on screen — it sees the actual
-  terminal.
-- **Juggle projects.** List, start, rename, switch, and close sessions across all your allowed
-  project folders, entirely by voice.
-- **Kick off and walk away.** Start a long refactor, make coffee, then ask *"how's it going?"*
-  — the agent peeks at the session and tells you. Approve the next permission prompt from
-  wherever you are.
+### 🎙️ Start everything by voice
+Open the app and just talk: *"start a session in my blog repo."*
+The agent launches a real Claude session, relays your instructions, and narrates results back —
+while the live terminal streams in your browser.
+
+### 🔁 Hand off in either direction
+| You're in… | Do this | Result |
+| --- | --- | --- |
+| A terminal `claude` session | type `/voice-handoff` | continue **that exact session** by voice |
+| The app (voice session) | run the printed `tmux attach` | take the keyboard in your terminal |
+
+Details: [co-driving](#co-driving-voice--keyboard-on-one-session).
+
+### 🤝 Co-drive — type *and* talk
+Voice and keyboard share one tmux session. Type a precise edit, lean back, steer by voice —
+same session, one transcript.
+
+### 📱 Code from the couch
+Run [network mode](#lan--phone-network-mode-tls--token-required) → open the app on your phone
+(same Wi-Fi) → full experience anywhere in the house: talk to Claude **and watch the live
+terminal**, while the work happens on your machine.
+
+### ✅ Approve without walking over
+Claude pauses for permission? Just say *"yes"*, *"allow"*, or *"switch to auto mode."*
+
+### 🖥️ Drive the real TUI
+*"Run /init"* · *"interrupt that"* · *"what's on the screen?"* — the agent runs slash commands,
+stops runaway tasks, and reads you the actual terminal.
+
+### 🗂️ Juggle projects
+List, start, rename, switch, and close sessions across all your allowed folders — entirely by
+voice.
+
+### ☕ Kick off and walk away
+Start a long refactor, go make coffee, then ask *"how's it going?"* — the agent peeks at the
+session and tells you. Approve the next prompt from wherever you are.
 
 ---
 
