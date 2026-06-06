@@ -536,10 +536,8 @@ def _summarize_tool(tool_name: str, ti: dict[str, Any]) -> str:
                 "work in auto mode (no further permission prompts); answer "
                 "'manual' to approve but keep approving each edit by voice; "
                 "declining keeps it in plan mode so you can refine the plan")
-        # Include the plan itself: the prompt text is the ONLY channel the voice
-        # agent reliably receives — by the time it reacts, the plan has usually
-        # scrolled out of the visible pane, so peek_screen can't recover it and
-        # the agent ends up approving a plan it never saw.
+        # The prompt text is the only channel the voice agent reliably gets —
+        # the plan scrolls off the pane before it can peek.
         plan = str(ti.get("plan") or "").strip()
         if plan:
             if len(plan) > 8000:

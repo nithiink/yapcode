@@ -51,8 +51,6 @@ def main() -> None:
     }
 
     if kind == "safe" or is_plan_file_write(tool_name, tool_input):
-        # Plan-file writes (~/.claude/plans) are how plan mode saves its plan —
-        # the vanilla CLI never prompts for them; neither do we.
         append_event({"event": "tool", **base})
         emit("allow")
         return

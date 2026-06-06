@@ -13,9 +13,7 @@ SAFE_TOOLS: frozenset[str] = frozenset({
     "Read", "Grep", "Glob", "LS",
     "TodoWrite", "NotebookRead",
     "WebSearch", "WebFetch",
-    # Loads tool schemas into context — pure metadata, runs nothing. The vanilla
-    # CLI never prompts for it; parking it by voice was pointless friction.
-    "ToolSearch",
+    "ToolSearch",  # loads tool schemas — pure metadata, runs nothing
 })
 
 # Always surface to the user as a choice (not a yes/no permission).
@@ -29,15 +27,12 @@ def is_edit_tool(tool_name: str) -> bool:
     return tool_name in EDIT_TOOLS
 
 
-# Plan mode saves its plan markdown to ~/.claude/plans before presenting it.
-# The vanilla CLI does this silently (the plan file is session state, not
-# project files); asking the user "may I write create-a-random-plan-zippy-
-# moth.md?" by voice is confusing noise. Resolved once at import.
 _PLANS_DIR = os.path.realpath(os.path.expanduser("~/.claude/plans"))
 
 
 def is_plan_file_write(tool_name: str, tool_input: dict | None) -> bool:
-    """True when an edit tool is writing inside ~/.claude/plans."""
+    """True when an edit tool is writing inside ~/.claude/plans — plan mode's
+    own plan file, which the vanilla CLI writes without prompting."""
     if tool_name not in EDIT_TOOLS:
         return False
     fp = str((tool_input or {}).get("file_path")

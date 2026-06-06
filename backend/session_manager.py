@@ -156,10 +156,8 @@ async def peek_session(handle: str, lines: int = 40) -> dict:
         text = await r.read(handle)
         out = {"session_id": handle, "screen": text or "(no output yet)",
                "note": "SDK backend has no live screen; showing accumulated text."}
-    # If a prompt is waiting, attach it in full. The screen alone can't be
-    # trusted for this: long prompt context (a plan approval's plan, a long
-    # question) scrolls off the pane, so an agent peeking to find out "what is
-    # it waiting on?" would otherwise come back empty-handed.
+    # Attach any waiting prompt in full — long prompt context (e.g. a plan)
+    # scrolls off the pane, so the screen alone can't be trusted.
     sess = next((s for s in r.list() if s["handle"] == handle), None)
     if sess and sess.get("prompt"):
         out["pending_prompt"] = sess["prompt"]

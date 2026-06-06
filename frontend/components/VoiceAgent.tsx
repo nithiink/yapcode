@@ -804,9 +804,7 @@ export default function VoiceAgent() {
       ].filter(Boolean);
       const folder = s.cwd.replace(/^\/Users\/[^/]+/, "~");
       let line = `- "${s.name || s.handle.slice(0, 8)}" · ${folder} · ${[state, ...extras].join(", ")}`;
-      // A prompt that fired before this conversation connected was never
-      // narrated to us — without this the agent only sees "needs_permission"
-      // and can't tell the user what (e.g. which plan) is awaiting approval.
+      // A prompt that fired before this conversation connected was never narrated.
       if (s.prompt) {
         const opts = (s.prompt.options || []).map((o, i) => `(${i + 1}) ${o}`).join("; ");
         line +=
@@ -1077,11 +1075,8 @@ export default function VoiceAgent() {
       ) {
         pollSession(res.session_id);
       }
-      // Answering by voice must dismiss the prompt card just like clicking the
-      // card's buttons does (answerPrompt clears it before the fetch). Without
-      // this it lingered for the whole post-answer turn — minutes for a plan
-      // execution — looking stuck. If a follow-up prompt arrives (e.g. the next
-      // question of a form), the poll re-raises a fresh card.
+      // Dismiss the prompt card on a voice answer, same as clicking its buttons;
+      // a follow-up prompt re-raises a fresh card via the poll.
       if (e.name === "answer_prompt") {
         setPending((p) => (p && p.sessionId === res?.session_id ? null : p));
       }

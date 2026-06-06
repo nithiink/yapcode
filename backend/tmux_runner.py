@@ -614,21 +614,12 @@ class TmuxClaudeRunner(ClaudeRunner):
         return allow
 
     async def _drive_plan_dialog(self, s: _TmuxSession, choice: str) -> None:
-        """Drive the TUI dialog that follows an ALLOWED ExitPlanMode.
-
-        Allowing the hook permission is not enough: the CLI then renders its own
-        menu — 'Claude has written up a plan and is ready to execute. Would you
-        like to proceed? 1. Yes, and use auto mode / 2. Yes, manually approve
-        edits / …' — and waits for a keyboard selection. Without driving it the
-        plan sat unapproved after the user already said yes (verified live,
-        CLI v2.1.165). Map the user's words to a row: 'manual…' -> manually
-        approve edits, anything else allow-ish -> auto mode (the CLI's default
-        highlight). Then sync our mode file so the voice permission policy
-        matches what the CLI is now doing — picking auto while the hook still
-        parked every edit would re-introduce the prompts the user just opted
-        out of. (A DENIED ExitPlanMode never shows this dialog: the hook blocks
-        the tool and Claude stays in plan mode.)"""
-        for _ in range(80):  # the dialog renders shortly after the hook allows; ~12s grace
+        """An ALLOWED ExitPlanMode still renders the CLI's own 'ready to
+        execute. Would you like to proceed?' menu, which needs a keyboard
+        selection: 'manual…' -> manually approve edits, otherwise auto mode.
+        The session's mode file is synced so the hook policy matches the CLI.
+        (A denied ExitPlanMode never shows this dialog — the hook blocks it.)"""
+        for _ in range(80):  # ~12s grace for the dialog to render
             pane = await self._capture(s)
             if "Would you like to proceed?" in pane or "ready to execute" in pane:
                 break
@@ -699,9 +690,6 @@ class TmuxClaudeRunner(ClaudeRunner):
                 await self._tmux("send-keys", "-t", s.pane, "Enter")
 
         if not more and len(s.questions) > 1:
-            # Answering the LAST question of a multi-question form does NOT fire
-            # the tool — the TUI advances to a final review screen that needs one
-            # more confirmation. Single-question forms submit on selection.
             await self._confirm_submit(s)
         return more
 
@@ -745,17 +733,9 @@ class TmuxClaudeRunner(ClaudeRunner):
         await self._select_row(s, len(options))
 
     async def _confirm_submit(self, s: _TmuxSession) -> None:
-        """Confirm the review screen a multi-question form ends on.
-
-        After the last question is answered the TUI shows 'Review your answers'
-        with '❯ 1. Submit answers / 2. Cancel' and waits for Enter — the
-        AskUserQuestion tool only fires once that's confirmed. We previously
-        stopped at the last selection, so the form sat unsubmitted while the
-        voice agent believed it had answered (the user watched the menu stay
-        on screen). Verified live against CLI v2.1.165: single-question forms
-        submit on selection and never render this screen; multi-question forms
-        always do. The cursor defaults to 'Submit answers', but navigate to it
-        explicitly in case the highlight moved."""
+        """Confirm the 'Review your answers' screen a multi-question form ends
+        on ('❯ 1. Submit answers / 2. Cancel') — the tool only fires after that
+        final Enter. Single-question forms submit on selection instead."""
         for _ in range(20):  # the review screen renders well within ~3s
             pane = await self._capture(s)
             if "Submit answers" in pane:
@@ -950,11 +930,8 @@ class TmuxClaudeRunner(ClaudeRunner):
             d = {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
                  "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0,
                  **self._queue_counts(s)}
-            # Expose the live pending prompt. A prompt's needs_* result is
-            # delivered exactly once via poll_status; a voice agent that
-            # connects AFTER that (reconnect, second device) only sees the bare
-            # status string and has no way to learn what's being asked — for a
-            # plan approval the plan has long scrolled off the screen.
+            # A prompt's needs_* result is delivered exactly once via poll_status;
+            # expose it here so a later-connecting agent can still see it.
             if s.pending is not None:
                 d["prompt"] = {"kind": s.pending.kind, "text": s.pending.text,
                                "options": list(s.pending.options or [])}
