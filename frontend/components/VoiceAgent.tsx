@@ -1520,7 +1520,7 @@ export default function VoiceAgent() {
         </div>
       ) : (
         <div className="ctrlcap">
-          <span className="ck">✓</span> Recommended: <b>Claude CLI</b> backend — works with any voice provider
+          <span className="ck">✓</span> Recommended: <b>Claude CLI</b> with any voice provider
         </div>
       )}
 
