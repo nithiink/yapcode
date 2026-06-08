@@ -603,7 +603,22 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     def _write_decision(self, s: _TmuxSession, choice: str) -> bool:
         c = (choice or "").strip().lower()
-        allow = c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS)
+        # This gate approves/denies risky tool calls, so it must fail CLOSED on
+        # ambiguous speech. Any negation anywhere in the phrase wins over a
+        # leading affirmative word: spoken corrections like "yeah, no — cancel"
+        # or "ok wait, stop" are denials, not approvals (the old code only
+        # prefix-matched affirmatives and would have approved both).
+        tokens = re.findall(r"[a-z']+", c)
+        deny = (any(t in _DENY_WORDS for t in tokens)
+                or any(p in c for p in ("don't", "do not", "stop", "cancel",
+                                        "decline", "reject", "nope", "nah")))
+        # Match affirmatives only at a word boundary so a single-letter word like
+        # "y" cannot swallow unrelated words ("your call, deny that").
+        first = tokens[0] if tokens else ""
+        allow = (not deny) and (
+            c in _ALLOW_WORDS
+            or first in _ALLOW_WORDS
+            or any(c.startswith(w + " ") for w in _ALLOW_WORDS))
         path = os.path.join(s.ctrl, "decisions", f"{s.pending_tool_use_id or 'none'}.json")
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
