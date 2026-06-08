@@ -48,6 +48,17 @@ export class RealtimeSession implements VoiceSession {
   // but a response was still active when we tried to ask for it. Fire the
   // response.create as soon as the active response ends (response.done).
   private awaitingContinuation = false;
+  // Backstop timer for a deferred continuation. Azure WebRTC never emits
+  // response.done (see the conversation.item.added case), so responseActive
+  // sticks true after the first continuation and every later tool result would
+  // strand — the model freezes after a tool call (esp. an error result, which
+  // makes the model retry immediately, so a second continuation lands while the
+  // first is still "active"). If response.done doesn't clear the deferral in
+  // time, this fires it anyway. No-op on OpenAI/Gemini, which DO send
+  // response.done — it clears awaitingContinuation first, so the timer finds
+  // nothing to do.
+  private continuationFallback: ReturnType<typeof setTimeout> | null = null;
+  private static CONTINUATION_FALLBACK_MS = 1500;
   // Function-call arguments stream as response.function_call_arguments.delta and
   // are NOT included in the conversation.item.added item that Azure uses to
   // surface the call — so accumulate them by call_id and dispatch with the
@@ -153,6 +164,10 @@ export class RealtimeSession implements VoiceSession {
   stop(): void {
     for (const t of this.callFallbackTimers.values()) clearTimeout(t);
     this.callFallbackTimers.clear();
+    if (this.continuationFallback) {
+      clearTimeout(this.continuationFallback);
+      this.continuationFallback = null;
+    }
     this.dc?.close();
     this.pc?.getSenders().forEach((s) => s.track?.stop());
     this.localStream?.getTracks().forEach((t) => t.stop());
@@ -492,7 +507,23 @@ export class RealtimeSession implements VoiceSession {
     if (this.responseActive) {
       this.awaitingContinuation = true;
       this.trace("continuation deferred (response still active)");
+      // Backstop: Azure never sends response.done to clear responseActive, so
+      // without this the deferral is permanent and the model freezes after the
+      // tool result. response.done (OpenAI/Gemini) fires the continuation and
+      // clears awaitingContinuation before this runs, making it a no-op there.
+      if (this.continuationFallback) clearTimeout(this.continuationFallback);
+      this.continuationFallback = setTimeout(() => {
+        this.continuationFallback = null;
+        if (!this.awaitingContinuation) return; // response.done already handled it
+        this.trace("continuation fallback fired (no response.done — Azure path)");
+        this.responseActive = false;
+        this.requestContinuation();
+      }, RealtimeSession.CONTINUATION_FALLBACK_MS);
       return;
+    }
+    if (this.continuationFallback) {
+      clearTimeout(this.continuationFallback);
+      this.continuationFallback = null;
     }
     this.awaitingContinuation = false;
     this.responseActive = true;
