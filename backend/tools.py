@@ -260,6 +260,39 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 
 
+def _require_session(args: dict[str, Any], action: str) -> str:
+    """Resolve the session a tool should act on.
+
+    The voice model sometimes omits session_id ('close the session', 'read it')
+    — especially when only one session is open. Rather than letting
+    `args["session_id"]` raise a bare KeyError (which the endpoint maps to a
+    confusing HTTP 404), this:
+
+      * falls back to the sole active session when session_id is omitted and
+        exactly one is open — the unambiguous, expected case;
+      * otherwise raises ValueError, a SOFT error the model can recover from
+        (the endpoint returns {ok: false, error} and the model can ask which
+        session / start one), listing the open sessions by name.
+
+    A non-empty but unknown session_id also becomes a ValueError here instead of
+    a 404, for the same recoverable behavior."""
+    ref = (args.get("session_id") or "").strip()
+    if not ref:
+        sessions = list_all_sessions()
+        if len(sessions) == 1:
+            return sessions[0]["handle"]
+        if not sessions:
+            raise ValueError(f"there are no active sessions to {action}. Start one first.")
+        names = ", ".join(s.get("name") or s["handle"][:8] for s in sessions)
+        raise ValueError(
+            f"which session should I {action}? {len(sessions)} are open: {names}. "
+            "Ask the user which one, then pass its session_id.")
+    try:
+        return resolve_session(ref)
+    except KeyError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "list_projects":
         return list_projects()
@@ -314,13 +347,13 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 "message": f"Started Claude session '{sess_name}' in {path}."}
 
     if name == "rename_session":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "rename")
         new_name = set_session_name(sid, args["name"])
         return {"session_id": sid, "name": new_name,
                 "message": f"Renamed the session to '{new_name}'."}
 
     if name == "set_mode":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "change the mode for")
         # Snapshot any pending permission BEFORE the switch: the runner resolves
         # a covered prompt asynchronously, so checking afterwards would race.
         sess = next((x for x in list_all_sessions() if x["handle"] == sid), None)
@@ -352,7 +385,7 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"commands": list_slash_commands(cwd)}
 
     if name == "run_slash_command":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "run that command in")
         if backend_of(sid) != "cli":
             return {"ok": False, "error": "slash commands run in the interactive CLI; this session uses the SDK backend."}
         cmd = str(args.get("command", "")).strip().lstrip("/")
@@ -377,12 +410,12 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         # Non-blocking: Claude turns can run for minutes. Kick it off in the
         # background and return immediately so the voice model stays responsive;
         # the frontend polls poll_session and narrates the result when ready.
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "send that to")
         runner_for(sid).start_advance(sid, args["message"])
         return {"status": "working", "session_id": sid}
 
     if name == "answer_prompt":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "answer for")
         runner_for(sid).start_answer(sid, args["choice"])
         return {"status": "working", "session_id": sid}
 
@@ -397,25 +430,25 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return read_timeline(resolve_session(args["session_id"]))
 
     if name == "interrupt_session":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "interrupt")
         await runner_for(sid).interrupt(sid)
         return {"status": "interrupted", "session_id": sid}
 
     if name == "close_session":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "close")
         await close_session(sid)
         return {"status": "closed", "session_id": sid}
 
     if name == "peek_screen":
-        return await peek_session(resolve_session(args["session_id"]))
+        return await peek_session(_require_session(args, "peek at"))
 
     if name == "read_session":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "read")
         text = await runner_for(sid).read(sid)
         return {"session_id": sid, "text": text}
 
     if name == "get_handoff":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "hand off")
         sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
         if not sess:
             raise KeyError(f"unknown session: {sid}")
@@ -433,7 +466,7 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         }
 
     if name == "send_keys":
-        sid = resolve_session(args["session_id"])
+        sid = _require_session(args, "send keys to")
         if backend_of(sid) != "cli":
             return {"ok": False, "error": "send_keys controls the interactive CLI; this session uses the SDK backend."}
         items = args.get("items") or []
