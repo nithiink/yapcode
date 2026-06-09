@@ -189,13 +189,6 @@ run_wizard() {
 
   local token; token="$(gen_token)"
 
-  # Documented model defaults, written commented into the template so the knobs
-  # are discoverable from the single-source-of-truth file without pinning a
-  # (frequently version-stamped) model name into every user's config. These
-  # MUST mirror the os.getenv fallbacks in backend/main.py; a test asserts it.
-  local DEFAULT_OPENAI_REALTIME_MODEL="gpt-realtime-mini"
-  local DEFAULT_GEMINI_MODEL="gemini-2.5-flash-native-audio-preview-12-2025"
-
   mkdir -p "$CONF_DIR"
   # umask 077 => the file is created 0600 from the start, so the secret is never
   # briefly world-readable; chmod 600 afterwards is belt-and-suspenders.
@@ -208,22 +201,14 @@ REALTIME_VOICE=marin
 # --- Azure OpenAI ---
 AZURE_OPENAI_ENDPOINT=$az_endpoint
 AZURE_OPENAI_API_KEY=$az_key
-# Your realtime deployment name (model selection for Azure is the deployment).
 AZURE_OPENAI_DEPLOYMENT=$az_deploy
-# Optional: comma-separated deployments the UI may switch between (best first).
-# Defaults to AZURE_OPENAI_DEPLOYMENT when unset.
-# AZURE_OPENAI_DEPLOYMENTS=$az_deploy
 
 # --- OpenAI ---
 OPENAI_API_KEY=$openai_key
-# Realtime model. Leave commented to track the app default; uncomment to pin.
-# OPENAI_REALTIME_MODEL=$DEFAULT_OPENAI_REALTIME_MODEL
 
 # --- Google Gemini ---
 GEMINI_API_KEY=$gemini_key
 GEMINI_VOICE=Kore
-# Live model. Leave commented to track the app default; uncomment to pin.
-# GEMINI_MODEL=$DEFAULT_GEMINI_MODEL
 
 # Folders the agent may start sessions in. Mandatory sandbox: sessions cannot
 # escape these roots (realpath-resolved, containment-checked).

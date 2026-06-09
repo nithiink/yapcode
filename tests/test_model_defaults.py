@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Tests for model-default population in the first-run env template.
+"""Tests for model-default handling in the first-run env template.
 
-Scope: the wizard in ``bin/yapcode`` writes ``~/.config/yapcode/.env`` and calls
-it the single source of truth. These tests pin two properties:
+Intended behavior: the wizard in ``bin/yapcode`` does NOT pre-populate model
+knobs in the generated ``~/.config/yapcode/.env``. Model settings stay absent
+so configs use the backend's ``os.getenv(..., <default>)`` fallbacks in
+``backend/main.py`` unless a user explicitly adds the variable themselves.
 
-  1. The model-default knobs (OpenAI realtime model, Gemini live model, the
-     Azure multi-deployment list) are present in the generated template so
-     they're discoverable/editable from that file.
-  2. The default values documented in the template do not drift from the
-     ``os.getenv(..., <default>)`` fallbacks the backend actually uses in
-     ``backend/main.py``.
+These tests pin two properties:
+
+  1. The generated template contains no model-selection knobs
+     (``OPENAI_REALTIME_MODEL``, ``GEMINI_MODEL``, ``AZURE_OPENAI_DEPLOYMENTS``)
+     — neither active nor commented.
+  2. The backend still defines fallback defaults for those knobs, so an env
+     file without them resolves to a working model.
 
 Runnable standalone (``python3 tests/test_model_defaults.py``) or via pytest.
 """
@@ -22,6 +25,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 YAPCODE = os.path.join(ROOT, "bin", "yapcode")
 MAIN_PY = os.path.join(ROOT, "backend", "main.py")
 
+# Model-selection knobs that must NOT be pre-populated by the wizard.
+MODEL_KNOBS = ("OPENAI_REALTIME_MODEL", "GEMINI_MODEL", "AZURE_OPENAI_DEPLOYMENTS")
+
 
 def _read(path):
     with open(path, "r", encoding="utf-8") as fh:
@@ -29,20 +35,12 @@ def _read(path):
 
 
 def _backend_getenv_default(text, var):
-    """The default in ``os.getenv("<var>", "<default>")`` from main.py."""
+    """The default in ``os.getenv("<var>", "<default>")`` from main.py, or None."""
     m = re.search(
         r'os\.getenv\(\s*["\']' + re.escape(var) + r'["\']\s*,\s*["\']([^"\']*)["\']\s*\)',
         text,
     )
-    assert m, f"could not find os.getenv default for {var} in backend/main.py"
-    return m.group(1)
-
-
-def _wizard_local_default(text, name):
-    """A ``local NAME="value"`` assignment from bin/yapcode."""
-    m = re.search(r'local\s+' + re.escape(name) + r'="([^"]*)"', text)
-    assert m, f"could not find `local {name}=` in bin/yapcode"
-    return m.group(1)
+    return m.group(1) if m else None
 
 
 def _render_template():
@@ -66,8 +64,6 @@ def _render_template():
             'gemini_key=""',
             'roots="$HOME/projects"',
             'token="tok-test"',
-            'DEFAULT_OPENAI_REALTIME_MODEL="gpt-realtime-mini"',
-            'DEFAULT_GEMINI_MODEL="gemini-2.5-flash-native-audio-preview-12-2025"',
         ]
     )
     script = preamble + "\ncat <<EOF\n" + body + "\nEOF\n"
@@ -77,35 +73,25 @@ def _render_template():
     return out.stdout
 
 
-def test_no_drift_between_template_and_backend_defaults():
-    wiz = _read(YAPCODE)
+def test_template_omits_model_knobs():
+    """Model knobs are absent entirely — not active, not commented."""
+    rendered = _render_template()
+    for knob in MODEL_KNOBS:
+        for line in rendered.splitlines():
+            s = line.lstrip("# ").strip()
+            if s.startswith(knob + "="):
+                raise AssertionError(
+                    f"{knob} should be absent from the template, found: {line!r}"
+                )
+
+
+def test_backend_provides_model_fallbacks():
+    """With the knobs absent, the backend's os.getenv fallbacks must resolve
+    to a non-empty model so a fresh config still works."""
     backend = _read(MAIN_PY)
-    assert _wizard_local_default(wiz, "DEFAULT_OPENAI_REALTIME_MODEL") == \
-        _backend_getenv_default(backend, "OPENAI_REALTIME_MODEL")
-    assert _wizard_local_default(wiz, "DEFAULT_GEMINI_MODEL") == \
-        _backend_getenv_default(backend, "GEMINI_MODEL")
-
-
-def test_template_populates_model_defaults():
-    rendered = _render_template()
-    # OpenAI-native realtime model knob, documented at the backend default.
-    assert "# OPENAI_REALTIME_MODEL=gpt-realtime-mini" in rendered
-    # Gemini live model knob, documented at the backend default.
-    assert "# GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025" in rendered
-    # Azure: deployment name is the model selector; multi-deployment list is
-    # documented too.
-    assert "AZURE_OPENAI_DEPLOYMENT=" in rendered
-    assert "# AZURE_OPENAI_DEPLOYMENTS=" in rendered
-
-
-def test_model_knobs_are_commented_to_track_backend_default():
-    """Model defaults are commented so a backend bump propagates to existing
-    configs that left them untouched (no pinning of version-stamped names)."""
-    rendered = _render_template()
-    for line in rendered.splitlines():
-        s = line.strip()
-        if s.startswith("OPENAI_REALTIME_MODEL=") or s.startswith("GEMINI_MODEL="):
-            raise AssertionError(f"model knob should be commented, got active: {line!r}")
+    for var in ("OPENAI_REALTIME_MODEL", "GEMINI_MODEL"):
+        default = _backend_getenv_default(backend, var)
+        assert default, f"backend/main.py must define an os.getenv fallback for {var}"
 
 
 if __name__ == "__main__":
