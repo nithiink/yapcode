@@ -1,20 +1,13 @@
 """Token-usage → USD cost estimation for Claude models.
 
 The interactive CLI backend runs on a Max subscription, so the session JSONL
-never reports a dollar figure (`total_cost_usd` is an SDK-only field). But every
-assistant message in the transcript carries a full `usage` block — input,
-output, cache-write, and cache-read token counts — so we can reconstruct the
-*API-equivalent* cost the same usage would have billed at standard rates. That's
-what the UI's "Claude $…" readout shows for CLI sessions.
+never reports a dollar figure (`total_cost_usd` is SDK-only). But each assistant
+message carries a full `usage` block, so we reconstruct the *API-equivalent*
+cost the same usage would bill at list rates — that's the UI's "Claude $…"
+readout for CLI sessions.
 
-Rates are list prices per 1M tokens, sourced from the Claude model catalog
-(see the claude-api skill). Cache economics follow the documented multipliers:
-cache *read* = 0.1× input, cache *write* (5-minute TTL) = 1.25× input,
-cache *write* (1-hour TTL) = 2× input.
-
-Override or extend the table via `VC_PRICING_JSON` (a JSON object mapping a
-model-id substring to `{"input": x, "output": y}` per-MTok rates) so a new model
-or a negotiated rate can be wired in without a code change.
+Rates are list prices per 1M tokens. Override the table via `VC_PRICING_JSON`
+(a JSON object mapping a model-id substring to `{"input": x, "output": y}`).
 """
 from __future__ import annotations
 

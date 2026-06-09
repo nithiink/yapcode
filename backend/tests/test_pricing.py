@@ -30,7 +30,7 @@ def test_input_and_output_priced_per_model():
 
 def test_cache_read_is_tenth_of_input():
     cost = pricing.cost_for_usage("claude-opus-4-8", {"cache_read_input_tokens": 1_000_000})
-    assert _close(cost, 5.0 * 0.1)  # 0.5
+    assert _close(cost, 5.0 * 0.1)
 
 
 def test_cache_write_ttl_breakdown():
@@ -38,13 +38,13 @@ def test_cache_write_ttl_breakdown():
     usage = {"cache_creation": {"ephemeral_5m_input_tokens": 1_000_000,
                                 "ephemeral_1h_input_tokens": 1_000_000}}
     cost = pricing.cost_for_usage("claude-opus-4-8", usage)
-    assert _close(cost, 5.0 * 1.25 + 5.0 * 2.0)  # 6.25 + 10.0
+    assert _close(cost, 5.0 * 1.25 + 5.0 * 2.0)
 
 
 def test_cache_write_flat_total_defaults_to_5m_rate():
     # No per-TTL breakdown → treat the flat total as a 5-minute write (1.25×).
     cost = pricing.cost_for_usage("claude-opus-4-8", {"cache_creation_input_tokens": 1_000_000})
-    assert _close(cost, 5.0 * 1.25)  # 6.25
+    assert _close(cost, 5.0 * 1.25)
 
 
 def test_real_transcript_message():

@@ -141,10 +141,9 @@ class _TmuxSession:
         self.status: Status = "running"
         self.turn_prompt: str | None = None  # message of the in-flight turn (narration attribution)
         self.error: str | None = None
-        # Subscription billing means no dollar figure in the jsonl, so cost is
-        # reconstructed from per-message token usage × list pricing (see
-        # _update_cost). _cost_scan_size caches the transcript byte-size of the
-        # last scan so polling list() calls don't re-read an unchanged file.
+        # Subscription billing reports no $ in the jsonl, so cost is rebuilt from
+        # token usage × list pricing (see _update_cost). _cost_scan_size caches
+        # the last-scanned transcript size so polling doesn't re-read it.
         self.cost_usd = 0.0
         self._cost_scan_size = -1
         self._delta: list[str] = []
@@ -1428,9 +1427,7 @@ class TmuxClaudeRunner(ClaudeRunner):
     def _collect(self, s: _TmuxSession) -> AdvanceResult:
         text = "".join(s._delta)
         s._delta.clear()
-        # The just-finished turn appended new usage to the transcript; refresh
-        # so the turn result carries the up-to-date cumulative cost.
-        self._update_cost(s)
+        self._update_cost(s)  # the finished turn added usage to the transcript
         return AdvanceResult(
             status=s.status, assistant_text=text, prompt=s.pending,
             error=s.error, session_id=s.handle, cost_usd=round(s.cost_usd, 4),
