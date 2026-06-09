@@ -24,7 +24,6 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,7 +46,8 @@ from session_manager import (
 )
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
-load_dotenv()
+# .env is loaded once, by `import config` above. No second load here: a CWD-based
+# re-read would restore the VC_AUTH_TOKEN a run mode intentionally left unset.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("yapcode")
 

@@ -6,7 +6,7 @@ with `brew tap nithiink/yapcode && brew install yapcode`.
 
 ## Files
 
-- **`yapcode.rb`** — the formula (source-of-truth draft). Declares the
+- **`yapcode.rb`** — the formula (source-of-truth copy; mirrored to the tap). Declares the
   `node` / `python@3.12` / `tmux` dependencies, builds the Python venv and the
   Next.js production bundle at install time, and installs a `yapcode`
   launcher on `PATH`. The launcher redirects the backend's runtime writes

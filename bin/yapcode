@@ -7,19 +7,21 @@
 #                             (delegates to the Claude Code plugin launcher).
 #   yapcode config       Open the config file in your editor.
 #
-# Config lives at ~/.config/yapcode/.env (chmod 600) and is the SINGLE
-# SOURCE OF TRUTH. The wizard only runs when that file is absent; every later
-# change is an edit of that file, so subsequent runs never prompt. Edit it by
-# hand, or run `yapcode config`.
+# Config lives at backend/.env (chmod 600) and is the SINGLE SOURCE OF TRUTH —
+# the same file the backend loads, so there's one location and no precedence to
+# reason about. The wizard only runs when that file is absent; every later change
+# is an edit of that file, so subsequent runs never prompt. Edit it by hand, or
+# run `yapcode config`.
 set -euo pipefail
 
 # APP_ROOT is the installed source tree. The Homebrew wrapper exports
 # YAPCODE_ROOT; a `git clone` user running ./bin/yapcode falls back to
 # the repo root (this file's parent's parent).
 APP_ROOT="${YAPCODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-# Config dir lives OUTSIDE the source tree (and outside the Homebrew cellar), so
-# `brew upgrade` / `git pull` never touch it.
-CONF_DIR="${YAPCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/yapcode}"
+# Config defaults to the in-tree backend/.env. A read-only install (Homebrew,
+# whose Cellar can't host a writable .env) sets YAPCODE_CONFIG_DIR to point it
+# out of tree; that override still wins so `brew upgrade` never touches it.
+CONF_DIR="${YAPCODE_CONFIG_DIR:-$APP_ROOT/backend}"
 ENV_FILE="$CONF_DIR/.env"
 
 err() { printf '%s\n' "$*" >&2; }
@@ -229,11 +231,21 @@ EOF
 }
 
 ensure_env() {
-  # One-time migration from the project's old name (voice-claude → yapcode):
-  # adopt an existing config dir instead of re-running the wizard.
-  local old_conf="${XDG_CONFIG_HOME:-$HOME/.config}/voice-claude"
-  if [ ! -e "$CONF_DIR" ] && [ -f "$old_conf/.env" ]; then
-    mv "$old_conf" "$CONF_DIR" && err "yapcode: migrated config $old_conf -> $CONF_DIR"
+  # Migrate older installs that kept the .env out of tree (~/.config/yapcode, or
+  # ~/.config/voice-claude before the rename): if backend/.env is absent, COPY one
+  # in (copy, not move — never destroy the original) so upgraders keep their
+  # settings. Skipped when YAPCODE_CONFIG_DIR is set (Homebrew keeps using it).
+  if [ -z "${YAPCODE_CONFIG_DIR:-}" ] && [ ! -f "$ENV_FILE" ]; then
+    local base="${XDG_CONFIG_HOME:-$HOME/.config}" legacy
+    for legacy in "$base/yapcode/.env" "$base/voice-claude/.env"; do
+      if [ -f "$legacy" ]; then
+        mkdir -p "$CONF_DIR"
+        ( umask 077; cp "$legacy" "$ENV_FILE" ) && chmod 600 "$ENV_FILE"
+        err "yapcode: adopted existing config $legacy -> $ENV_FILE"
+        err "  (the old file is left untouched; you can delete it)"
+        break
+      fi
+    done
   fi
   [ -f "$ENV_FILE" ] || run_wizard
 }
@@ -320,13 +332,9 @@ cmd_up() {
   ensure_env
   bootstrap
 
-  # Load the canonical config into the environment so the launcher can act on it.
-  # Note: backend/config.py calls load_dotenv(override=True), so in a clone a
-  # present backend/.env is authoritative and overrides these exported values
-  # for any key set in both; the config-dir file rules only when no backend/.env
-  # exists (e.g. Homebrew). Then drop VC_AUTH_TOKEN: on localhost, setting it would force
-  # even loopback callers to present the token (per the access-control model),
-  # breaking the zero-config localhost flow. It stays in the file for run-network.
+  # Load config into the environment, then drop VC_AUTH_TOKEN: on localhost,
+  # setting it would force even loopback callers to present the token, breaking
+  # the zero-config flow. The token stays in the file for run-network.sh.
   load_env
   unset VC_AUTH_TOKEN
 
