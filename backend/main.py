@@ -295,7 +295,16 @@ def _mint_config(
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
             "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
-            "audio": {"output": {"voice": voice}},
+            "audio": {
+                "output": {"voice": voice},
+                # Input VAD must be set here too: Azure ignores the client
+                # session.update, so without this it runs on Azure's bare
+                # default and barges in on the model's own audio
+                # (self-interruption). Set the SAME server_vad the frontend
+                # configures for OpenAI-native (lib/realtime.ts) so both
+                # providers behave identically.
+                "input": {"turn_detection": {"type": "server_vad"}},
+            },
         }
         if req.instructions:
             session_cfg["instructions"] = req.instructions
