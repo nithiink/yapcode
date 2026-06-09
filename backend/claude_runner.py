@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
@@ -38,6 +39,41 @@ _ALLOW_WORDS = {
 
 # Bare declines (no feedback attached) for the plan-approval dialog.
 _DENY_WORDS = {"deny", "no", "nope", "decline", "declined", "cancel", "reject", "rejected", "n"}
+
+# Negations that aren't single tokens (caught as substrings, not word matches).
+_DENY_PHRASES = ("don't", "do not", "stop")
+
+
+def decide_permission(choice: str) -> Optional[str]:
+    """Resolve a binary allow/deny permission answer to "allow", "deny", or None.
+
+    This guards risky tool calls (Bash/Write/Edit/...), so it is a SECURITY gate
+    and must fail CLOSED. The `answer_prompt` tool contract already instructs the
+    voice agent to send exactly "allow" or "deny"; the agent owns the job of
+    turning natural speech ("yeah, go for it") into one of those. Here we only
+    confirm the answer is unambiguous, accepting a tight set of synonyms for
+    robustness — with three hard rules that the old logic violated:
+
+      1. Match at the WORD level, never as a prefix/substring. The old
+         `any(c.startswith(w) for w in _ALLOW_WORDS)` let the single-letter
+         allow-word "y" swallow unrelated words — "your call, deny that" was
+         read as ALLOW.
+      2. Any negation wins. The old code never checked deny-words first, so a
+         spoken correction like "yeah, no — cancel" (starts with "yeah") was
+         read as ALLOW.
+      3. Anything that is neither a clean allow nor a clean deny is AMBIGUOUS
+         and returns None, so the caller re-asks rather than guessing. A binary
+         permission must never be approved on a fuzzy match.
+    """
+    c = (choice or "").strip().lower()
+    if not c:
+        return None
+    tokens = set(re.findall(r"[a-z']+", c))
+    if tokens & _DENY_WORDS or any(p in c for p in _DENY_PHRASES):
+        return "deny"
+    if c in _ALLOW_WORDS or (tokens & _ALLOW_WORDS):
+        return "allow"
+    return None
 
 
 @dataclass
@@ -476,16 +512,29 @@ class SDKClaudeRunner(ClaudeRunner):
 
         async with s._perm_lock:           # serialize concurrent risky/question asks
             loop = asyncio.get_running_loop()
-            fut: asyncio.Future[str] = loop.create_future()
-            s._decision = fut
-            s.pending = self._build_prompt(kind, tool_name, tool_input)
-            s.status = "needs_choice" if kind == "question" else "needs_permission"
-            log_event("claude", "backend", "hook",
-                      f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",
-                      session=s.session_id or s.handle[:8],
-                      detail={"handle": s.handle, "tool_name": tool_name})
-            s._stop.set()                  # let advance/answer return with the prompt
-            choice = await fut             # parked until answer() resolves
+            while True:
+                fut: asyncio.Future[str] = loop.create_future()
+                s._decision = fut
+                s.pending = self._build_prompt(kind, tool_name, tool_input)
+                s.status = "needs_choice" if kind == "question" else "needs_permission"
+                log_event("claude", "backend", "hook",
+                          f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",
+                          session=s.session_id or s.handle[:8],
+                          detail={"handle": s.handle, "tool_name": tool_name})
+                s._stop.set()              # let advance/answer return with the prompt
+                choice = await fut         # parked until answer() resolves
+                # A binary allow/deny permission that came back ambiguous is
+                # re-asked (fail closed: approve nothing until it's clear).
+                # Questions and the plan dialog have their own non-binary
+                # handling, so they're never re-asked here.
+                if (kind != "permission" or tool_name == "ExitPlanMode"
+                        or decide_permission(choice) is not None):
+                    break
+                log_event("backend", "claude", "decision",
+                          f"ambiguous, re-asking: {choice}",
+                          session=s.session_id or s.handle[:8],
+                          detail={"handle": s.handle, "tool_name": tool_name,
+                                  "choice": choice})
             s._decision = None
             s.pending = None
             log_event("backend", "claude", "decision", str(choice),
@@ -530,7 +579,19 @@ class SDKClaudeRunner(ClaudeRunner):
             # Best-effort: allow the tool with the selection injected.
             # AskUserQuestion's exact answer schema is verified in the e2e step.
             return sdk.PermissionResultAllow(updated_input={**tool_input, "answer": choice})
-        if c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS):
+        if tool_name == "ExitPlanMode":
+            # Plan approval is NOT a binary allow/deny: "auto"/"manual"/"proceed"
+            # leave plan mode and start work; anything else keeps planning and
+            # forwards the text to Claude as feedback. Declining is the safe
+            # default, so an unclear answer stays in plan mode (no re-ask).
+            if (decide_permission(choice) == "allow"
+                    or any(w in c for w in ("auto", "manual", "proceed", "approve"))):
+                return sdk.PermissionResultAllow()
+            return sdk.PermissionResultDeny(message=f"Keep planning: {choice}")
+        # True binary permission: fail closed — approve ONLY on a clean allow.
+        # Ambiguous answers were already re-asked in _can_use_tool, so reaching
+        # here with anything but "allow" is a deliberate decline.
+        if decide_permission(choice) == "allow":
             return sdk.PermissionResultAllow()
         return sdk.PermissionResultDeny(message=f"User declined: {choice}")
 
