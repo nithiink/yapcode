@@ -6,6 +6,7 @@ import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
+import { scopedClearPending } from "@/lib/promptState";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
 
@@ -666,6 +667,14 @@ export default function VoiceAgent() {
     }
   };
 
+  // Clear the pending prompt card ONLY when it belongs to `sessionId`. The card
+  // is a single global slot but each card is owned by one session, so a result
+  // for a DIFFERENT session must never dismiss it — e.g. switching session B to
+  // auto resolves B's prompt and must leave session A's pending prompt intact.
+  // An empty/absent sessionId is treated as a non-match (never clears blindly).
+  const clearPendingFor = (sessionId?: string) =>
+    setPending((p) => scopedClearPending(p, sessionId));
+
   // A background Claude turn reached a result — surface any prompt in the UI and
   // tell the voice model to narrate it (works even mid-conversation).
   const handleClaudeResult = (res: any) => {
@@ -696,13 +705,13 @@ export default function VoiceAgent() {
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "completed") {
-      setPending(null);
+      clearPendingFor(sid);
       const txt = (res.assistant_text || "").trim();
       const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${txt}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "error") {
-      setPending(null);
+      clearPendingFor(sid);
       const msg = `[Claude update] Claude hit an error${forReq}: ${res.error || "unknown"}. Tell the user.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
@@ -1131,17 +1140,20 @@ export default function VoiceAgent() {
         pollSession(res.session_id);
       }
       // Dismiss the prompt card on a voice answer, same as clicking its buttons;
-      // a follow-up prompt re-raises a fresh card via the poll.
+      // a follow-up prompt re-raises a fresh card via the poll. Scoped so it only
+      // dismisses the answered session's own card.
       if (e.name === "answer_prompt") {
-        setPending((p) => (p && p.sessionId === res?.session_id ? null : p));
+        clearPendingFor(res?.session_id);
       }
       // A mode switch can auto-approve the pending permission in the terminal
       // (auto covers everything, acceptEdits covers edits). The backend resolves
       // it asynchronously and flags prompt_resolved, so clear the now-stale card
       // and resume polling to drain the resumed turn's result — without this the
-      // card hangs even though the terminal already moved on.
+      // card hangs even though the terminal already moved on. Strictly scoped to
+      // res.session_id: switching session B to auto must never clear session A's
+      // pending prompt, even when A is the card currently on screen.
       if (e.name === "set_mode" && res?.prompt_resolved && res.session_id) {
-        setPending((p) => (p && p.sessionId === res.session_id ? null : p));
+        clearPendingFor(res.session_id);
         pollSession(res.session_id);
       }
       if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
