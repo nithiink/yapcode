@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
@@ -38,6 +39,27 @@ _ALLOW_WORDS = {
 
 # Bare declines (no feedback attached) for the plan-approval dialog.
 _DENY_WORDS = {"deny", "no", "nope", "decline", "declined", "cancel", "reject", "rejected", "n"}
+
+# Negations that aren't single tokens (caught as substrings, not word matches).
+_DENY_PHRASES = ("don't", "do not", "stop")
+
+
+def decide_permission(choice: str) -> Optional[str]:
+    """Resolve a binary permission answer to "allow", "deny", or None (ambiguous).
+
+    A SECURITY gate that fails CLOSED: matching is word-level (not the old
+    `startswith`, which let "y" match "your"), any negation wins, and anything
+    that isn't a clean allow/deny returns None so the caller re-asks.
+    """
+    c = (choice or "").strip().lower()
+    if not c:
+        return None
+    tokens = set(re.findall(r"[a-z']+", c))
+    if tokens & _DENY_WORDS or any(p in c for p in _DENY_PHRASES):
+        return "deny"
+    if c in _ALLOW_WORDS or (tokens & _ALLOW_WORDS):
+        return "allow"
+    return None
 
 
 @dataclass
@@ -480,16 +502,27 @@ class SDKClaudeRunner(ClaudeRunner):
 
         async with s._perm_lock:           # serialize concurrent risky/question asks
             loop = asyncio.get_running_loop()
-            fut: asyncio.Future[str] = loop.create_future()
-            s._decision = fut
-            s.pending = self._build_prompt(kind, tool_name, tool_input)
-            s.status = "needs_choice" if kind == "question" else "needs_permission"
-            log_event("claude", "backend", "hook",
-                      f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",
-                      session=s.session_id or s.handle[:8],
-                      detail={"handle": s.handle, "tool_name": tool_name})
-            s._stop.set()                  # let advance/answer return with the prompt
-            choice = await fut             # parked until answer() resolves
+            while True:
+                fut: asyncio.Future[str] = loop.create_future()
+                s._decision = fut
+                s.pending = self._build_prompt(kind, tool_name, tool_input)
+                s.status = "needs_choice" if kind == "question" else "needs_permission"
+                log_event("claude", "backend", "hook",
+                          f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",
+                          session=s.session_id or s.handle[:8],
+                          detail={"handle": s.handle, "tool_name": tool_name})
+                s._stop.set()              # let advance/answer return with the prompt
+                choice = await fut         # parked until answer() resolves
+                # Re-ask an ambiguous binary permission (fail closed); questions
+                # and the plan dialog have their own non-binary handling.
+                if (kind != "permission" or tool_name == "ExitPlanMode"
+                        or decide_permission(choice) is not None):
+                    break
+                log_event("backend", "claude", "decision",
+                          f"ambiguous, re-asking: {choice}",
+                          session=s.session_id or s.handle[:8],
+                          detail={"handle": s.handle, "tool_name": tool_name,
+                                  "choice": choice})
             s._decision = None
             s.pending = None
             log_event("backend", "claude", "decision", str(choice),
@@ -534,7 +567,15 @@ class SDKClaudeRunner(ClaudeRunner):
             # Best-effort: allow the tool with the selection injected.
             # AskUserQuestion's exact answer schema is verified in the e2e step.
             return sdk.PermissionResultAllow(updated_input={**tool_input, "answer": choice})
-        if c in _ALLOW_WORDS or any(c.startswith(w) for w in _ALLOW_WORDS):
+        if tool_name == "ExitPlanMode":
+            # Plan approval isn't binary: "auto"/"manual"/"proceed" leave plan
+            # mode; anything else keeps planning and forwards the text as feedback.
+            if (decide_permission(choice) == "allow"
+                    or any(w in c for w in ("auto", "manual", "proceed", "approve"))):
+                return sdk.PermissionResultAllow()
+            return sdk.PermissionResultDeny(message=f"Keep planning: {choice}")
+        # Binary permission: approve only on a clean allow (ambiguity re-asked above).
+        if decide_permission(choice) == "allow":
             return sdk.PermissionResultAllow()
         return sdk.PermissionResultDeny(message=f"User declined: {choice}")
 

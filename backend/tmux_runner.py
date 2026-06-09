@@ -40,6 +40,7 @@ from claude_runner import (
     Status,
     _ALLOW_WORDS,
     _DENY_WORDS,
+    decide_permission,
     _parse_questions,
     _summarize_tool,
     normalize_mode,
@@ -535,7 +536,15 @@ class TmuxClaudeRunner(ClaudeRunner):
                     # plan renders on screen; the TUI dialog is the actual gate.
                     await self._drive_plan_dialog(s, choice)
                 else:
-                    self._write_decision(s, choice)
+                    decided = self._write_decision(s, choice)
+                    if decided is None:
+                        # Ambiguous: keep the prompt pending and re-ask. The hook
+                        # stays parked (no decision written), so the gate holds.
+                        s.status = "needs_permission"
+                        s._delta.append(
+                            "I didn't catch a clear yes or no — say 'allow' to "
+                            "approve or 'deny' to reject.")
+                        return self._collect(s)
             else:  # choice / AskUserQuestion menu
                 more = await self._answer_question(s, choice)
                 if more:
@@ -601,34 +610,28 @@ class TmuxClaudeRunner(ClaudeRunner):
         if probe in input_line:
             await self._tmux("send-keys", "-t", s.pane, "Enter")
 
-    def _write_decision(self, s: _TmuxSession, choice: str) -> bool:
-        c = (choice or "").strip().lower()
-        # This gate approves/denies risky tool calls, so it must fail CLOSED on
-        # ambiguous speech. Any negation anywhere in the phrase wins over a
-        # leading affirmative word: spoken corrections like "yeah, no — cancel"
-        # or "ok wait, stop" are denials, not approvals (the old code only
-        # prefix-matched affirmatives and would have approved both).
-        tokens = re.findall(r"[a-z']+", c)
-        deny = (any(t in _DENY_WORDS for t in tokens)
-                or any(p in c for p in ("don't", "do not", "stop", "cancel",
-                                        "decline", "reject", "nope", "nah")))
-        # Match affirmatives only at a word boundary so a single-letter word like
-        # "y" cannot swallow unrelated words ("your call, deny that").
-        first = tokens[0] if tokens else ""
-        allow = (not deny) and (
-            c in _ALLOW_WORDS
-            or first in _ALLOW_WORDS
-            or any(c.startswith(w + " ") for w in _ALLOW_WORDS))
+    def _write_decision(self, s: _TmuxSession, choice: str) -> bool | None:
+        """Write the decision file the parked PreToolUse hook waits on. Returns
+        True/False (allowed/denied), or None on an ambiguous answer — in which
+        case no file is written, so the hook stays parked and the caller re-asks."""
+        decision = decide_permission(choice)
+        if decision is None:
+            log_event("backend", "claude", "decision", f"ambiguous, re-asking: {choice}",
+                      session=_slabel(s),
+                      detail={"handle": s.handle, "choice": choice,
+                              "tool_use_id": s.pending_tool_use_id})
+            return None
+        allow = decision == "allow"
         path = os.path.join(s.ctrl, "decisions", f"{s.pending_tool_use_id or 'none'}.json")
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"decision": "allow" if allow else "deny",
+            json.dump({"decision": decision,
                        "reason": "" if allow else f"user said: {choice}"}, f)
         os.replace(tmp, path)
         log_event("backend", "claude", "decision",
-                  f"{'allow' if allow else 'deny'}" + (f" ({choice})" if not allow else ""),
+                  decision + (f" ({choice})" if not allow else ""),
                   session=_slabel(s),
-                  detail={"handle": s.handle, "decision": "allow" if allow else "deny",
+                  detail={"handle": s.handle, "decision": decision,
                           "choice": choice, "tool_use_id": s.pending_tool_use_id})
         return allow
 
