@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nithiin.voice-claude-transcript-fixer</string>
+
+  <!-- caffeinate -i keeps the machine awake for the duration of the run -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>/Users/nithiinkathiresan/Development/Assistant/voice-claude-transcript-based-fixes/automation/daily-transcript-fixer/run.sh</string>
+  </array>
+
+  <!-- Run daily at 09:00. If the Mac was asleep at 09:00, launchd runs it at next wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/nithiinkathiresan/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/nithiinkathiresan/Development/Assistant/voice-claude-transcript-based-fixes/automation/daily-transcript-fixer/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/nithiinkathiresan/Development/Assistant/voice-claude-transcript-based-fixes/automation/daily-transcript-fixer/logs/launchd.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
