@@ -350,7 +350,12 @@ cmd_up() {
   mkdir -p "$STATE_DIR"
   local fe_log="$STATE_DIR/frontend.log"
 
-  ( cd "$APP_ROOT/backend" && exec .venv/bin/python -m uvicorn main:app --port 8000 --log-level info ) &
+  # --timeout-graceful-shutdown: the app holds long-lived connections (the
+  # debug/event SSE stream, the poll loop, the xterm terminal WebSockets) that
+  # never drain on their own. Without a cap, stopping yapcode (Ctrl-C → the
+  # trap below SIGTERMs uvicorn) hangs on "Waiting for connections to close"
+  # until a second Ctrl-C. 3s lets a real in-flight request finish, then exits.
+  ( cd "$APP_ROOT/backend" && exec .venv/bin/python -m uvicorn main:app --port 8000 --log-level info --timeout-graceful-shutdown 3 ) &
   local back=$!
 
   # Dev vs. prod detection. `next build` (production) is the ONLY thing that
