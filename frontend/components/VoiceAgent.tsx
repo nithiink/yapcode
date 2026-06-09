@@ -894,12 +894,12 @@ export default function VoiceAgent() {
     return () => clearInterval(t);
   }, []);
 
-  // The backend (and live terminal) is on :8000 at the same host the page loaded
-  // from — works on localhost and from the phone alike. Mirrors LiveTerminal.
+  // The backend (and live terminal) is on BACKEND_PORT at the same host the page
+  // loaded from — works on localhost and from the phone alike. Mirrors LiveTerminal.
   const backendBase = () => {
     const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
     const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http";
-    return `${proto}://${host}:8000`;
+    return `${proto}://${host}:${process.env.BACKEND_PORT || "8000"}`;
   };
 
   // Push a browser-only event (voice transcripts, [Claude update] injections,
