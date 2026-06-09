@@ -1146,7 +1146,13 @@ export default function VoiceAgent() {
         clearPendingFor(res.session_id);
         pollSession(res.session_id);
       }
-      if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
+      // Interrupt and close both dismiss any pending permission server-side
+      // (deny + escape / deny + kill the session), so drop that session's now-
+      // stale card along with its poll loop.
+      if (e.name === "interrupt_session" || e.name === "close_session") {
+        stopPolling(res?.session_id);
+        clearPendingFor(res?.session_id);
+      }
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
           e.name,
@@ -1264,11 +1270,18 @@ export default function VoiceAgent() {
     // Optimistic: reflect the target immediately, then reconcile from the backend.
     setSessions((prev) => prev.map((s) => (s.handle === handle ? { ...s, mode } : s)));
     try {
-      await fetch("/api/tools/execute", {
+      const r = await fetch("/api/tools/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: "set_mode", arguments: { session_id: handle, mode } }),
       });
+      // Mirror the voice set_mode path: if the switch auto-approved a pending
+      // permission, clear the stale card and resume polling for the resumed turn.
+      const res = (await r.json())?.result;
+      if (res?.prompt_resolved) {
+        clearPendingFor(handle);
+        pollSession(handle);
+      }
     } finally {
       await refreshSessions();
       setModeBusy(null);
@@ -1306,7 +1319,7 @@ export default function VoiceAgent() {
   const answerPrompt = async (choice: string) => {
     if (!pending) return;
     const p = pending;
-    setPending(null);
+    clearPendingFor(p.sessionId);
     await fetch("/api/tools/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
