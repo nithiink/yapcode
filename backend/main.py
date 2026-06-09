@@ -295,6 +295,11 @@ def _mint_config(
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
             "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
+            # Lock output to audio so the model never emits a text-only message
+            # item that goes unspoken. Azure binds config at mint time and
+            # ignores the client session.update, so it MUST be set here (the
+            # OpenAI-native path also sets it in lib/realtime.ts).
+            "output_modalities": ["audio"],
             "audio": {
                 "output": {"voice": voice},
                 # Input VAD must be set here too: Azure ignores the client
@@ -322,7 +327,11 @@ def _mint_config(
     if not key:
         raise HTTPException(status_code=500, detail=config.missing_key_detail("OPENAI_API_KEY"))
     model = req.model or OPENAI_REALTIME_MODEL
+    # output_modalities: ["audio"] locks output to speech so no text-only item
+    # goes unspoken. The client session.update (lib/realtime.ts) reasserts it,
+    # but setting it at mint covers the first response before that lands.
     payload = {"session": {"type": "realtime", "model": model,
+                           "output_modalities": ["audio"],
                            "audio": {"output": {"voice": voice}}}}
     headers = {
         "Authorization": f"Bearer {key}",
