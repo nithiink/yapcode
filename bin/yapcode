@@ -205,14 +205,10 @@ AZURE_OPENAI_DEPLOYMENT=$az_deploy
 
 # --- OpenAI ---
 OPENAI_API_KEY=$openai_key
-OPENAI_REALTIME_MODEL=gpt-realtime-mini
 
 # --- Google Gemini ---
 GEMINI_API_KEY=$gemini_key
-GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
 GEMINI_VOICE=Kore
-
-CLAUDE_MODEL=opus
 
 # Folders the agent may start sessions in. Mandatory sandbox: sessions cannot
 # escape these roots (realpath-resolved, containment-checked).

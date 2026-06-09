@@ -442,10 +442,14 @@ class SDKClaudeRunner(ClaudeRunner):
                     if not s.session_id:
                         s.session_id = msg.session_id
                     if msg.total_cost_usd:
-                        s.cost_usd += msg.total_cost_usd
+                        # total_cost_usd is already cumulative for the whole
+                        # ClaudeSDKClient session (verified empirically: turn 2
+                        # reports turn-1 cost + delta), so assign — summing it
+                        # per turn double-counts.
+                        s.cost_usd = msg.total_cost_usd
                         log.info(
-                            "session %s turn cost $%.4f (cumulative $%.4f)",
-                            s.session_id, msg.total_cost_usd, s.cost_usd,
+                            "session %s cumulative cost $%.4f",
+                            s.session_id, s.cost_usd,
                         )
                     if msg.is_error:
                         s.status = "error"
