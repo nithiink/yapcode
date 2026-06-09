@@ -47,8 +47,9 @@ export default function LiveTerminal({ handle }: { handle: string }) {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     // Append the shared-secret token (when configured) so the backend authorizes
     // this keystroke-injecting socket; no-op on localhost (loopback-trusted).
+    const port = process.env.BACKEND_PORT || "8000";
     const ws = new WebSocket(
-      withAuthParam(`${proto}://${host}:8000/sessions/${handle}/terminal`),
+      withAuthParam(`${proto}://${host}:${port}/sessions/${handle}/terminal`),
     );
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;

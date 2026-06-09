@@ -6,6 +6,7 @@ import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
 import { INSTRUCTIONS } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
+import { scopedClearPending } from "@/lib/promptState";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
 
@@ -666,6 +667,9 @@ export default function VoiceAgent() {
     }
   };
 
+  const clearPendingFor = (sessionId?: string) =>
+    setPending((p) => scopedClearPending(p, sessionId));
+
   // A background Claude turn reached a result — surface any prompt in the UI and
   // tell the voice model to narrate it (works even mid-conversation).
   const handleClaudeResult = (res: any) => {
@@ -696,13 +700,13 @@ export default function VoiceAgent() {
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "completed") {
-      setPending(null);
+      clearPendingFor(sid);
       const txt = (res.assistant_text || "").trim();
       const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${txt}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "error") {
-      setPending(null);
+      clearPendingFor(sid);
       const msg = `[Claude update] Claude hit an error${forReq}: ${res.error || "unknown"}. Tell the user.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
@@ -890,12 +894,12 @@ export default function VoiceAgent() {
     return () => clearInterval(t);
   }, []);
 
-  // The backend (and live terminal) is on :8000 at the same host the page loaded
-  // from — works on localhost and from the phone alike. Mirrors LiveTerminal.
+  // The backend (and live terminal) is on BACKEND_PORT at the same host the page
+  // loaded from — works on localhost and from the phone alike. Mirrors LiveTerminal.
   const backendBase = () => {
     const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
     const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http";
-    return `${proto}://${host}:8000`;
+    return `${proto}://${host}:${process.env.BACKEND_PORT || "8000"}`;
   };
 
   // Push a browser-only event (voice transcripts, [Claude update] injections,
@@ -1133,9 +1137,22 @@ export default function VoiceAgent() {
       // Dismiss the prompt card on a voice answer, same as clicking its buttons;
       // a follow-up prompt re-raises a fresh card via the poll.
       if (e.name === "answer_prompt") {
-        setPending((p) => (p && p.sessionId === res?.session_id ? null : p));
+        clearPendingFor(res?.session_id);
       }
-      if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
+      // A mode switch can auto-approve the pending permission (prompt_resolved).
+      // The backend resolves it asynchronously, so clear the now-stale card and
+      // resume polling to drain the resumed turn — else the card hangs.
+      if (e.name === "set_mode" && res?.prompt_resolved && res.session_id) {
+        clearPendingFor(res.session_id);
+        pollSession(res.session_id);
+      }
+      // Interrupt and close both dismiss any pending permission server-side
+      // (deny + escape / deny + kill the session), so drop that session's now-
+      // stale card along with its poll loop.
+      if (e.name === "interrupt_session" || e.name === "close_session") {
+        stopPolling(res?.session_id);
+        clearPendingFor(res?.session_id);
+      }
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
           e.name,
@@ -1253,11 +1270,18 @@ export default function VoiceAgent() {
     // Optimistic: reflect the target immediately, then reconcile from the backend.
     setSessions((prev) => prev.map((s) => (s.handle === handle ? { ...s, mode } : s)));
     try {
-      await fetch("/api/tools/execute", {
+      const r = await fetch("/api/tools/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: "set_mode", arguments: { session_id: handle, mode } }),
       });
+      // Mirror the voice set_mode path: if the switch auto-approved a pending
+      // permission, clear the stale card and resume polling for the resumed turn.
+      const res = (await r.json())?.result;
+      if (res?.prompt_resolved) {
+        clearPendingFor(handle);
+        pollSession(handle);
+      }
     } finally {
       await refreshSessions();
       setModeBusy(null);
@@ -1295,7 +1319,7 @@ export default function VoiceAgent() {
   const answerPrompt = async (choice: string) => {
     if (!pending) return;
     const p = pending;
-    setPending(null);
+    clearPendingFor(p.sessionId);
     await fetch("/api/tools/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },

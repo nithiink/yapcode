@@ -362,10 +362,14 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         out = {"session_id": sid, "mode": mode}
         if prompt and prompt.get("kind") == "permission":
             if mode_covers(mode, prompt.get("tool_name", "")):
+                # Runner approved the parked prompt under the new mode; the flag
+                # lets the frontend dismiss the stale card and resume polling.
+                out["prompt_resolved"] = True
                 out["message"] = (f"Mode is now '{mode}'. The pending permission "
                                   f"({prompt['text']}) was approved under the new mode — "
                                   "the session is continuing.")
             else:
+                out["prompt_resolved"] = False
                 out["message"] = (f"Mode is now '{mode}', but the pending permission "
                                   f"({prompt['text']}) is NOT covered by it and still "
                                   "needs an allow/deny from the user.")
