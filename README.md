@@ -474,6 +474,7 @@ config-dir file for any key set in both; the config-dir file is authoritative on
 | `VC_ALLOWED_ORIGIN_REGEX` | _(LAN regex)_ | Overrides the default private-LAN origin regex (localhost/127.0.0.1/::1 + 10.x/192.168.x/172.16–31.x); set empty to disable LAN origins. |
 | `VC_SESSION_STORE` | `<repo>/.yapcode/tmux` | Session control-dir root (tmux sessions, `meta.json`, `events.jsonl`, …). |
 | `VC_COST_LOG_PATH` | `<repo>/cost-log.jsonl` | Append-only cost log. |
+| `VC_PRICING_JSON` | _(built-in rates)_ | JSON object overriding per-model list pricing, e.g. `{"opus":{"input":5,"output":25}}` (USD per 1M tokens, matched by model-id substring). The CLI backend has no dollar figure in its transcript (Max subscription), so the displayed "Claude $…" is reconstructed from per-message token usage × these rates; cache reads bill at 0.1× input, 5-min cache writes at 1.25×, 1-hour writes at 2×. |
 | `VC_DEBUG_LOG_PATH` | `<repo>/debug-log.jsonl` | Append-only pipeline event log. |
 | `VC_DEBUG_LOG_FILE` | `1` | Set `0` to keep debug events in-memory/SSE only (no file). |
 | `VC_DEBUG_BUFFER` | `3000` | In-memory ring-buffer size for the event bus. |
