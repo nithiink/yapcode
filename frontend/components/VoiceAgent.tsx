@@ -667,11 +667,6 @@ export default function VoiceAgent() {
     }
   };
 
-  // Clear the pending prompt card ONLY when it belongs to `sessionId`. The card
-  // is a single global slot but each card is owned by one session, so a result
-  // for a DIFFERENT session must never dismiss it — e.g. switching session B to
-  // auto resolves B's prompt and must leave session A's pending prompt intact.
-  // An empty/absent sessionId is treated as a non-match (never clears blindly).
   const clearPendingFor = (sessionId?: string) =>
     setPending((p) => scopedClearPending(p, sessionId));
 
@@ -1140,18 +1135,13 @@ export default function VoiceAgent() {
         pollSession(res.session_id);
       }
       // Dismiss the prompt card on a voice answer, same as clicking its buttons;
-      // a follow-up prompt re-raises a fresh card via the poll. Scoped so it only
-      // dismisses the answered session's own card.
+      // a follow-up prompt re-raises a fresh card via the poll.
       if (e.name === "answer_prompt") {
         clearPendingFor(res?.session_id);
       }
-      // A mode switch can auto-approve the pending permission in the terminal
-      // (auto covers everything, acceptEdits covers edits). The backend resolves
-      // it asynchronously and flags prompt_resolved, so clear the now-stale card
-      // and resume polling to drain the resumed turn's result — without this the
-      // card hangs even though the terminal already moved on. Strictly scoped to
-      // res.session_id: switching session B to auto must never clear session A's
-      // pending prompt, even when A is the card currently on screen.
+      // A mode switch can auto-approve the pending permission (prompt_resolved).
+      // The backend resolves it asynchronously, so clear the now-stale card and
+      // resume polling to drain the resumed turn — else the card hangs.
       if (e.name === "set_mode" && res?.prompt_resolved && res.session_id) {
         clearPendingFor(res.session_id);
         pollSession(res.session_id);

@@ -1,8 +1,5 @@
-// Multi-session safeguard tests for the pending-prompt scoping helper.
-//
-// Run with Node's built-in runner (no deps, Node strips the TS types):
+// Multi-session safeguard tests. Run with Node's built-in runner (no deps):
 //     node --test lib/promptState.test.ts     # from frontend/
-//     node --test                             # all *.test.ts under frontend/
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,8 +13,7 @@ test("a result for the SAME session clears its own card", () => {
 });
 
 test("a result for a DIFFERENT session leaves the card intact", () => {
-  // The core safeguard: session A's prompt is on screen; switching session B to
-  // auto resolves/completes B and must NOT dismiss A's pending prompt.
+  // Core safeguard: B completing must not dismiss A's on-screen prompt.
   assert.equal(scopedClearPending(cardA, "B"), cardA);
 });
 

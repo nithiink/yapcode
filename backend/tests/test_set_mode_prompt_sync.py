@@ -1,16 +1,10 @@
-"""Prompt-state-sync regression tests for the `set_mode` tool.
+"""Regression tests for the `set_mode` tool's `prompt_resolved` flag — the
+signal the frontend uses to dismiss a stale prompt card and resume polling when
+a mode switch auto-approves a pending permission.
 
-Bug: switching to a mode that covers a pending permission (auto: anything,
-acceptEdits: file edits) auto-approves it in the terminal, but the frontend kept
-showing the prompt as pending because the `set_mode` result carried no machine
-signal — only prose. The fix adds a structured `prompt_resolved` flag the
-frontend uses to dismiss the stale card and resume polling.
+The session registry is stubbed, so these run without tmux or a live Claude CLI:
 
-These tests exercise `dispatch_tool("set_mode", ...)` with the session registry
-stubbed out, so they run without tmux or a live Claude CLI:
-
-    python -m unittest backend.tests.test_set_mode_prompt_sync   # from repo root
-    python -m unittest discover -s backend/tests                 # all backend tests
+    python -m unittest discover -s backend/tests
 """
 import os
 import sys
@@ -59,9 +53,8 @@ class SetModePromptSync(unittest.IsolatedAsyncioTestCase):
         self.assertIs(out["prompt_resolved"], True)
 
     async def test_accept_edits_does_not_cover_pending_bash(self):
+        # Bash still needs a human answer, so the flag is explicitly False.
         out = await self._set_mode(PERM("Bash"), "acceptEdits")
-        # Mode switched, but the prompt still needs a human answer — the frontend
-        # must keep the card up, so the flag is explicitly False.
         self.assertIs(out["prompt_resolved"], False)
         self.assertIn("still", out["message"])
 
@@ -72,8 +65,6 @@ class SetModePromptSync(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("message", out)
 
     async def test_pending_question_is_not_a_permission(self):
-        # A pending AskUserQuestion choice is never auto-approved by a mode
-        # switch, so it carries no resolution flag.
         out = await self._set_mode(
             {"kind": "choice", "text": "pick one", "tool_name": "AskUserQuestion"},
             "auto")
