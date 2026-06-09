@@ -311,7 +311,10 @@ def _mint_config(
         payload = {"session": session_cfg}
         headers = {"api-key": key, "Content-Type": "application/json"}
         mint_url = f"{AZURE_ENDPOINT}/openai/v1/realtime/client_secrets"
-        webrtc_url = f"{AZURE_ENDPOINT}/openai/v1/realtime/calls?webrtcfilter=on"
+        # No ?webrtcfilter=on: it strips the function-call argument events
+        # (response.done, *.function_call_arguments.done, …), so tool calls
+        # arrive with empty args. It only hides the prompt, which we don't need.
+        webrtc_url = f"{AZURE_ENDPOINT}/openai/v1/realtime/calls"
         return mint_url, headers, payload, webrtc_url, model
 
     # OpenAI direct

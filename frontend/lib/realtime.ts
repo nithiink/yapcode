@@ -48,6 +48,17 @@ export class RealtimeSession implements VoiceSession {
   // but a response was still active when we tried to ask for it. Fire the
   // response.create as soon as the active response ends (response.done).
   private awaitingContinuation = false;
+  // Backstop timer for a deferred continuation. Azure WebRTC never emits
+  // response.done (see the conversation.item.added case), so responseActive
+  // sticks true after the first continuation and every later tool result would
+  // strand — the model freezes after a tool call (esp. an error result, which
+  // makes the model retry immediately, so a second continuation lands while the
+  // first is still "active"). If response.done doesn't clear the deferral in
+  // time, this fires it anyway. No-op on OpenAI/Gemini, which DO send
+  // response.done — it clears awaitingContinuation first, so the timer finds
+  // nothing to do.
+  private continuationFallback: ReturnType<typeof setTimeout> | null = null;
+  private static CONTINUATION_FALLBACK_MS = 1500;
   // Function-call arguments stream as response.function_call_arguments.delta and
   // are NOT included in the conversation.item.added item that Azure uses to
   // surface the call — so accumulate them by call_id and dispatch with the
@@ -153,6 +164,10 @@ export class RealtimeSession implements VoiceSession {
   stop(): void {
     for (const t of this.callFallbackTimers.values()) clearTimeout(t);
     this.callFallbackTimers.clear();
+    if (this.continuationFallback) {
+      clearTimeout(this.continuationFallback);
+      this.continuationFallback = null;
+    }
     this.dc?.close();
     this.pc?.getSenders().forEach((s) => s.track?.stop());
     this.localStream?.getTracks().forEach((t) => t.stop());
@@ -269,16 +284,18 @@ export class RealtimeSession implements VoiceSession {
       }
       // Providers disagree on how a function call surfaces, so this case is a
       // conditional dispatcher:
-      //  - Azure WebRTC omits the whole response.* lifecycle (no argument
-      //    deltas, no arguments.done, no output_item.done, no response.done —
-      //    verified in debug-log traces) and announces the call ONLY here.
+      //  - Azure WebRTC omits the response.* lifecycle (no argument deltas, no
+      //    arguments.done, no output_item.done) and surfaces the call's complete
+      //    arguments in conversation.item.DONE (handled below), NOT here:
+      //    conversation.item.added fires at call START with EMPTY arguments.
       //  - OpenAI sends this item FIRST with EMPTY arguments; the deltas stream
       //    after, then arguments.done / output_item.done / response.done carry
       //    the complete string. Dispatching here ran tools with {} (backend
       //    KeyError 'session_id') and the dedup then blocked the real dispatch.
       // So: dispatch now only if we already have args; otherwise register the
-      // name and let a completion event dispatch — with a grace-timer fallback
-      // so a provider that sends nothing else (Azure no-arg calls) can't stall.
+      // name and let a completion event (output_item.done / conversation.item.done)
+      // dispatch — with a grace-timer fallback so a provider that genuinely sends
+      // no arguments at all can't stall the turn.
       case "conversation.item.added":
       case "conversation.item.created": {
         const item = evt.item;
@@ -289,7 +306,7 @@ export class RealtimeSession implements VoiceSession {
               ? item.arguments
               : this.callArgs.get(item.call_id) || "";
           // A tool with NO parameters has nothing to stream — empty args ARE
-          // complete. Dispatch now instead of burning the 1.2s grace timer
+          // complete. Dispatch now instead of burning the grace timer
           // (which is what every zero-param call on Azure would otherwise do).
           if (!argsStr) {
             const def: any = this.tools.find((t: any) => t.name === item.name);
@@ -311,10 +328,19 @@ export class RealtimeSession implements VoiceSession {
                 this.callFallbackTimers.delete(callId);
                 if (this.dispatchedCalls.has(callId)) return; // completion event won
                 const late = this.callArgs.get(callId) || "";
-                this.trace(`fallback dispatch ${name} args=${late.slice(0, 60)}`);
+                // 2.5s gives the complete-args events (output_item.done /
+                // conversation.item.done) time to win before this freeze-guard
+                // dispatches. If args are STILL empty, the provider sent none at
+                // all — flag it loudly (it surfaces a tool error the model can
+                // recover from rather than a silent stall).
+                if (!late) {
+                  this.trace(`fallback dispatch ${name} with NO args — provider delivered none (no output_item.done / conversation.item.done)`);
+                } else {
+                  this.trace(`fallback dispatch ${name} args=${late.slice(0, 60)}`);
+                }
                 emit({ type: "state", state: "thinking" });
                 void this.runFunctionCall(name, callId, late);
-              }, 1200),
+              }, 2500),
             );
           }
         }
@@ -326,6 +352,23 @@ export class RealtimeSession implements VoiceSession {
         const item = evt.item;
         if (item?.type === "function_call" && item.call_id) {
           this.trace(`output_item.done → function_call ${item.name}`);
+          emit({ type: "state", state: "thinking" });
+          await this.runFunctionCall(item.name, item.call_id, item.arguments || "");
+        }
+        break;
+      }
+      // Azure's WebRTC path omits the response.* lifecycle (no
+      // response.output_item.done, no response.function_call_arguments.done), so
+      // per the Realtime spec the COMPLETE function-call arguments arrive here:
+      // conversation.item.done finalizes the item with its full `arguments`
+      // string + call_id. Without this case the only Azure event we read was
+      // conversation.item.added, which fires at call START with EMPTY arguments —
+      // so session tools dispatched with no session_id and looped forever on
+      // "which session?". Deduped by call_id; cancels the grace-timer fallback.
+      case "conversation.item.done": {
+        const item = evt.item;
+        if (item?.type === "function_call" && item.call_id) {
+          this.trace(`conversation.item.done → function_call ${item.name} args=${(item.arguments || "").slice(0, 60)}`);
           emit({ type: "state", state: "thinking" });
           await this.runFunctionCall(item.name, item.call_id, item.arguments || "");
         }
@@ -492,7 +535,23 @@ export class RealtimeSession implements VoiceSession {
     if (this.responseActive) {
       this.awaitingContinuation = true;
       this.trace("continuation deferred (response still active)");
+      // Backstop: Azure never sends response.done to clear responseActive, so
+      // without this the deferral is permanent and the model freezes after the
+      // tool result. response.done (OpenAI/Gemini) fires the continuation and
+      // clears awaitingContinuation before this runs, making it a no-op there.
+      if (this.continuationFallback) clearTimeout(this.continuationFallback);
+      this.continuationFallback = setTimeout(() => {
+        this.continuationFallback = null;
+        if (!this.awaitingContinuation) return; // response.done already handled it
+        this.trace("continuation fallback fired (no response.done — Azure path)");
+        this.responseActive = false;
+        this.requestContinuation();
+      }, RealtimeSession.CONTINUATION_FALLBACK_MS);
       return;
+    }
+    if (this.continuationFallback) {
+      clearTimeout(this.continuationFallback);
+      this.continuationFallback = null;
     }
     this.awaitingContinuation = false;
     this.responseActive = true;
