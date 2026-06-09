@@ -1135,6 +1135,15 @@ export default function VoiceAgent() {
       if (e.name === "answer_prompt") {
         setPending((p) => (p && p.sessionId === res?.session_id ? null : p));
       }
+      // A mode switch can auto-approve the pending permission in the terminal
+      // (auto covers everything, acceptEdits covers edits). The backend resolves
+      // it asynchronously and flags prompt_resolved, so clear the now-stale card
+      // and resume polling to drain the resumed turn's result — without this the
+      // card hangs even though the terminal already moved on.
+      if (e.name === "set_mode" && res?.prompt_resolved && res.session_id) {
+        setPending((p) => (p && p.sessionId === res.session_id ? null : p));
+        pollSession(res.session_id);
+      }
       if (e.name === "interrupt_session" || e.name === "close_session") stopPolling(res?.session_id);
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
