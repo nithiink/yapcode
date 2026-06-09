@@ -47,6 +47,7 @@ from claude_runner import (
 )
 from permissions import classify, mode_covers
 from event_log import log_event
+import pricing
 
 log = logging.getLogger("yapcode.tmux")
 
@@ -140,7 +141,12 @@ class _TmuxSession:
         self.status: Status = "running"
         self.turn_prompt: str | None = None  # message of the in-flight turn (narration attribution)
         self.error: str | None = None
-        self.cost_usd = 0.0                 # interactive = subscription, no $ in jsonl
+        # Subscription billing means no dollar figure in the jsonl, so cost is
+        # reconstructed from per-message token usage × list pricing (see
+        # _update_cost). _cost_scan_size caches the transcript byte-size of the
+        # last scan so polling list() calls don't re-read an unchanged file.
+        self.cost_usd = 0.0
+        self._cost_scan_size = -1
         self._delta: list[str] = []
         self._transcript: list[str] = []
         self.tools_used: list[str] = []
@@ -1021,8 +1027,10 @@ class TmuxClaudeRunner(ClaudeRunner):
     def list(self) -> list[dict]:
         out: list[dict] = []
         for s in self._sessions.values():
+            self._update_cost(s)
             d = {"handle": s.handle, "session_id": s.handle, "cwd": s.cwd,
-                 "model": s.model, "mode": s.mode, "status": s.status, "cost_usd": 0.0,
+                 "model": s.model, "mode": s.mode, "status": s.status,
+                 "cost_usd": round(s.cost_usd, 4),
                  **self._queue_counts(s)}
             # A prompt's needs_* result is delivered exactly once via poll_status;
             # expose it here so a later-connecting agent can still see it.
@@ -1374,6 +1382,32 @@ class TmuxClaudeRunner(ClaudeRunner):
                         s.tools_used.append(b.get("name", ""))
         return "".join(out)
 
+    def _update_cost(self, s: _TmuxSession) -> None:
+        """Refresh s.cost_usd from the full transcript's token usage.
+
+        Reads the whole jsonl and sums API-equivalent cost across every
+        assistant message — accurate regardless of resume (a resumed session's
+        prior turns still count). Cheap on repeat calls: if the transcript's
+        byte-size is unchanged since the last scan, the cached value is kept, so
+        the frequent polling list()/poll path doesn't re-read a static file.
+        """
+        path = self._find_transcript(s)
+        if not path or not os.path.exists(path):
+            return
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return
+        if size == s._cost_scan_size:
+            return
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            return
+        s.cost_usd = pricing.cost_for_transcript_lines(lines)
+        s._cost_scan_size = size
+
     def _find_transcript(self, s: _TmuxSession) -> str | None:
         if s.transcript_path and os.path.exists(s.transcript_path):
             return s.transcript_path
@@ -1394,9 +1428,12 @@ class TmuxClaudeRunner(ClaudeRunner):
     def _collect(self, s: _TmuxSession) -> AdvanceResult:
         text = "".join(s._delta)
         s._delta.clear()
+        # The just-finished turn appended new usage to the transcript; refresh
+        # so the turn result carries the up-to-date cumulative cost.
+        self._update_cost(s)
         return AdvanceResult(
             status=s.status, assistant_text=text, prompt=s.pending,
-            error=s.error, session_id=s.handle, cost_usd=0.0,
+            error=s.error, session_id=s.handle, cost_usd=round(s.cost_usd, 4),
             request=s.turn_prompt,
         )
 
