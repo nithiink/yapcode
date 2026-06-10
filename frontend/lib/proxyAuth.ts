@@ -39,8 +39,8 @@ export function forwardAuth(
 // which the browser hits at :8000 without a proxy in between).
 //
 // Why this is reliable: `Sec-Fetch-Site` is set by the browser and cannot be
-// forged or removed by page JS, so a value other than same-origin/same-site is
-// proof the request did not originate from our own page. For the rare client
+// forged or removed by page JS, so any value other than same-origin is proof
+// the request did not originate from our own page. For the rare client
 // that omits it we fall back to comparing the Origin's host to the request Host
 // (a cross-site POST always carries an Origin). Non-browser callers (curl,
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
@@ -49,8 +49,13 @@ export function forwardAuth(
 export function isCrossSiteRequest(req: NextRequest): boolean {
   const site = req.headers.get("sec-fetch-site");
   if (site) {
-    // same-origin / same-site = ours; cross-site / none = not from our page.
-    return site !== "same-origin" && site !== "same-site";
+    // The legitimate frontend ALWAYS calls these routes same-origin (a relative
+    // `fetch("/api/...")` from the app's own page), so only same-origin is ours.
+    // Accept nothing else: `same-site` would trust any other origin on the same
+    // host (e.g. a different localhost/LAN port), which could drive the
+    // command-executing proxy via CSRF. `cross-site` / `none` are likewise not
+    // from our page.
+    return site !== "same-origin";
   }
   const origin = req.headers.get("origin");
   if (origin) {
