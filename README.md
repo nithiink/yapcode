@@ -386,6 +386,9 @@ is just a remote.
 3. Open `https://192.168.1.42:3000/#vc_token=<your token>` — the app stores the token and strips
    it from the address bar. Allow **microphone** access when prompted.
 
+   > 💡 You don't have to type this URL: `npm run dev:network` **prints the full
+   > phone URL** (IP + token) at startup — just open it on your phone.
+
 **Every time after that:** just open `https://192.168.1.42:3000` — talk, watch the terminal,
 approve permission prompts from the couch, the kitchen, anywhere on the network.
 

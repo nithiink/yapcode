@@ -5,10 +5,6 @@ prompt = no
 [dn]
 CN = yapcode-dev
 [v3_req]
-# CA:TRUE lets this self-signed cert serve as its own trust anchor, so the
-# Next /api proxy (Node fetch, NODE_EXTRA_CA_CERTS) can trust it WITHOUT
-# disabling TLS verification. Browsers/phones accept it the usual way.
-basicConstraints = critical, CA:TRUE
 subjectAltName = @alt
 [alt]
 # Set IP.1 to your machine's LAN IP (macOS: ipconfig getifaddr en0; Linux: hostname -I).
