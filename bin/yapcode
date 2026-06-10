@@ -64,8 +64,20 @@ read_secret() { # read_secret "Prompt" -> echoes secret, never echoes keystrokes
 # terminates the read, equivalent to pressing Enter). EOF before any Enter
 # aborts so we never write a half-baked config.
 read_secret_optional() { # read_secret_optional "Prompt" -> echoes (possibly empty) secret
-  local q="$1" s="" c="" got_enter=0
+  local q="$1" s="" c="" got_enter=0 saved=""
   printf '%s: ' "$q" >&2
+  # Disable terminal echo for the WHOLE read, not per-keystroke. `read -s` toggles
+  # echo on/off around each -rsn1 call, so during a paste the characters arriving
+  # between calls leak to the screen as plaintext (mixed in with the • mask). Hold
+  # noecho across the entire loop with stty, and restore it on every exit path. If
+  # there's no tty (piped input), stty -g fails and we fall back gracefully.
+  saved="$(stty -g 2>/dev/null || true)"
+  if [ -n "$saved" ]; then
+    stty -echo 2>/dev/null || true
+    # Restore the terminal if the user interrupts mid-prompt, so Ctrl-C never
+    # leaves the shell stuck in noecho.
+    trap 'stty "$saved" 2>/dev/null; printf "\n" >&2; exit 130' INT
+  fi
   # With -n1, `read` returns success on Enter (delivering c="") and on any
   # normal key; it returns non-zero only at EOF. So we loop, and the moment we
   # see an empty c from a *successful* read we know it was Enter and stop.
@@ -77,6 +89,7 @@ read_secret_optional() { # read_secret_optional "Prompt" -> echoes (possibly emp
       *) s="$s$c"; printf '•' >&2 ;;
     esac
   done
+  if [ -n "$saved" ]; then stty "$saved" 2>/dev/null || true; trap - INT; fi # restore echo
   if [ "$got_enter" -eq 0 ]; then # loop ended via read failure = EOF, never Enter
     printf '\n' >&2; err "yapcode: no input — aborting setup"; exit 1
   fi
