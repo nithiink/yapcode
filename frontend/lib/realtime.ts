@@ -228,6 +228,11 @@ export class RealtimeSession implements VoiceSession {
       instructions: this.opts.instructions,
       tools: this.tools,
       tool_choice: "auto",
+      // Lock output to audio. Left unset, the model sometimes emits a text-only
+      // message item within a response (e.g. an audio preamble item followed by
+      // a text answer item) — it's transcribed but never spoken, so the user
+      // hears only the first item. ["audio"] still yields a transcript.
+      output_modalities: ["audio"],
       audio: {
         // Input transcription stays off to avoid the separate per-minute
         // transcription charge — the model understands speech directly.
