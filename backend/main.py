@@ -68,9 +68,8 @@ class _RedactTokenFilter(logging.Filter):
         return True
 
 
-# uvicorn.access logs the SSE GET; uvicorn.error logs the WebSocket handshake line
-# (/sessions/.../terminal?token=...). Both carry the query-string token, and a
-# filter only runs on the logger that emits the record, so register on both.
+# uvicorn.error emits the WebSocket handshake line; a filter only runs on the
+# logger that emits the record, so register on both, not just uvicorn.access.
 for _uvicorn_logger in ("uvicorn.access", "uvicorn.error"):
     logging.getLogger(_uvicorn_logger).addFilter(_RedactTokenFilter())
 
