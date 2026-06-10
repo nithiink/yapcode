@@ -53,10 +53,10 @@ log = logging.getLogger("yapcode")
 
 
 class _RedactTokenFilter(logging.Filter):
-    """Strip `token=...` from access-log lines. The shared secret rides the query
+    """Strip `token=...` from uvicorn log lines. The shared secret rides the query
     string on SSE (/debug/stream) and WebSocket (/sessions/.../terminal) connects
-    because those transports can't set headers — keep it out of access logs,
-    which are routinely shipped to stdout / aggregators / shown on screen-shares."""
+    because those transports can't set headers — keep it out of the logs, which
+    are routinely shipped to stdout / aggregators / shown on screen-shares."""
     _TOKEN_RE = re.compile(r"(token=)[^&\s\"']+")
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -68,7 +68,11 @@ class _RedactTokenFilter(logging.Filter):
         return True
 
 
-logging.getLogger("uvicorn.access").addFilter(_RedactTokenFilter())
+# uvicorn.access logs the SSE GET; uvicorn.error logs the WebSocket handshake line
+# (/sessions/.../terminal?token=...). Both carry the query-string token, and a
+# filter only runs on the logger that emits the record, so register on both.
+for _uvicorn_logger in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_uvicorn_logger).addFilter(_RedactTokenFilter())
 
 # Default provider when the request doesn't specify one. "azure" | "openai" | "gemini"
 VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "azure").lower()
