@@ -48,16 +48,17 @@ watch (and take over by keyboard) at any time.
 ### Installation
 
 ```sh
-brew tap nithiink/yapcode && brew install yapcode   # macOS / Linuxbrew
-yapcode up    # first run: setup wizard → opens http://localhost:3000
-```
-
-Or [from source](#install-from-source):
-
-```sh
 git clone https://github.com/nithiink/yapcode.git
 cd yapcode
-./bin/yapcode up    # same wizard; installs deps on first run
+./bin/yapcode up    # first run: setup wizard → installs deps → opens http://localhost:3000
+```
+
+**Don't want to install the prerequisites yourself?** Use [Homebrew](#install-with-homebrew) —
+`brew` pulls in `tmux`, `python@3.12`, and `node` for you:
+
+```sh
+brew tap nithiink/yapcode && brew install yapcode   # macOS / Linuxbrew
+yapcode up    # same wizard; opens http://localhost:3000
 ```
 
 The [first-run wizard](#first-run-setup-wizard) asks for a voice key and the folder(s) the
@@ -71,8 +72,8 @@ agent may edit; after that, `yapcode up` just launches.
 - [Security model (read this first)](#security-model-read-this-first)
 - [What's in the box](#whats-in-the-box)
 - [Prerequisites](#prerequisites-1)
-- [Install with Homebrew (recommended)](#install-with-homebrew-recommended)
 - [Install from source](#install-from-source)
+- [Install with Homebrew](#install-with-homebrew)
 - [Running](#running)
 - [Use it from your phone (local network)](#use-it-from-your-phone-local-network)
 - [Windows (WSL2)](#windows-wsl2)
@@ -184,68 +185,16 @@ sudo apt install tmux git python3 python3-venv
 
 ---
 
-## Install with Homebrew (recommended)
-
-Works on macOS and Linuxbrew:
-
-```sh
-brew tap nithiink/yapcode
-brew install yapcode      # pulls in tmux, python@3.12, node; builds the app
-yapcode up                # first run: setup wizard → starts servers → opens browser
-```
-
-Details unique to Homebrew:
-
-- The formula `depends_on` node, python@3.12, and tmux, copies the source into the **Cellar**,
-  builds the backend virtualenv and a **production** frontend build (so the launcher runs
-  `next start`, with no compile-on-launch), and puts `yapcode` on your `PATH`.
-- Your config (`~/.config/yapcode/.env`) and runtime state (`~/.local/state/yapcode/`) live
-  **outside** the install and **survive `brew upgrade` and uninstall**.
-
-```bash
-brew upgrade yapcode    # later, to update
-```
-
-### First-run setup wizard
-
-The first time you run any subcommand (`up` / `session` / `config`) with no config present, a
-wizard runs and writes `~/.config/yapcode/.env` (created `0600`, `umask 077`). It prompts for:
-
-1. **Gemini API key** — optional (free tier at <https://aistudio.google.com/apikey>), Enter to skip.
-2. **OpenAI key** (`sk-...`) — optional, Enter to skip.
-3. **Folder(s) the agent may edit** — comma-separated; a leading `~` is expanded. At least one
-   is required; each must exist and may **not** be empty, `/`, or your `$HOME` (rejected as too
-   broad).
-
-The wizard derives the default `VOICE_PROVIDER` (Gemini key → `gemini`; else OpenAI key →
-`openai`; else `openai` placeholder with a warning to add a key later) and **auto-generates a
-`VC_AUTH_TOKEN`** for later network/phone use. **Azure OpenAI is config-file-only** (not
-prompted) — add it later with `yapcode config`.
-
-Only the *absence* of the config file triggers the wizard; later runs never re-prompt. To change
-anything, edit the file or run `yapcode config`.
-
-### CLI subcommands
-
-| Command | What it does |
-| --- | --- |
-| `yapcode up` *(default)* | Runs the wizard if needed, bootstraps deps, starts backend (`:8000`) + frontend (`:3000`), opens the app. Ctrl-C stops both. |
-| `yapcode session [dir]` | Starts and attaches a voice-ready Claude session in `dir`. |
-| `yapcode config` | Opens `~/.config/yapcode/.env` in `$EDITOR` (falls back to `open`). |
-
-`yapcode -h` / `--help` prints `usage: yapcode {up|session [dir]|config}`. An unknown
-subcommand prints usage to stderr and exits `2`.
-
----
-
 ## Install from source
 
-For development, or to run latest `main` instead of a release. The commands are in the
+This is the primary path — `git clone`, then `./bin/yapcode up`. The commands are in the
 [quickstart](#quickstart); the details unique to a clone:
 
 - On first `up` the launcher **bootstraps dependencies**: if `backend/.venv` is missing it picks
   a Python 3.12+ interpreter and `pip install`s `backend/requirements.txt`; if
-  `frontend/node_modules` is missing it runs `npm ci`.
+  `frontend/node_modules` is missing it runs `npm ci`. (It does **not** install `tmux`, Python,
+  or Node — those are prerequisites; use [Homebrew](#install-with-homebrew) if you'd rather not
+  install them yourself.)
 - It then preflights ports 8000/3000, starts both servers, polls for readiness (~60s), prints
   `yapcode is running — http://localhost:3000`, and opens it.
 - `./bin/yapcode config` and `./bin/yapcode session` work from a clone too.
@@ -276,13 +225,69 @@ brew install python@3.12
 # then create the venv with python3.12 -m venv .venv
 ```
 
-> **Config precedence.** With a `backend/.env` present (it is, in a clone), `backend/.env`
-> **takes precedence** over `~/.config/yapcode/.env` for any key set in both — `backend/config.py`
-> calls `load_dotenv(override=True)`, so `backend/.env` overrides values the launcher exported
-> from the config-dir file. The config-dir `~/.config/yapcode/.env` is authoritative only when
-> there is **no** `backend/.env` (e.g. a Homebrew install, where the Cellar ships none). For a
-> single source of truth in a clone, edit `backend/.env` (or delete it and rely on the config-dir
-> file).
+> **One config file.** In a clone the single source of truth is `backend/.env` — the wizard
+> writes it, `yapcode config` edits it, and the backend loads it directly, so there's no second
+> location and no precedence to track. (Only a Homebrew install differs: its read-only Cellar
+> can't hold a writable `backend/.env`, so the wrapper sets `YAPCODE_CONFIG_DIR` and the file
+> lives at `~/.config/yapcode/.env` instead. You can set that same variable in a clone if you'd
+> rather keep config outside the tree.)
+
+### First-run setup wizard
+
+The first time you run any subcommand (`up` / `session` / `config`) with no config present, a
+wizard runs and writes the config file (created `0600`, `umask 077`) — `backend/.env` from a
+clone, or `~/.config/yapcode/.env` on a Homebrew install. It prompts for:
+
+1. **Gemini API key** — optional (free tier at <https://aistudio.google.com/apikey>), Enter to skip.
+2. **OpenAI key** (`sk-...`) — optional, Enter to skip.
+3. **Folder(s) the agent may edit** — comma-separated; a leading `~` is expanded. At least one
+   is required; each must exist and may **not** be empty, `/`, or your `$HOME` (rejected as too
+   broad).
+
+The wizard derives the default `VOICE_PROVIDER` (Gemini key → `gemini`; else OpenAI key →
+`openai`; else `openai` placeholder with a warning to add a key later) and **auto-generates a
+`VC_AUTH_TOKEN`** for later network/phone use. **Azure OpenAI is config-file-only** (not
+prompted) — add it later with `yapcode config`.
+
+Only the *absence* of the config file triggers the wizard; later runs never re-prompt. To change
+anything, edit the file or run `yapcode config`.
+
+### CLI subcommands
+
+| Command | What it does |
+| --- | --- |
+| `yapcode up` *(default)* | Runs the wizard if needed, bootstraps deps, starts backend (`:8000`) + frontend (`:3000`), opens the app. Ctrl-C stops both. |
+| `yapcode session [dir]` | Starts and attaches a voice-ready Claude session in `dir`. |
+| `yapcode config` | Opens the config file (`backend/.env`, or `~/.config/yapcode/.env` on Homebrew) in `$EDITOR` (falls back to `open`). |
+
+`yapcode -h` / `--help` prints `usage: yapcode {up|session [dir]|config}`. An unknown
+subcommand prints usage to stderr and exits `2`.
+
+---
+
+## Install with Homebrew
+
+**Prefer not to install the prerequisites yourself?** `brew install` pulls in `tmux`,
+`python@3.12`, and `node` and builds the app — handy on a fresh machine. Works on macOS and
+Linuxbrew:
+
+```sh
+brew tap nithiink/yapcode
+brew install yapcode      # pulls in tmux, python@3.12, node; builds the app
+yapcode up                # first run: setup wizard → starts servers → opens browser
+```
+
+Details unique to Homebrew:
+
+- The formula `depends_on` node, python@3.12, and tmux, copies the source into the **Cellar**,
+  builds the backend virtualenv and a **production** frontend build (so the launcher runs
+  `next start`, with no compile-on-launch), and puts `yapcode` on your `PATH`.
+- Your config (`~/.config/yapcode/.env`) and runtime state (`~/.local/state/yapcode/`) live
+  **outside** the install and **survive `brew upgrade` and uninstall**.
+
+```bash
+brew upgrade yapcode    # later, to update
+```
 
 ---
 
@@ -302,9 +307,9 @@ cd frontend && npm run dev
 ```
 
 On localhost the backend trusts loopback (your own machine: `127.0.0.1`, `::1`, `localhost`), so
-**no auth token is needed**. (`yapcode up` deliberately *unsets* `VC_AUTH_TOKEN` for localhost
-even if it's in your config, so loopback callers aren't forced to present it — the token stays in
-the file and applies only in network mode.) Open <http://localhost:3000>.
+**no auth token is needed**. The backend never auto-loads `VC_AUTH_TOKEN` from a `.env` file — it's
+opt-in per run mode, so `run.sh` (and `yapcode up`) stay zero-config even with a token in your
+config; it applies only when `run-network.sh` exports it. Open <http://localhost:3000>.
 
 ### LAN / phone (network mode, TLS + token required)
 
@@ -341,7 +346,7 @@ One-time per device:
 A phone needs HTTPS (a "secure context") for the microphone to work off localhost.
 
 If you ran the [first-run wizard](#first-run-setup-wizard), **a `VC_AUTH_TOKEN` was already
-generated for you** — it's in `~/.config/yapcode/.env` (`yapcode config` to view). Manual setups
+generated for you** — it's in your config file (`yapcode config` to view). Manual setups
 can generate one with:
 
 ```bash
@@ -362,7 +367,7 @@ is just a remote.
    with the cert's SAN matching your LAN IP.
 2. Find your LAN IP: `ipconfig getifaddr en0` (macOS) or `hostname -I` (Linux) — say it's
    `192.168.1.42`.
-3. Have your `VC_AUTH_TOKEN` handy — the wizard already wrote one to `~/.config/yapcode/.env`
+3. Have your `VC_AUTH_TOKEN` handy — the wizard already wrote one to your config file
    (`yapcode config` to view).
 
 **On your phone (once per device):**
@@ -432,15 +437,15 @@ WSL gotchas:
 
 ## Configuration reference
 
-Config lives at **`~/.config/yapcode/.env`** (chmod `600`). Override its location with
-`YAPCODE_CONFIG_DIR` or `XDG_CONFIG_HOME`. Runtime state (logs, tmux store) lives at
-**`~/.local/state/yapcode`** (override base via `XDG_STATE_HOME`); both survive `brew upgrade`
-and uninstall.
+Config lives at **`backend/.env`** (chmod `600`) — one file, loaded directly by the backend, with
+no second location and no precedence to track. A **Homebrew** install instead uses
+**`~/.config/yapcode/.env`** (its wrapper sets `YAPCODE_CONFIG_DIR`, since the Cellar is
+read-only); set `YAPCODE_CONFIG_DIR` yourself to keep a clone's config out of the tree too.
+Runtime state (logs, tmux store) lives under `<project>/.yapcode/` from a clone, or
+**`~/.local/state/yapcode`** on Homebrew (override base via `XDG_STATE_HOME` / `VC_SESSION_STORE`);
+the Homebrew config + state survive `brew upgrade` and uninstall.
 
-The [first-run wizard](#first-run-setup-wizard) writes this file. Note the
-[config precedence](#install-from-source): in a clone, a present `backend/.env` **overrides** the
-config-dir file for any key set in both; the config-dir file is authoritative only when no
-`backend/.env` exists (e.g. Homebrew).
+The [first-run wizard](#first-run-setup-wizard) writes this file; `yapcode config` edits it.
 
 ### Core
 
@@ -505,9 +510,9 @@ convenience for same-network devices, not the boundary.
 `_access_ok` in `backend/main.py` is the gate. A mismatch returns `401` (when a token is
 configured) or `403` (when relying on loopback). Token comparison is **constant-time**
 (`secrets.compare_digest`). Even loopback must present a configured token, so the same-origin Next
-proxy can't launder a remote attacker's request into a "trusted" localhost call. `run-network.sh`
-binds `0.0.0.0` and **refuses to start** unless a token is set (checks the env var or a non-empty
-`VC_AUTH_TOKEN=` line in `backend/.env`).
+proxy can't launder a remote attacker's request into a "trusted" localhost call. The token is
+never auto-loaded from a `.env` file (opt-in per run mode); `run-network.sh` reads it from the
+config file and **exports** it, and **refuses to start** if none is set.
 
 **Token transport.** `Authorization: Bearer`, `X-VC-Token` header, or `?token=` query param
 (SSE/WebSocket can't set headers). The browser supplies it once via
@@ -590,11 +595,11 @@ More detail in the [plugin README](integrations/claude-code-plugin/README.md).
 | Mic doesn't work on phone | `getUserMedia` needs a secure context. Use `npm run dev:network` (HTTPS on `0.0.0.0`); plain `npm run dev` is HTTP + loopback-only. The device's IP must be in the cert SANs (`frontend/.certs/san.cnf`, copied from `san.cnf.example`); regenerate the cert for a new IP. |
 | App loads on a phone but toggles/buttons appear dead | Your LAN IP is outside the `192.168` / `10` / `172.16` private ranges, so Next 16 blocked `/_next/*` assets. Add the specific origin to `allowedDevOrigins` in `frontend/next.config.mjs`. |
 | Voice model select is greyed out | The model is **locked while connected** — disconnect first to change it. |
-| Token I set in config has no effect on localhost | Intentional: `yapcode up` **unsets `VC_AUTH_TOKEN` on localhost** so loopback stays zero-config. The token still applies in network mode. |
-| Config changes don't take effect | Check [config precedence](#install-from-source): in a clone, `backend/.env` overrides `~/.config/yapcode/.env`. Edit the file that wins, or run `yapcode config`. The wizard only runs when the config-dir file is absent. |
+| Token I set in config has no effect on localhost | Intentional: the backend **never auto-loads `VC_AUTH_TOKEN` from a `.env` file** (opt-in per run mode), so localhost stays zero-config. It applies only in network mode, where `run-network.sh` exports it. |
+| Config changes don't take effect | There's one config file — `backend/.env` (or `~/.config/yapcode/.env` on Homebrew). Edit it (or run `yapcode config`) and restart. Make sure you don't also have stale values exported in your shell, which win over the file. |
 | First page load is slow | Without a production build (`frontend/.next/BUILD_ID`), the launcher runs `npm run dev`, which compiles the UI on first load. A `next build` produces the `BUILD_ID` and switches it to `npm run start`. |
 | Sessions vanished after restart | yapcode can run Claude two ways — the default interactive **CLI** backend or the Agent **SDK** backend (see [Architecture](#architecture-for-contributors)). Only the CLI backend rehydrates detached tmux sessions on restart; SDK subprocesses die with the backend. Set `VC_KILL_SESSIONS_ON_SHUTDOWN=1` to kill on shutdown instead. |
-| `brew install yapcode` 404s | Homebrew distribution isn't live until the repo is public and a release tag exists. Use the [clone install](#install-from-source) meanwhile. |
+| `brew install yapcode` can't find the formula | Tap it first: `brew tap nithiink/yapcode`, then `brew install yapcode`. If a fetch fails, `brew update` and retry; you can always fall back to the [clone install](#install-from-source). |
 
 ---
 

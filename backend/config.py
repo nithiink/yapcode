@@ -5,13 +5,20 @@ its environment variable when present, otherwise falls back to the default
 defined here. The `.env` files are loaded first so values placed there are
 honored regardless of which module imports config first.
 
-Two .env files, in precedence order:
+Config location:
 
-  1. backend/.env            — repo-local developer override (gitignored).
-  2. ~/.config/yapcode/.env  — the wizard's canonical config, as a fill-gaps
-                               fallback, so the key the user entered in the
-                               setup wizard works no matter how the backend
-                               was started (run.sh, bare uvicorn, launcher).
+  * backend/.env  — the SINGLE source of truth for a clone (gitignored). The
+                    setup wizard writes it, `yapcode config` edits it, and the
+                    backend loads it directly — so the wizard's key works no
+                    matter how the backend is started (run.sh, bare uvicorn,
+                    launcher).
+  * ~/.config/yapcode/.env — used ONLY by a read-only install (Homebrew), whose
+                    wrapper sets YAPCODE_CONFIG_DIR because the Cellar can't host
+                    a writable backend/.env. A normal clone never consults it.
+
+VC_AUTH_TOKEN is never auto-loaded from either file — it is opt-in per run mode
+(loopback-only `yapcode up`/run.sh stay tokenless; run-network.sh exports it
+explicitly). See the access-control note below.
 """
 from __future__ import annotations
 
@@ -19,44 +26,42 @@ import os
 import re
 import secrets
 
-# backend/.env lives next to this file — resolved explicitly instead of by
-# CWD discovery so `uvicorn main:app` from any directory behaves the same.
+# backend/.env lives next to this file — resolved explicitly (not by CWD) so
+# `uvicorn main:app` from any directory behaves the same.
 _BACKEND_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
-# The wizard's config dir. Mirrors bin/yapcode's CONF_DIR resolution
-# (YAPCODE_CONFIG_DIR > XDG_CONFIG_HOME > ~/.config).
-_CONFIG_DIR = os.path.expanduser(
-    os.getenv("YAPCODE_CONFIG_DIR")
-    or os.path.join(os.getenv("XDG_CONFIG_HOME") or "~/.config", "yapcode"))
-_CONFIG_ENV = os.path.join(_CONFIG_DIR, ".env")
-_CONFIG_ENV_DISPLAY = _CONFIG_ENV.replace(os.path.expanduser("~"), "~", 1)
+# Out-of-tree config dir — consulted ONLY when YAPCODE_CONFIG_DIR is set (a
+# Homebrew install). A normal clone uses backend/.env alone.
+_config_dir_raw = os.getenv("YAPCODE_CONFIG_DIR")
+_CONFIG_DIR = os.path.expanduser(_config_dir_raw) if _config_dir_raw else None
+_CONFIG_ENV = os.path.join(_CONFIG_DIR, ".env") if _CONFIG_DIR else None
+_CONFIG_ENV_DISPLAY = (
+    _CONFIG_ENV.replace(os.path.expanduser("~"), "~", 1) if _CONFIG_ENV else None)
 
 # Where each .env-provided variable came from, for the startup summary and
 # actionable error messages. Values are display labels, never secrets.
 ENV_SOURCES: dict[str, str] = {}
 
 try:  # dotenv is present in the venv; stay importable without it (e.g. in tests)
-    from dotenv import dotenv_values, load_dotenv
+    from dotenv import dotenv_values
 
-    # 1) backend/.env — developer override. override=True so empty/stale vars
-    #    exported in the shell environment must NOT shadow the values
-    #    configured here (long-standing behavior; fresh users have no file).
-    if os.path.isfile(_BACKEND_ENV):
-        for _k in (dotenv_values(_BACKEND_ENV) or {}):
-            ENV_SOURCES[_k] = "backend/.env"
-        load_dotenv(_BACKEND_ENV, override=True)
-
-    # 2) Config-dir .env — fill-gaps fallback (never overrides). VC_AUTH_TOKEN
-    #    is deliberately SKIPPED: the token is opt-in per run mode — `yapcode
-    #    up` unsets it for zero-config localhost and `yapcode network` exports
-    #    it explicitly. Reading it here would force token auth onto every
-    #    localhost run.sh user.
-    if os.path.isfile(_CONFIG_ENV):
-        for _k, _v in (dotenv_values(_CONFIG_ENV) or {}).items():
-            if _k == "VC_AUTH_TOKEN" or _v is None or (os.getenv(_k) or "").strip():
+    def _load_env_file(path: str | None, *, override: bool, label: str) -> None:
+        """Apply a .env file to the environment, recording provenance.
+        VC_AUTH_TOKEN is skipped (opt-in per run mode — see module docstring)."""
+        if not path or not os.path.isfile(path):
+            return
+        for _k, _v in (dotenv_values(path) or {}).items():
+            if _k == "VC_AUTH_TOKEN" or _v is None:
                 continue
+            if not override and (os.getenv(_k) or "").strip():
+                continue  # fill-gaps: don't shadow an already-set value
             os.environ[_k] = _v
-            ENV_SOURCES[_k] = _CONFIG_ENV_DISPLAY
+            ENV_SOURCES[_k] = label
+
+    # backend/.env wins (override=True); the config dir only fills gaps and is
+    # present only on Homebrew.
+    _load_env_file(_BACKEND_ENV, override=True, label="backend/.env")
+    _load_env_file(_CONFIG_ENV, override=False, label=_CONFIG_ENV_DISPLAY or "")
 except Exception:
     pass
 
@@ -81,9 +86,11 @@ def voice_keys_found() -> list[tuple[str, str]]:
 
 def env_files_checked() -> str:
     """Human-readable list of the .env locations consulted, with presence."""
-    return (f"backend/.env ({'present' if os.path.isfile(_BACKEND_ENV) else 'not present'}) "
-            f"and {_CONFIG_ENV_DISPLAY} "
-            f"({'present' if os.path.isfile(_CONFIG_ENV) else 'not found'})")
+    parts = [f"backend/.env ({'present' if os.path.isfile(_BACKEND_ENV) else 'not present'})"]
+    if _CONFIG_ENV:  # only relevant for a Homebrew (YAPCODE_CONFIG_DIR) install
+        parts.append(f"{_CONFIG_ENV_DISPLAY} "
+                     f"({'present' if os.path.isfile(_CONFIG_ENV) else 'not found'})")
+    return " and ".join(parts)
 
 
 def missing_key_detail(var: str) -> str:

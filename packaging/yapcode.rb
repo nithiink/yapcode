@@ -1,13 +1,9 @@
-# yapcode Homebrew formula (DRAFT — staged for when the repo goes public).
+# yapcode Homebrew formula. This is the source-of-truth copy; the live tap is
+# github.com/nithiink/homebrew-yapcode (Formula/yapcode.rb).
 #
-# This is the source-of-truth copy. To publish: run packaging/release.sh vX.Y.Z
-# (it tags a release, computes the sha256, and stamps `url`/`sha256` below), then
-# copy this file into the tap repo (github.com/nithiink/homebrew-yapcode) at
-# Formula/yapcode.rb and push. See packaging/README.md.
-#
-# It will NOT install while the repo is private — `brew` fetches the source
-# tarball over anonymous HTTPS, which 404s on a private repo. Publish only after
-# the repo is public and a release tag exists.
+# To cut a new version: run packaging/release.sh vX.Y.Z (it tags a release,
+# computes the sha256, and stamps `url`/`sha256` below), then copy this file into
+# the tap repo and push. See packaging/README.md.
 class Yapcode < Formula
   desc "Voice agent for Claude Code — talk to drive real Claude Code sessions"
   homepage "https://github.com/nithiink/yapcode"
@@ -35,13 +31,22 @@ class Yapcode < Formula
       system "npm", "run", "build"
     end
 
-    # Launcher wrapper on PATH. It (1) pins the install tree via YAPCODE_ROOT
-    # and (2) redirects the backend's runtime writes (session store + logs) into
-    # the user's state dir, since the Cellar must be treated as read-only. Each
-    # `:=` respects a value the user already set, so overrides still win.
+    # Launcher wrapper on PATH. The Cellar is read-only, so this relocates
+    # everything the launcher would otherwise write inside the tree:
+    #   (1) pins the install tree via YAPCODE_ROOT;
+    #   (2) points config out-of-tree via YAPCODE_CONFIG_DIR — a clone defaults
+    #       config to the in-tree backend/.env, which can't be written under the
+    #       Cellar, so a Homebrew install keeps its .env in ~/.config/yapcode
+    #       (survives brew upgrade / uninstall);
+    #   (3) redirects the backend's runtime writes (session store + logs) into
+    #       the user's state dir.
+    # Each `:=` respects a value the user already set, so overrides still win.
     (bin/"yapcode").write <<~SH
       #!/bin/bash
       export YAPCODE_ROOT="#{libexec}"
+      : "${YAPCODE_CONFIG_DIR:=${XDG_CONFIG_HOME:-$HOME/.config}/yapcode}"
+      export YAPCODE_CONFIG_DIR
+      mkdir -p "$YAPCODE_CONFIG_DIR"
       state="${XDG_STATE_HOME:-$HOME/.local/state}/yapcode"
       mkdir -p "$state/tmux"
       : "${VC_SESSION_STORE:=$state/tmux}";             export VC_SESSION_STORE

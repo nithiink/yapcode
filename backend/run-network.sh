@@ -12,10 +12,25 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# The backend doesn't auto-load VC_AUTH_TOKEN from a file (it's opt-in per run
+# mode). Network mode opts in: read it from the config file and export it. Look
+# in backend/.env, plus the config dir on Homebrew. An env value already set wins.
+if [ -z "${VC_AUTH_TOKEN:-}" ]; then
+  for _f in .env "${YAPCODE_CONFIG_DIR:+$YAPCODE_CONFIG_DIR/.env}"; do
+    [ -n "$_f" ] && [ -f "$_f" ] || continue
+    _line="$(grep -E '^[[:space:]]*VC_AUTH_TOKEN=' "$_f" | tail -1)"
+    if [ -n "$_line" ]; then
+      _val="${_line#*=}"; _val="${_val#\"}"; _val="${_val%\"}"  # strip one quote layer
+      _val="${_val#\'}"; _val="${_val%\'}"
+      [ -n "$_val" ] && { export VC_AUTH_TOKEN="$_val"; break; }
+    fi
+  done
+fi
+
 # Fail closed with a clear message: binding 0.0.0.0 without VC_AUTH_TOKEN leaves
 # the backend refusing every remote request (loopback-only), i.e. a non-functional
 # LAN app. Require the secret to be configured before exposing the port.
-if [ -z "${VC_AUTH_TOKEN:-}" ] && ! grep -qE '^[[:space:]]*VC_AUTH_TOKEN=[^[:space:]]+' .env 2>/dev/null; then
+if [ -z "${VC_AUTH_TOKEN:-}" ]; then
   echo "ERROR: run-network.sh binds 0.0.0.0 but VC_AUTH_TOKEN is not set." >&2
   echo "Set VC_AUTH_TOKEN in backend/.env (see .env.example) so remote/phone" >&2
   echo "requests can authenticate; otherwise all non-loopback requests are refused." >&2
