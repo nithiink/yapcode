@@ -57,7 +57,9 @@ cd yapcode
 `brew` pulls in `tmux`, `python@3.12`, and `node` for you:
 
 ```sh
-brew tap nithiink/yapcode && brew install yapcode   # macOS / Linuxbrew
+brew tap nithiink/yapcode
+brew trust nithiink/yapcode   # one-time: newer brew gates third-party taps until trusted
+brew install yapcode
 yapcode up    # same wizard; opens http://localhost:3000
 ```
 
@@ -273,9 +275,14 @@ Linuxbrew:
 
 ```sh
 brew tap nithiink/yapcode
-brew install yapcode      # pulls in tmux, python@3.12, node; builds the app
-yapcode up                # first run: setup wizard → starts servers → opens browser
+brew trust nithiink/yapcode   # one-time; see note below
+brew install yapcode          # pulls in tmux, python@3.12, node; builds the app
+yapcode up                    # first run: setup wizard → starts servers → opens browser
 ```
+
+> **Why `brew trust`?** Newer Homebrew refuses to install from *any* third-party tap (anything
+> outside homebrew/core) until you trust it once — supply-chain protection, not a warning about
+> this tap specifically. If your brew is older and doesn't have `brew trust`, skip that line.
 
 Details unique to Homebrew:
 
@@ -587,6 +594,7 @@ More detail in the [plugin README](integrations/claude-code-plugin/README.md).
 
 | Symptom | Cause & fix |
 | --- | --- |
+| `brew install` refuses: `Refusing to load formula … from untrusted tap` | Newer Homebrew gates **all third-party taps** until trusted once (supply-chain protection — not a warning about this tap specifically). Run `brew trust nithiink/yapcode`, then `brew install yapcode`. |
 | `pip` fails: `No matching distribution found for claude-agent-sdk==…` | **Python is too old** — must be **3.12+**. macOS: `brew install python@3.12` and build the venv with `python3.12`. Ubuntu: upgrade to 24.04 (20.04 ships 3.8, 22.04 ships 3.10). |
 | `start_session` refuses / "no allowed roots" | `ALLOWED_PROJECT_ROOTS` is unset — the sandbox fails closed by design. Set it to existing folders (not `/`, `$HOME`, or empty). |
 | `run-network.sh` exits `1` immediately | Network mode **fails closed without `VC_AUTH_TOKEN`** in `backend/.env`. Generate one and set it, then open the app once with `/#vc_token=<token>`. |
