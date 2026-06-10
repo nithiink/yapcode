@@ -2,7 +2,8 @@
 
 Homebrew formula and release tooling. **Live** since `v0.1.0`: the tap is
 [`nithiink/homebrew-yapcode`](https://github.com/nithiink/homebrew-yapcode), and users install
-with `brew tap nithiink/yapcode && brew install yapcode`.
+with `brew tap nithiink/yapcode && brew trust nithiink/yapcode && brew install yapcode`
+(newer brew requires a one-time `brew trust` for any third-party tap).
 
 ## Files
 
@@ -30,6 +31,7 @@ with `brew tap nithiink/yapcode && brew install yapcode`.
 5. **Users install:**
    ```bash
    brew tap nithiink/yapcode
+   brew trust nithiink/yapcode   # one-time, newer brew only
    brew install yapcode
    yapcode up
    ```
