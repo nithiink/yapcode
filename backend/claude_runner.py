@@ -123,7 +123,7 @@ class ClaudeRunner(ABC):
     @abstractmethod
     async def advance(self, handle: str, message: str) -> AdvanceResult: ...
     @abstractmethod
-    async def answer(self, handle: str, choice: str) -> AdvanceResult: ...
+    async def answer(self, handle: str, choice: str, seq: int) -> AdvanceResult: ...
     # Non-blocking variants: kick off advance/answer in the background so the
     # voice model can keep talking while Claude works; the caller polls.
     @abstractmethod
@@ -176,6 +176,12 @@ class _Session:
         self._stop = asyncio.Event()
         self.pending: Prompt | None = None
         self._decision: asyncio.Future[str] | None = None
+        # Answers bind to the prompt pending when they were requested: prompt_seq
+        # bumps whenever a new prompt parks; answer_claimed is the seq an
+        # in-flight answer has claimed. A second answer for the same prompt
+        # fails fast instead of double-resolving (see TmuxClaudeRunner).
+        self.prompt_seq = 0
+        self.answer_claimed = -1
         self._consumer: asyncio.Task | None = None
         self._perm_lock = asyncio.Lock()          # one pending prompt at a time
         self._turn_lock = asyncio.Lock()          # serialize advance/answer
@@ -253,11 +259,11 @@ class SDKClaudeRunner(ClaudeRunner):
             await s._stop.wait()
             return self._collect(s)
 
-    async def answer(self, handle: str, choice: str) -> AdvanceResult:
+    async def answer(self, handle: str, choice: str, seq: int) -> AdvanceResult:
         s = self._get(handle)
         async with s._turn_lock:
-            if s._decision is None:
-                return self._err(s, "no pending prompt to answer")
+            if s._decision is None or s.prompt_seq != seq:
+                return self._err(s, "that prompt was already answered — nothing to do")
             fut = s._decision
             s._delta.clear()
             s._stop.clear()
@@ -306,11 +312,18 @@ class SDKClaudeRunner(ClaudeRunner):
         self._bg[handle] = task
 
     def start_answer(self, handle: str, choice: str) -> None:
-        self._get(handle)
+        s = self._get(handle)
         self._harvest_finished(handle)
+        if s._decision is None:
+            raise ValueError("no pending prompt to answer — it was already "
+                             "resolved (don't answer it again)")
+        if s.answer_claimed == s.prompt_seq:
+            raise ValueError("that prompt is already being answered — "
+                             "don't answer it again")
+        s.answer_claimed = s.prompt_seq
         if handle in self._bg and not self._bg[handle].done():
             log.warning("start_answer for %s while previous task still running", handle)
-        task = asyncio.create_task(self.answer(handle, choice))
+        task = asyncio.create_task(self.answer(handle, choice, s.prompt_seq))
         task.set_name(f"answer: {choice}")
         self._bg[handle] = task
 
@@ -378,9 +391,11 @@ class SDKClaudeRunner(ClaudeRunner):
         # set_permission_mode affects FUTURE tool calls only — a can_use_tool
         # callback already parked on s._decision keeps waiting. If the new mode
         # would have auto-approved that tool, resolve the prompt now so
-        # 'switch to auto mode' doesn't leave it hanging.
+        # 'switch to auto mode' doesn't leave it hanging. Skip if an
+        # answer_prompt already claimed it — one decision per prompt.
         if (s.pending and s.pending.kind == "permission"
-                and mode_covers(mode, s.pending.tool_name)):
+                and mode_covers(mode, s.pending.tool_name)
+                and s.answer_claimed != s.prompt_seq):
             self.start_answer(handle, "allow")
         return mode
 
@@ -506,6 +521,7 @@ class SDKClaudeRunner(ClaudeRunner):
                 fut: asyncio.Future[str] = loop.create_future()
                 s._decision = fut
                 s.pending = self._build_prompt(kind, tool_name, tool_input)
+                s.prompt_seq += 1  # each (re-)park is a fresh claimable prompt
                 s.status = "needs_choice" if kind == "question" else "needs_permission"
                 log_event("claude", "backend", "hook",
                           f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",

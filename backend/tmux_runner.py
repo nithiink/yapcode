@@ -151,6 +151,13 @@ class _TmuxSession:
         self.tools_used: list[str] = []
         self.pending: Prompt | None = None
         self.pending_tool_use_id: str | None = None
+        # Answers bind to the prompt that was pending when they were requested:
+        # prompt_seq bumps whenever a new prompt parks; answer_claimed is the
+        # seq an in-flight answer has claimed. A second answer for the same
+        # prompt fails fast instead of queueing a stale decision that could
+        # approve a LATER prompt the user never heard.
+        self.prompt_seq = 0
+        self.answer_claimed = -1
         # An AskUserQuestion can carry several questions answered in sequence on
         # one form; track the full list and which one we're on so the menu is
         # driven through every question, not just the first.
@@ -470,12 +477,14 @@ class TmuxClaudeRunner(ClaudeRunner):
                 tool_name=ev.get("tool_name", ""),
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
+            s.prompt_seq += 1
             s.status = "needs_permission"
         elif kind == "needs_choice":
             s.questions = _parse_questions(ev.get("tool_input", {}))
             s.q_index = self._detect_question_index(s, pane)
             s.pending = self._prompt_for_question(s, s.q_index, ev.get("tool_name", ""))
             s.pending_tool_use_id = ev.get("tool_use_id")
+            s.prompt_seq += 1
             s.status = "needs_choice"
 
     def _detect_question_index(self, s: _TmuxSession, pane: str) -> int:
@@ -525,11 +534,11 @@ class TmuxClaudeRunner(ClaudeRunner):
                 return res
             return self._collect(s)
 
-    async def answer(self, handle: str, choice: str) -> AdvanceResult:
+    async def answer(self, handle: str, choice: str, seq: int) -> AdvanceResult:
         s = self._get(handle)
         async with s._turn_lock:
-            if s.pending is None:
-                return self._err(s, "no pending prompt to answer")
+            if s.pending is None or s.prompt_seq != seq:
+                return self._err(s, "that prompt was already answered — nothing to do")
             kind = s.pending.kind
             pending_tool = s.pending.tool_name
             s._delta.clear()
@@ -545,7 +554,9 @@ class TmuxClaudeRunner(ClaudeRunner):
                     if decided is None:
                         # Ambiguous: keep the prompt pending and re-ask. The hook
                         # stays parked (no decision written), so the gate holds.
+                        # Release the claim so the retry can answer the same prompt.
                         s.status = "needs_permission"
+                        s.answer_claimed = -1
                         s._delta.append(
                             "I didn't catch a clear yes or no — say 'allow' to "
                             "approve or 'deny' to reject.")
@@ -559,6 +570,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                     # right away instead of waiting for the turn to complete.
                     s.q_index += 1
                     s.pending = self._prompt_for_question(s, s.q_index, s.pending.tool_name)
+                    s.prompt_seq += 1  # next question = new prompt, claimable again
                     s.status = "needs_choice"
                     return self._collect(s)
             s.pending = None
@@ -933,8 +945,10 @@ class TmuxClaudeRunner(ClaudeRunner):
         # file. If the new mode would have auto-approved that tool, approve it
         # now so 'switch to auto mode' doesn't leave the prompt hanging; the
         # resumed turn's output is delivered via poll_status like any answer.
+        # Skip if an answer_prompt already claimed it — one decision per prompt.
         if (s.pending and s.pending.kind == "permission"
-                and mode_covers(s.mode, s.pending.tool_name)):
+                and mode_covers(s.mode, s.pending.tool_name)
+                and s.answer_claimed != s.prompt_seq):
             log_event("backend", "claude", "decision",
                       f"allow (pending prompt covered by switch to {s.mode})",
                       session=_slabel(s),
@@ -1101,12 +1115,18 @@ class TmuxClaudeRunner(ClaudeRunner):
             self._bg[handle] = task
 
     def start_answer(self, handle: str, choice: str) -> None:
-        self._get(handle)
+        s = self._get(handle)
         self._harvest_finished(handle)
-        task = asyncio.create_task(self.answer(handle, choice))
+        if s.pending is None:
+            raise ValueError("no pending prompt to answer — it was already "
+                             "resolved (don't answer it again)")
+        if s.answer_claimed == s.prompt_seq:
+            raise ValueError("that prompt is already being answered — "
+                             "don't answer it again")
+        s.answer_claimed = s.prompt_seq
+        task = asyncio.create_task(self.answer(handle, choice, s.prompt_seq))
         task.set_name(f"answer: {choice}")
         if handle in self._bg and not self._bg[handle].done():
-            s = self._sessions[handle]
             s._extra_tasks.append(task)
             log.info("start_answer for %s queued behind running turn", handle)
         else:
@@ -1295,6 +1315,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                 tool_name=ev.get("tool_name", ""),
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
+            s.prompt_seq += 1
             s.status = "needs_permission"
             log_event("claude", "backend", "hook",
                       f"needs permission: {s.pending.text}", session=_slabel(s), detail=ev)
@@ -1304,6 +1325,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             s.q_index = 0
             s.pending = self._prompt_for_question(s, 0, ev.get("tool_name", ""))
             s.pending_tool_use_id = ev.get("tool_use_id")
+            s.prompt_seq += 1
             s.status = "needs_choice"
             log_event("claude", "backend", "hook",
                       f"needs choice: {s.pending.text}", session=_slabel(s), detail=ev)
