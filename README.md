@@ -13,6 +13,10 @@ instructions, approving permission prompts, running slash commands, and narratin
 back. A live terminal streams the actual Claude TUI to your browser and your phone, so you can
 watch (and take over by keyboard) at any time.
 
+[![Watch the demo](https://img.youtube.com/vi/PFuo4jB9LQg/maxresdefault.jpg)](https://www.youtube.com/watch?v=PFuo4jB9LQg)
+
+**▶ [Watch the demo](https://www.youtube.com/watch?v=PFuo4jB9LQg)**
+
 ### What it does
 
 - 🎙️ **Hands-free Claude Code** — speak; the agent drives a real `claude` session and reads the answer back.
@@ -125,7 +129,7 @@ layers of defense — both **fail-closed**.
 | Layer | Control | What it does |
 | --- | --- | --- |
 | **1. Authentication** | `VC_AUTH_TOKEN` | A shared secret that gates every sensitive endpoint and the live-terminal WebSocket. **If set**, it is required from *every* caller — including loopback (`loopback` = connections from your own machine: `127.0.0.1`, `::1`, `localhost`). **If unset**, only loopback clients are allowed and all remote callers are refused. Network mode (`run-network.sh`, binding `0.0.0.0`) **refuses to start without a token**. |
-| **2. Directory sandbox** | `ALLOWED_PROJECT_ROOTS` | A **mandatory** allowlist of directories Claude sessions may run in. If unset, `start_session` refuses — sessions cannot be started anywhere on the filesystem. Paths are `realpath`-resolved and containment-checked, so `..`, symlinks, and absolute-path escapes are blocked. |
+| **2. Directory sandbox** | `ALLOWED_PROJECT_ROOTS` | A **mandatory** allowlist of directories Claude sessions may **start** in. If unset, `start_session` refuses — sessions cannot be started anywhere on the filesystem. Paths are `realpath`-resolved and containment-checked, so `..`, symlinks, and absolute-path escapes are blocked. |
 
 In plain language:
 
@@ -133,7 +137,11 @@ In plain language:
   machine: `127.0.0.1`, `::1`, `localhost`), so no token is needed.
 - **The moment you go off your laptop** (LAN, phone, tunnel), you *must* set a token, and
   the network launcher will not start without one.
-- **Claude can never wander outside the folders you list** in `ALLOWED_PROJECT_ROOTS`.
+- **Sessions only start inside folders you allowlist** (`ALLOWED_PROJECT_ROOTS`), and the
+  voice agent itself can't run arbitrary commands — its only tools spawn and drive Claude
+  sessions. What Claude does *inside* a session is governed by Claude Code's own permission
+  model: in default mode it asks first and you approve or deny (by voice or keyboard); auto
+  mode acts without asking, exactly like at the keyboard.
 
 Full details — the `_access_ok` check, Origin allowlist, CSRF defenses, log redaction — are in
 [Security & access control (details)](#security--access-control-details) below.
@@ -534,10 +542,15 @@ bad/missing token with `4401`.
 
 ### Layer 2 — directory sandbox (`ALLOWED_PROJECT_ROOTS`)
 
-`ALLOWED_PROJECT_ROOTS` confines every session's working directory. Every candidate path —
-including fuzzy-matched ones — is `realpath`-normalized and containment-checked, so `..`,
-symlinks, and absolute-path escapes are blocked. The wizard also rejects roots that are empty,
-`/`, `$HOME`, or non-existent.
+`ALLOWED_PROJECT_ROOTS` confines every session's **starting working directory**. Every
+candidate path — including fuzzy-matched ones — is `realpath`-normalized and
+containment-checked, so `..`, symlinks, and absolute-path escapes are blocked. The wizard also
+rejects roots that are empty, `/`, `$HOME`, or non-existent.
+
+Scope note: this bounds where sessions *start*, not what a running Claude session may touch —
+actions inside a session are gated by Claude Code's own permission prompts (and act freely in
+auto mode, as at the keyboard). The voice agent's own tool surface contains no
+arbitrary-command tool: it can only spawn and drive Claude sessions.
 
 ### Additional hardening
 
