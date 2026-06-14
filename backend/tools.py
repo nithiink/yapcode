@@ -257,6 +257,18 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["session_id", "items"],
         },
     },
+    {
+        "type": "function",
+        "name": "mute",
+        "description": (
+            "Mute your own microphone in the user interface so you stop listening to "
+            "the user. Call this when the user says 'mute', 'mute yourself', 'stop "
+            "listening', or 'be quiet'. While muted you can't hear the user, so you "
+            "can't unmute by voice — the user unmutes with the on-screen button. Give a "
+            "brief spoken acknowledgement before or as you mute."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -477,5 +489,11 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(items, list) or not items:
             raise ValueError("items is required (a non-empty list of {key} or {text} objects)")
         return await runner_for(sid).send_keys(sid, items)
+
+    if name == "mute":
+        # Muting is a client-side action (it disables the mic track in the
+        # browser). The backend just acknowledges; the frontend reacts to the
+        # tool_call event and flips the actual mute state.
+        return {"muted": True, "message": "Microphone muted. The user can unmute with the on-screen button."}
 
     raise KeyError(f"unknown tool: {name}")
