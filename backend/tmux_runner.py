@@ -124,18 +124,14 @@ CTRL_ROOT = config.SESSION_STORE_DIR  # set via VC_SESSION_STORE; defaults insid
 HOOK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tmux_hooks")
 ENABLE_CHROME = os.getenv("CLAUDE_CLI_CHROME", "1") != "0"
 
-# A session id becomes a directory name under CTRL_ROOT (see _TmuxSession.ctrl),
-# so it must be a single safe path component. Without this, a caller-supplied id
-# like "../../foo" on the handoff/resume path would traverse outside the session
-# store and let os.makedirs/_write_* create or overwrite files there. Real Claude
-# session ids are UUIDs; fresh sessions use uuid4(), so this only constrains the
-# externally supplied resume/handoff id.
+# A session id becomes a directory name under CTRL_ROOT, so it must be a single
+# safe path component; otherwise a caller-supplied id like "../../foo" would
+# traverse out of the session store. Real session ids are UUIDs.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 def validate_session_id(session_id: str) -> str:
-    """Return the trimmed id if it is a safe single path component, else raise
-    ValueError. Rejects ids containing '/', '\\', '.', or a leading non-alnum."""
+    """Return the trimmed id if it is a safe single path component, else raise ValueError."""
     sid = (session_id or "").strip()
     if not _SESSION_ID_RE.match(sid):
         raise ValueError(f"invalid session id (expected a UUID-like token): {session_id!r}")
@@ -230,10 +226,9 @@ class TmuxClaudeRunner(ClaudeRunner):
         """Create the detached tmux pane running `claude` (with our hooks wired via
         --settings) and start tracking it. `claude_id_arg` is either
         `--session-id <new uuid>` (fresh start) or `--resume <existing id>`."""
-        # Defense in depth: the control dir is derived from the (already validated)
-        # session id, but assert containment before any makedirs/write so a path
-        # can never escape the session store even if a future caller skips
-        # validate_session_id.
+        # Defense in depth: assert containment before any makedirs/write so the
+        # control dir can never escape the session store, even if a future caller
+        # reaches _spawn without going through validate_session_id.
         ctrl_real = os.path.realpath(s.ctrl)
         root_real = os.path.realpath(CTRL_ROOT)
         if ctrl_real != root_real and not ctrl_real.startswith(root_real + os.sep):

@@ -408,9 +408,8 @@ async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
     sid = (req.session_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="session_id is required")
-    # session_id becomes a directory name under the session store; reject anything
-    # that isn't a safe single path component so it can't traverse out (see
-    # tmux_runner.validate_session_id).
+    # session_id becomes a directory name under the session store; reject path
+    # traversal before it is used (see tmux_runner.validate_session_id).
     try:
         sid = validate_session_id(sid)
     except ValueError as exc:
