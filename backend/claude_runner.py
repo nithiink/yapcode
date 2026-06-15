@@ -521,7 +521,7 @@ class SDKClaudeRunner(ClaudeRunner):
                 fut: asyncio.Future[str] = loop.create_future()
                 s._decision = fut
                 s.pending = self._build_prompt(kind, tool_name, tool_input)
-                s.prompt_seq += 1  # each (re-)park is a fresh claimable prompt
+                s.prompt_seq += 1
                 s.status = "needs_choice" if kind == "question" else "needs_permission"
                 log_event("claude", "backend", "hook",
                           f"needs {'choice' if kind == 'question' else 'permission'}: {s.pending.text}",

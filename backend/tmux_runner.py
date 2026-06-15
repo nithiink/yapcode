@@ -570,7 +570,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                     # right away instead of waiting for the turn to complete.
                     s.q_index += 1
                     s.pending = self._prompt_for_question(s, s.q_index, s.pending.tool_name)
-                    s.prompt_seq += 1  # next question = new prompt, claimable again
+                    s.prompt_seq += 1
                     s.status = "needs_choice"
                     return self._collect(s)
             s.pending = None
