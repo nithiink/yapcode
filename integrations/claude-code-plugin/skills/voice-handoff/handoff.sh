@@ -21,7 +21,17 @@ if [ -n "${YAPCODE_TOKEN:-}" ]; then
   args+=(-H "X-VC-Token: ${YAPCODE_TOKEN}")
 fi
 
-payload="$(printf '{"session_id":"%s","cwd":"%s","tmux":"%s"}' "$sid" "$(pwd)" "${TMUX:-}")"
+# Escape a string for safe inclusion in a JSON value (backslash and quote are the
+# only characters a session-id/path/$TMUX realistically contains that break JSON).
+json_escape() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '%s' "$s"
+}
+
+payload="$(printf '{"session_id":"%s","cwd":"%s","tmux":"%s"}' \
+  "$(json_escape "$sid")" "$(json_escape "$(pwd)")" "$(json_escape "${TMUX:-}")")"
 
 curl "${args[@]}" -d "$payload" ||
   printf '{"error":"could not reach yapcode — is the backend running at %s?"}\n' "$url"
