@@ -44,6 +44,7 @@ from session_manager import (
     set_session_name,
     shutdown_all,
 )
+from tmux_runner import validate_session_id
 from tools import TOOL_DEFINITIONS, dispatch_tool
 
 # .env is loaded once, by `import config` above. No second load here: a CWD-based
@@ -431,6 +432,12 @@ async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
     sid = (req.session_id or "").strip()
     if not sid:
         raise HTTPException(status_code=400, detail="session_id is required")
+    # session_id becomes a directory name under the session store; reject path
+    # traversal before it is used (see tmux_runner.validate_session_id).
+    try:
+        sid = validate_session_id(sid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Already a live vc_ session (seamless launcher path) — nothing to reopen.
     pane = cli_pane_for(sid)
