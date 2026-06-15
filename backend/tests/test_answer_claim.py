@@ -142,6 +142,45 @@ class TmuxAmbiguousAndMultiQuestion(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s.status, "needs_choice")
 
 
+class TmuxInterruptClose(unittest.IsolatedAsyncioTestCase):
+    """interrupt/close write a deny directly, bypassing the prompt_seq/claim
+    guard, to unblock the parked hook. Verify that bypass still can't let a
+    stale in-flight answer write a second decision afterwards."""
+
+    @staticmethod
+    def _patch(r, writes):
+        async def _noop_tmux(*a, **k):
+            return ""
+        r._tmux = _noop_tmux
+        r._write_decision = lambda sess, choice: writes.append(choice) or False
+
+    async def test_interrupt_denies_pending_and_keeps_guard(self):
+        r, s = _runner_with_session()
+        writes = []
+        self._patch(r, writes)
+        r.start_answer(s.handle, "allow")        # an answer is in flight (claims seq 1)
+        await r.interrupt(s.handle)
+        self.assertEqual(writes, ["deny"])       # teardown unblocked the parked hook
+        self.assertIsNone(s.pending)
+        self.assertEqual(s.status, "completed")
+        # the stale answer (bound to seq 1) must not now write a 2nd decision
+        res = await r.answer(s.handle, "allow", seq=1)
+        self.assertEqual(res.status, "error")
+        await asyncio.sleep(0)
+
+    async def test_close_denies_pending_to_unblock_hook(self):
+        r, s = _runner_with_session()
+        writes = []
+        self._patch(r, writes)
+        r.start_answer(s.handle, "deny")
+        bg = r._bg.get(s.handle)
+        await r.close(s.handle)
+        self.assertEqual(writes, ["deny"])       # parked hook unblocked on teardown
+        self.assertNotIn(s.handle, r._sessions)  # session removed
+        await asyncio.sleep(0)
+        self.assertTrue(bg.done())               # in-flight answer cancelled
+
+
 class SDKAnswerClaim(unittest.IsolatedAsyncioTestCase):
     """Mirror of AnswerClaim for the SDK runner — same guard, different gate
     (a parked can_use_tool future instead of a tmux decision file)."""

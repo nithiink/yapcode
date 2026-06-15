@@ -842,6 +842,11 @@ class TmuxClaudeRunner(ClaudeRunner):
                 t.cancel()
         s._extra_tasks.clear()
         if s.pending and s.pending.kind == "permission":
+            # Teardown writes the deny directly, bypassing the prompt_seq/claim
+            # guard: the parked PreToolUse hook must be unblocked even mid-answer.
+            # We cancelled the in-flight answer above and clear s.pending below,
+            # so any stale answer that still runs fails the guard instead of
+            # writing a second decision.
             self._write_decision(s, "deny")
         await self._tmux("send-keys", "-t", s.pane, "Escape")
         s.pending = None
@@ -898,7 +903,9 @@ class TmuxClaudeRunner(ClaudeRunner):
                 t.cancel()
         s._extra_tasks.clear()
         if s.pending and s.pending.kind == "permission":
-            self._write_decision(s, "deny")  # unblock any parked PreToolUse hook
+            # Bypasses the prompt_seq/claim guard on purpose: unblock the parked
+            # PreToolUse hook so the dying session doesn't leave it hanging.
+            self._write_decision(s, "deny")
         s._closed = True
         if s._tail and not s._tail.done():
             s._tail.cancel()
