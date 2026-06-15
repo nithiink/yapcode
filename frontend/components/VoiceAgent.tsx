@@ -1153,6 +1153,13 @@ export default function VoiceAgent() {
         stopPolling(res?.session_id);
         clearPendingFor(res?.session_id);
       }
+      // The model muted itself by voice ("mute", "be quiet"). Flip the real mic
+      // state to match, exactly as the on-screen Mute button does. Unmute stays
+      // manual — once muted the model can't hear a spoken "unmute".
+      if (e.name === "mute" && e.ok) {
+        setMuted(true);
+        sessionRef.current?.setMuted(true);
+      }
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
           e.name,
