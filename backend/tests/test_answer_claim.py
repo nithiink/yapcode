@@ -41,7 +41,7 @@ def _sdk_runner_with_session(pending: bool = True):
                            options=["allow", "deny"], tool_name="Bash")
         # SDK runner gates on _decision (the parked can_use_tool future)
         # rather than a decision file.
-        s._decision = asyncio.get_event_loop().create_future()
+        s._decision = asyncio.get_running_loop().create_future()
         s.prompt_seq = 1
         s.status = "needs_permission"
     r._sessions[s.handle] = s
@@ -183,21 +183,27 @@ class SDKSetModeClaim(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(s.handle, r._bg)        # set_mode started no 2nd answer
         self.assertFalse(s._decision.done())
 
-    async def test_set_mode_auto_approves_unclaimed_covered_prompt(self):
+    async def test_set_mode_auto_approves_unclaimed_covered_prompt_exactly_once(self):
         r, s = _sdk_runner_with_session()
+        fut = s._decision
         await r.set_mode(s.handle, "auto")       # 'switch to auto' alone
         self.assertEqual(s.answer_claimed, s.prompt_seq)  # set_mode claimed it
         self.assertIn(s.handle, r._bg)
-        r._bg[s.handle].cancel()
+        for _ in range(5):                        # let the answer task resolve fut
+            if fut.done():
+                break
+            await asyncio.sleep(0)
+        self.assertTrue(fut.done())               # the prompt was decided...
+        self.assertEqual(fut.result(), "allow")   # ...exactly once, as an allow
+        r._bg[s.handle].cancel()                  # task now parked at _stop.wait()
         await asyncio.sleep(0)
 
     async def test_set_mode_acceptedits_leaves_uncovered_prompt(self):
         r, s = _sdk_runner_with_session()         # pending tool is Bash
         await r.set_mode(s.handle, "acceptEdits")  # covers edits, not Bash
         self.assertEqual(s.mode, "acceptEdits")
-        self.assertNotIn(s.handle, r._bg)
-        self.assertEqual(s.answer_claimed, -1)
-        self.assertFalse(s._decision.done())
+        self.assertNotIn(s.handle, r._bg)         # start_answer was never called...
+        self.assertFalse(s._decision.done())      # ...so the prompt stays parked
 
 
 if __name__ == "__main__":
