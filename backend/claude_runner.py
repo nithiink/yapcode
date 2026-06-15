@@ -176,12 +176,10 @@ class _Session:
         self._stop = asyncio.Event()
         self.pending: Prompt | None = None
         self._decision: asyncio.Future[str] | None = None
-        # Answers bind to the prompt pending when they were requested: prompt_seq
-        # bumps whenever a new prompt parks; answer_claimed is the seq an
-        # in-flight answer has claimed. A second answer for the same prompt
-        # fails fast instead of double-resolving (see TmuxClaudeRunner).
-        self.prompt_seq = 0
-        self.answer_claimed = -1
+        # A second answer for the same prompt must fail fast, not double-resolve:
+        # a stale allow could decide a newer prompt (see TmuxClaudeRunner).
+        self.prompt_seq = 0       # bumps each time a prompt parks
+        self.answer_claimed = -1  # prompt_seq an in-flight answer has claimed
         self._consumer: asyncio.Task | None = None
         self._perm_lock = asyncio.Lock()          # one pending prompt at a time
         self._turn_lock = asyncio.Lock()          # serialize advance/answer

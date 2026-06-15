@@ -151,13 +151,10 @@ class _TmuxSession:
         self.tools_used: list[str] = []
         self.pending: Prompt | None = None
         self.pending_tool_use_id: str | None = None
-        # Answers bind to the prompt that was pending when they were requested:
-        # prompt_seq bumps whenever a new prompt parks; answer_claimed is the
-        # seq an in-flight answer has claimed. A second answer for the same
-        # prompt fails fast instead of queueing a stale decision that could
-        # approve a LATER prompt the user never heard.
-        self.prompt_seq = 0
-        self.answer_claimed = -1
+        # A second answer for the same prompt must fail fast, not queue: a
+        # stale allow run later could approve a LATER prompt the user never heard.
+        self.prompt_seq = 0       # bumps each time a prompt parks
+        self.answer_claimed = -1  # prompt_seq an in-flight answer has claimed
         # An AskUserQuestion can carry several questions answered in sequence on
         # one form; track the full list and which one we're on so the menu is
         # driven through every question, not just the first.
