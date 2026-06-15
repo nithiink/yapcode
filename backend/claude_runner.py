@@ -519,6 +519,10 @@ class SDKClaudeRunner(ClaudeRunner):
                 fut: asyncio.Future[str] = loop.create_future()
                 s._decision = fut
                 s.pending = self._build_prompt(kind, tool_name, tool_input)
+                # Each loop iteration re-parks, so an ambiguous re-ask bumps
+                # prompt_seq again — that alone makes any prior answer_claimed
+                # stale, so this runner never resets answer_claimed explicitly
+                # (unlike tmux, whose re-ask keeps the same prompt_seq).
                 s.prompt_seq += 1
                 s.status = "needs_choice" if kind == "question" else "needs_permission"
                 log_event("claude", "backend", "hook",

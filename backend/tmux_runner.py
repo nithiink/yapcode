@@ -551,7 +551,14 @@ class TmuxClaudeRunner(ClaudeRunner):
                     if decided is None:
                         # Ambiguous: keep the prompt pending and re-ask. The hook
                         # stays parked (no decision written), so the gate holds.
-                        # Release the claim so the retry can answer the same prompt.
+                        # Release the claim so the retry can answer the SAME prompt
+                        # — this is a re-ask, so prompt_seq is unchanged and the
+                        # claim wouldn't otherwise clear. The success/deny paths
+                        # need no such reset: the next parked prompt bumps
+                        # prompt_seq, which alone makes answer_claimed stale.
+                        # (The SDK runner has no reset here because its re-ask
+                        # loops through can_use_tool, which re-parks and bumps
+                        # prompt_seq.)
                         s.status = "needs_permission"
                         s.answer_claimed = -1
                         s._delta.append(
