@@ -19,8 +19,10 @@ CWD="${1:-$(pwd)}"
 hdr=(-H "Content-Type: application/json")
 [ -n "${YAPCODE_TOKEN:-}" ] && hdr+=(-H "X-VC-Token: ${YAPCODE_TOKEN}")
 
-resp="$(curl -fsS -X POST "$URL/tools/execute" "${hdr[@]}" \
-  -d "{\"name\":\"start_session\",\"arguments\":{\"project_path\":\"$CWD\"}}")" || {
+req="$(CWD="$CWD" python3 -c \
+  'import json,os; print(json.dumps({"name":"start_session","arguments":{"project_path":os.environ["CWD"]}}))')"
+
+resp="$(curl -fsS -X POST "$URL/tools/execute" "${hdr[@]}" -d "$req")" || {
   echo "yapcode: couldn't reach the backend at $URL (is it running?)" >&2
   exit 1
 }
