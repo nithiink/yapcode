@@ -35,6 +35,12 @@ const OUTPUT_RATE = 24000;
 // silence so the server doesn't treat the stream as idle and drop the session.
 const KEEPALIVE_MS = 10000;
 
+// Upper bound on a single tool call. The model can't speak again until it gets
+// a functionResponse, so a backend tool that stalls (e.g. set_mode parked on a
+// busy session's turn lock) would otherwise freeze the voice agent. On timeout
+// we abort and return an error response so the model unblocks and can narrate.
+const TOOL_EXEC_TIMEOUT_MS = 15000;
+
 // AudioWorklet that converts mic Float32 frames to 16-bit PCM and reports RMS
 // (used to drive the "hearing" orb state). Loaded via a Blob URL so we don't
 // ship a separate static asset.
@@ -522,18 +528,27 @@ export class GeminiSession implements VoiceSession {
 
     let result: unknown;
     let ok = true;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), TOOL_EXEC_TIMEOUT_MS);
     try {
       const r = await fetch("/api/tools/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: fc.name, arguments: args }),
+        signal: ctl.signal,
       });
       const out = await r.json();
       result = out.result ?? out;
       ok = !!out.ok;
     } catch (e: any) {
       ok = false;
-      result = { error: e?.message || String(e) };
+      result = {
+        error: ctl.signal.aborted
+          ? `${fc.name} timed out — it may still be running on the server`
+          : e?.message || String(e),
+      };
+    } finally {
+      clearTimeout(timer);
     }
     emit({ type: "tool_call", name: fc.name, arguments: args, result, ok });
 
