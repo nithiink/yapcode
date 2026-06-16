@@ -142,7 +142,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "answer_prompt",
-        "description": "Answer a pending permission or question prompt from Claude (after you were told Claude needs permission or is asking a question). For permissions pass 'allow' or 'deny'. For questions pass the chosen option text. Returns 'working' immediately; Claude resumes in the background and you'll be told the result automatically.",
+        "description": "Answer a pending permission or question prompt from Claude (after you were told Claude needs permission or is asking a question). For permissions pass 'allow' or 'deny'. For questions pass the chosen option text. Call it at most ONCE per prompt — it fails if the prompt was already answered or resolved by a mode switch (that's fine, don't retry). If the user wants to allow AND switch to auto/acceptEdits, call only set_mode — it approves the covered pending prompt itself. Returns 'working' immediately; Claude resumes in the background and you'll be told the result automatically.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -170,7 +170,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "set_mode",
-        "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect. If a permission prompt is pending and the new mode would auto-approve that tool (auto: anything; acceptEdits: file edits), the prompt is approved automatically and the session continues — the result message says which happened, so relay it.",
+        "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect. If a permission prompt is pending and the new mode would auto-approve that tool (auto: anything; acceptEdits: file edits), the prompt is approved automatically and the session continues — the result message says which happened, so relay it. So when the user asks to allow a prompt AND switch modes, call ONLY set_mode (no answer_prompt); only answer_prompt separately if the result says the prompt is still pending.",
         "parameters": {
             "type": "object",
             "properties": {
