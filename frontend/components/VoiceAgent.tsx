@@ -277,6 +277,12 @@ type Sess = {
   prompt?: { kind: string; text: string; options?: string[] };
 };
 
+// Monotonic-ish millisecond clock for ordering in-flight fetches against UI
+// state changes (performance.now() where available, wall clock as a fallback).
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 // Abbreviate the user's home dir to ~ for a compact path display.
 function abbrevHome(path: string): string {
   return path.replace(/^\/(Users|home)\/[^/]+/, "~");
@@ -505,6 +511,10 @@ export default function VoiceAgent() {
   const connectedRef = useRef(false);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // When the prompt card was last raised. The session-list poll uses this to
+  // clear a card the backend no longer reports without racing a list() response
+  // that was already in flight before the card went up (see refreshSessions).
+  const promptCardSetAtRef = useRef(0);
   // Cost-log connection identity & snapshot timer. connectionId persists for one
   // voice connect()/disconnect() cycle so snapshots can be grouped later.
   const costLogRef = useRef<{
@@ -681,6 +691,7 @@ export default function VoiceAgent() {
     const req = reqRaw.length > 90 ? `${reqRaw.slice(0, 90)}…` : reqRaw;
     const forReq = req ? ` for your request “${req}”` : "";
     if ((res.status === "needs_permission" || res.status === "needs_choice") && res.prompt) {
+      promptCardSetAtRef.current = nowMs();
       setPending({
         sessionId: sid,
         kind: res.prompt.kind,
@@ -841,11 +852,30 @@ export default function VoiceAgent() {
   };
 
   const refreshSessions = async () => {
+    const startedAt = nowMs();
     try {
-      setSessions(await fetchSessions());
+      const list = await fetchSessions();
+      setSessions(list);
+      reconcilePendingCard(list, startedAt);
     } catch {
       /* ignore */
     }
+  };
+
+  // Dismiss the prompt card when the backend no longer reports a pending prompt
+  // for its session — e.g. the user approved/answered it directly in the CLI,
+  // where no voice answer fires to clear the card. Guard with `startedAt`: a
+  // list() response that began before the card was raised reflects pre-prompt
+  // state, so it must not clear a card that just went up.
+  const reconcilePendingCard = (list: Sess[], startedAt: number) => {
+    setPending((p) => {
+      if (!p || startedAt < promptCardSetAtRef.current) return p;
+      const sess = list.find((s) => s.handle === p.sessionId);
+      if (!sess) return p; // session not in this read — leave the card as-is
+      if (sess.prompt) return p; // still pending on the backend
+      if (sess.status === "needs_permission" || sess.status === "needs_choice") return p;
+      return null; // resolved elsewhere (answered in the CLI) — retire the card
+    });
   };
 
   // Point-in-time context appended to the static instructions at connect():

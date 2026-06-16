@@ -176,6 +176,15 @@ class _TmuxSession:
         # stale allow run later could approve a LATER prompt the user never heard.
         self.prompt_seq = 0       # bumps each time a prompt parks
         self.answer_claimed = -1  # prompt_seq an in-flight answer has claimed
+        # CLI-answerable prompts (AskUserQuestion menus, the ExitPlanMode dialog)
+        # render in the live TUI, so the user can answer them with the keyboard —
+        # in which case no voice answer() fires to clear `pending`. We watch the
+        # pane: once we've seen THIS prompt's menu on screen (_pending_seen is the
+        # very Prompt object), its disappearance means it was answered in the CLI.
+        # Identity-keying to the Prompt avoids clearing a freshly-raised prompt
+        # whose menu hasn't rendered yet.
+        self._pending_seen: Prompt | None = None
+        self._pending_gone_strikes = 0
         # An AskUserQuestion can carry several questions answered in sequence on
         # one form; track the full list and which one we're on so the menu is
         # driven through every question, not just the first.
@@ -860,6 +869,68 @@ class TmuxClaudeRunner(ClaudeRunner):
                 return
             await asyncio.sleep(0.15)
 
+    def _is_cli_answerable(self, p: Prompt | None) -> bool:
+        """True for prompts the user can also answer with the keyboard in the live
+        TUI. AskUserQuestion menus and the ExitPlanMode dialog both render on
+        screen (the PreToolUse hook emits 'allow' for them and the runner drives
+        the menu). Risky-tool permission prompts instead PARK the hook with no
+        on-screen menu, so they can only be resolved by voice/mode/interrupt — the
+        pane never shows them and must never be reconciled against it."""
+        if p is None:
+            return False
+        if p.kind == "choice":
+            return True
+        return p.kind == "permission" and p.tool_name == "ExitPlanMode"
+
+    def _prompt_on_screen(self, p: Prompt, pane: str) -> bool:
+        """Whether the CLI-answerable prompt `p` is still rendered in `pane`."""
+        if p.kind == "permission":  # ExitPlanMode plan-approval dialog
+            return "Would you like to proceed?" in pane or "ready to execute" in pane
+        return "to navigate" in pane or "Enter to select" in pane  # question menu
+
+    async def _reconcile_pending(self, s: _TmuxSession) -> None:
+        """Drop a CLI-answerable prompt the user answered directly in the terminal.
+
+        The voice answer() path clears `pending` itself; but a keyboard answer in
+        the live TUI leaves `pending` set, so list()/poll_status keep reporting a
+        prompt the user already dealt with and the UI shows a stale card. We watch
+        the pane: once this prompt's menu/dialog has been seen on screen and then
+        leaves it, the user answered (or dismissed) it in the CLI — so clear it.
+
+        Skipped while a turn holds _turn_lock: the voice answer() is itself driving
+        the menu then, and its transient disappearance is not an external answer.
+        Requires two consecutive off-screen polls so a single capture caught
+        mid-redraw can't trigger a false clear."""
+        p = s.pending
+        if not self._is_cli_answerable(p) or s._turn_lock.locked():
+            return
+        pane = await self._capture(s)
+        if self._prompt_on_screen(p, pane):
+            s._pending_seen = p
+            s._pending_gone_strikes = 0
+            return
+        if s._pending_seen is not p:
+            return  # this prompt's menu hasn't rendered yet — don't clear early
+        s._pending_gone_strikes += 1
+        if s._pending_gone_strikes < 2:
+            return
+        if s.pending is not p:  # changed underneath us between awaits
+            return
+        log_event("claude", "backend", "decision",
+                  "prompt answered in the CLI; clearing stale UI prompt",
+                  session=_slabel(s),
+                  detail={"handle": s.handle, "kind": p.kind, "tool_name": p.tool_name})
+        s.pending = None
+        s.pending_tool_use_id = None
+        s._pending_seen = None
+        s._pending_gone_strikes = 0
+        s.questions = []
+        s.q_index = 0
+        if s.status in ("needs_permission", "needs_choice"):
+            # The CLI answer let Claude proceed; a later turn_complete will flip
+            # this to "completed". Until then it's no longer waiting on the user.
+            s.status = "running"
+
     async def interrupt(self, handle: str) -> None:
         s = self._get(handle)
         bg = self._bg.pop(handle, None)
@@ -1311,6 +1382,8 @@ class TmuxClaudeRunner(ClaudeRunner):
 
     async def _tail_events(self, s: _TmuxSession) -> None:
         path = os.path.join(s.ctrl, "events.jsonl")
+        loop = asyncio.get_event_loop()
+        next_reconcile = 0.0
         while not s._closed:
             try:
                 if os.path.exists(path):
@@ -1325,6 +1398,13 @@ class TmuxClaudeRunner(ClaudeRunner):
                         for line in parts:
                             if line.strip():
                                 await self._handle_event(s, line)
+                # A keyboard answer in the live TUI fires no event, so poll the
+                # pane (throttled — a capture is a subprocess) to retire prompts
+                # answered directly in the CLI.
+                now = loop.time()
+                if s.pending is not None and now >= next_reconcile:
+                    next_reconcile = now + 0.4
+                    await self._reconcile_pending(s)
             except asyncio.CancelledError:
                 raise
             except Exception:
