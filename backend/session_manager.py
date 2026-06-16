@@ -254,7 +254,10 @@ def resolve_project_path(name: str) -> str:
         `real` is only stat-ed once proven to sit at or under an allowed root."""
         real = os.path.realpath(os.path.abspath(os.path.expanduser(p)))
         for root in roots:
-            if real == root or real.startswith(root + os.sep):
+            # A single prefix check (os.sep appended to both sides) covers the
+            # exact-root and subdirectory cases without matching a sibling like
+            # "<root>-evil", and reads as an allowed-prefix path-injection barrier.
+            if (real + os.sep).startswith(root + os.sep):
                 return real if os.path.isdir(real) else None
         return None
 

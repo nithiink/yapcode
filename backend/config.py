@@ -151,10 +151,11 @@ def resolve_within_roots(path: str) -> str:
     which resolves spoken folder references to an allowed path in the first place."""
     real = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     for root in allowed_project_roots():
-        # Guard the filesystem access with an explicit containment check in the same
-        # scope (not a generator expression) so it reads as a path-injection barrier:
-        # `real` is only touched once proven to sit at or under an allowed root.
-        if real == root or real.startswith(root + os.sep):
+        # A single prefix check (appending os.sep to both sides) covers both the
+        # exact-root and subdirectory cases without matching a sibling like
+        # "<root>-evil", and reads as an allowed-prefix path-injection barrier so
+        # `real` is only stat-ed once proven to sit at or under an allowed root.
+        if (real + os.sep).startswith(root + os.sep):
             if not os.path.isdir(real):
                 raise ValueError(f"not a directory: {path!r}")
             return real
