@@ -150,12 +150,15 @@ def resolve_within_roots(path: str) -> str:
     operation — defense in depth alongside session_manager.resolve_project_path,
     which resolves spoken folder references to an allowed path in the first place."""
     real = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
-    roots = allowed_project_roots()
-    if not any(real == r or real.startswith(r + os.sep) for r in roots):
-        raise ValueError(f"directory is outside the allowed project roots: {path!r}")
-    if not os.path.isdir(real):
-        raise ValueError(f"not a directory: {path!r}")
-    return real
+    for root in allowed_project_roots():
+        # Guard the filesystem access with an explicit containment check in the same
+        # scope (not a generator expression) so it reads as a path-injection barrier:
+        # `real` is only touched once proven to sit at or under an allowed root.
+        if real == root or real.startswith(root + os.sep):
+            if not os.path.isdir(real):
+                raise ValueError(f"not a directory: {path!r}")
+            return real
+    raise ValueError(f"directory is outside the allowed project roots: {path!r}")
 
 
 # On backend shutdown, whether to KILL interactive CLI sessions (the old

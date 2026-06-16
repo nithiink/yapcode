@@ -219,13 +219,6 @@ def list_projects() -> dict:
     return {"roots": roots, "projects": projects}
 
 
-def _under_root(p: str, roots: list[str]) -> bool:
-    # Fail closed: with no roots configured nothing is "under root". The directory
-    # sandbox is mandatory (see resolve_project_path), so this never returns True
-    # for an unconfigured server.
-    return bool(roots) and any(p == r or p.startswith(r + os.sep) for r in roots)
-
-
 def resolve_project_path(name: str) -> str:
     """Best-effort resolve a spoken/fuzzy folder reference to an allowed dir.
 
@@ -254,11 +247,16 @@ def resolve_project_path(name: str) -> str:
 
     def _contained(p: str) -> str | None:
         """Realpath `p`; return it iff it's an existing directory under an
-        allowed root. Otherwise None."""
+        allowed root. Otherwise None.
+
+        The containment check is an explicit in-scope guard (not a generator
+        expression) so the filesystem access reads as a path-injection barrier:
+        `real` is only stat-ed once proven to sit at or under an allowed root."""
         real = os.path.realpath(os.path.abspath(os.path.expanduser(p)))
-        if not os.path.isdir(real):
-            return None
-        return real if _under_root(real, roots) else None
+        for root in roots:
+            if real == root or real.startswith(root + os.sep):
+                return real if os.path.isdir(real) else None
+        return None
 
     # Vague / empty -> default to the primary project root.
     if not name or name.lower() in {"anywhere", "any", "home", "default"}:
