@@ -22,6 +22,7 @@ import termios
 import time
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -91,6 +92,20 @@ AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")  # default realtime 
 AZURE_DEPLOYMENTS: list[str] = [
     d.strip() for d in os.getenv("AZURE_OPENAI_DEPLOYMENTS", AZURE_DEPLOYMENT).split(",") if d.strip()
 ]
+
+
+def _assert_allowed_mint_host(url: str) -> None:
+    """Refuse to POST a realtime-token mint request anywhere but the known provider
+    endpoints. The mint URL is built from the request-selected provider, so pin it
+    to https + an allowlisted host before the outbound call (CodeQL py/full-ssrf)."""
+    parsed = urlsplit(url)
+    allowed = {"api.openai.com"}
+    if AZURE_ENDPOINT:
+        azure_host = urlsplit(AZURE_ENDPOINT).hostname
+        if azure_host:
+            allowed.add(azure_host)
+    if parsed.scheme != "https" or parsed.hostname not in allowed:
+        raise HTTPException(status_code=500, detail="realtime mint endpoint is not allowed")
 
 # Google Gemini Live (WebSocket). Native-audio preview is the cheapest viable model.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
@@ -404,6 +419,7 @@ async def create_session(req: SessionRequest) -> dict[str, Any]:
         }
 
     mint_url, headers, payload, webrtc_url, model = _mint_config(provider, req)
+    _assert_allowed_mint_host(mint_url)
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             resp = await client.post(mint_url, headers=headers, json=payload)
@@ -646,6 +662,9 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
+        # Unexpected (non-ValueError/KeyError) failures can carry internal detail —
+        # log the full traceback server-side but return a generic message so it is
+        # not exposed to the caller (CodeQL py/stack-trace-exposure).
         log.exception("tool error after %.2fs", time.monotonic() - start)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": "the tool failed unexpectedly — see the backend logs"}

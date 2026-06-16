@@ -133,6 +133,31 @@ SESSION_STORE_DIR: str = os.path.abspath(os.path.expanduser(
 ))
 
 
+def allowed_project_roots() -> list[str]:
+    """Realpath'd ALLOWED_PROJECT_ROOTS entries — the directory sandbox a session's
+    cwd must live under. Realpath (not just abspath) so symlinked roots compare
+    correctly against a realpath'd candidate."""
+    raw = os.getenv("ALLOWED_PROJECT_ROOTS", "")
+    return [os.path.realpath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+
+
+def resolve_within_roots(path: str) -> str:
+    """Realpath `path` and return it only if it is an existing directory contained
+    in one of `allowed_project_roots()`; raise ValueError otherwise.
+
+    Fails closed: with no roots configured nothing is allowed. This is the sink-side
+    guard the session runners apply to a cwd before using it in any filesystem
+    operation — defense in depth alongside session_manager.resolve_project_path,
+    which resolves spoken folder references to an allowed path in the first place."""
+    real = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+    roots = allowed_project_roots()
+    if not any(real == r or real.startswith(r + os.sep) for r in roots):
+        raise ValueError(f"directory is outside the allowed project roots: {path!r}")
+    if not os.path.isdir(real):
+        raise ValueError(f"not a directory: {path!r}")
+    return real
+
+
 # On backend shutdown, whether to KILL interactive CLI sessions (the old
 # destroy-on-exit behavior) or DETACH and leave them running so the next startup
 # can rehydrate them.

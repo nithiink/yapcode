@@ -24,6 +24,7 @@ from uuid import uuid4
 
 import claude_agent_sdk as sdk
 
+import config
 from permissions import classify, is_plan_file_write, mode_covers
 from event_log import log_event
 
@@ -195,9 +196,10 @@ class SDKClaudeRunner(ClaudeRunner):
     # --- lifecycle --------------------------------------------------------
 
     async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
-        cwd = os.path.abspath(os.path.expanduser(cwd))
-        if not os.path.isdir(cwd):
-            raise ValueError(f"not a directory: {cwd}")
+        # Re-assert the directory sandbox at the sink (defense in depth alongside
+        # session_manager.resolve_project_path) so a session can never start outside
+        # ALLOWED_PROJECT_ROOTS (CodeQL py/path-injection).
+        cwd = config.resolve_within_roots(cwd)
         handle = str(uuid4())
         s = _Session(handle, cwd, model or self._default_model)
         s.mode = normalize_mode(mode)
