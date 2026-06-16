@@ -441,6 +441,9 @@ export class GeminiSession implements VoiceSession {
       this.startKeepalive();
       this.onSetupComplete?.();  // unblocks a reconnect attempt waiting on setup
       emit({ type: "status", status: "Connected — start talking." });
+      // setupComplete is Gemini's genuine ready point — start() returns earlier,
+      // before the handshake finishes.
+      emit({ type: "ready" });
       emit({ type: "state", state: "listening" });
       return;
     }
