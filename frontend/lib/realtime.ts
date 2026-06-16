@@ -139,7 +139,15 @@ export class RealtimeSession implements VoiceSession {
 
     const dc = pc.createDataChannel("oai-events");
     this.dc = dc;
-    dc.addEventListener("open", () => this.configureSession());
+    // The data channel opens after start() resolves and ICE connects. Fire the
+    // ready/listening signals here, once configureSession has run — not at the
+    // end of start(), which runs before the channel is open.
+    dc.addEventListener("open", () => {
+      this.configureSession();
+      emit({ type: "status", status: "Connected — start talking." });
+      emit({ type: "ready" });
+      emit({ type: "state", state: "listening" });
+    });
     dc.addEventListener("message", (ev) => this.handleEvent(ev.data));
 
     const offer = await pc.createOffer();
@@ -156,9 +164,7 @@ export class RealtimeSession implements VoiceSession {
     });
     if (!sdpResp.ok) throw new Error(`SDP exchange failed: ${sdpResp.status} ${await sdpResp.text()}`);
     await pc.setRemoteDescription({ type: "answer", sdp: await sdpResp.text() });
-
-    emit({ type: "status", status: "Connected — start talking." });
-    emit({ type: "state", state: "listening" });
+    // ready/listening fire from the data channel `open` handler above, not here.
   }
 
   stop(): void {

@@ -34,6 +34,10 @@ export type VoiceUsage = {
 export type RealtimeEvent =
   | { type: "status"; status: string }
   | { type: "state"; state: VoiceState }
+  // Fired at the genuine ready point — the post-start() handshake completing
+  // (Gemini: setupComplete; OpenAI/Azure: data channel open + configured). The
+  // orb's mic-volume animation gates on this, since start() resolving is not ready.
+  | { type: "ready" }
   | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { type: "tool_call"; name: string; arguments?: unknown; result?: unknown; ok?: boolean }
   | { type: "usage"; usage: VoiceUsage }

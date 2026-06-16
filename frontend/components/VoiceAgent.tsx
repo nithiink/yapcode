@@ -7,6 +7,7 @@ import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSess
 import { INSTRUCTIONS } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
 import { scopedClearPending } from "@/lib/promptState";
+import { orbTarget, envelopeStep } from "@/lib/orb";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
 
@@ -499,10 +500,10 @@ export default function VoiceAgent() {
     new Map(),
   );
   const smoothedRef = useRef(0);
-  // Mirror `connected` into a ref so the rAF orb loop (a stable closure) can gate
-  // volume scaling without re-subscribing — the orb stays still until fully
-  // connected, even though the mic analyser attaches during the handshake.
-  const connectedRef = useRef(false);
+  // The rAF orb loop gates volume scaling on this ref: the orb stays still until
+  // the transport fires `ready` (see voice.ts), even though the mic analyser
+  // attaches earlier, during the connection handshake.
+  const readyRef = useRef(false);
   const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const txPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Cost-log connection identity & snapshot timer. connectionId persists for one
@@ -983,35 +984,19 @@ export default function VoiceAgent() {
     return () => window.removeEventListener("resize", updateConvFades);
   }, [updateConvFades]);
 
-  // Keep the orb-loop's connection gate current.
-  useEffect(() => {
-    connectedRef.current = connected;
-  }, [connected]);
-
   // Drive the orb's size from live audio volume. Both the user's mic and the
   // assistant's speech feed analysers on ONE shared AudioContext; each frame we
   // take the LOUDER of the two as the instantaneous target, then envelope-smooth
   // it (fast attack, slow release) so the orb rises lively and falls gently
   // instead of twitching frame-to-frame.
   const orbLoop = () => {
-    let target = 0;
-    // Only react to audio once fully connected; while connecting the analyser is
-    // already live (mic acquired) but the orb should stay at rest (target 0).
-    if (connectedRef.current) {
-      for (const { analyser, buf } of analysersRef.current.values()) {
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) {
-          const v = (buf[i] - 128) / 128;
-          sum += v * v;
-        }
-        const rms = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
-        if (rms > target) target = rms; // loudest source wins
-      }
+    const bufs: Uint8Array[] = [];
+    for (const { analyser, buf } of analysersRef.current.values()) {
+      analyser.getByteTimeDomainData(buf);
+      bufs.push(buf);
     }
-    // Envelope: snap up quickly, ease down slowly.
-    const k = target > smoothedRef.current ? 0.35 : 0.08;
-    smoothedRef.current += (target - smoothedRef.current) * k;
+    const target = orbTarget(readyRef.current, bufs);
+    smoothedRef.current = envelopeStep(smoothedRef.current, target);
     const amp = smoothedRef.current.toFixed(3);
     orbRef.current?.style.setProperty("--amp", amp);
     glowRef.current?.style.setProperty("--amp", amp);
@@ -1060,7 +1045,14 @@ export default function VoiceAgent() {
 
   const onEvent = (e: RealtimeEvent) => {
     if (e.type === "status") setStatus(e.status);
-    else if (e.type === "state") setVstate(e.state);
+    else if (e.type === "ready") readyRef.current = true; // open the orb gate
+    else if (e.type === "state") {
+      // Dropping back to "connecting" (a Gemini reconnect) means the session is
+      // no longer ready — close the orb gate until the next `ready` re-opens it,
+      // so the orb rests across the outage instead of scaling from mic input.
+      if (e.state === "connecting") readyRef.current = false;
+      setVstate(e.state);
+    }
     else if (e.type === "usage") setVoiceUsage(e.usage);
     else if (e.type === "error") {
       setStatus(`Error: ${e.message}`);
@@ -1172,6 +1164,7 @@ export default function VoiceAgent() {
 
   const connect = async () => {
     setVstate("connecting");
+    readyRef.current = false;
     // Fetch the session list fresh rather than trusting the 2s poll — on a cold
     // page load the polled state may still be empty, and baking a wrong "no
     // sessions" snapshot invites the model to start duplicates.
@@ -1252,6 +1245,7 @@ export default function VoiceAgent() {
 
     sessionRef.current?.stop();
     sessionRef.current = null;
+    readyRef.current = false;
     stopAnalyser();
     stopPolling();
     if (txPollRef.current) {
