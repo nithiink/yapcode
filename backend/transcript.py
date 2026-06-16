@@ -35,9 +35,8 @@ def read_timeline(handle: str, limit: int = 300) -> dict[str, Any]:
     """Return {found, events:[...]} where each event is one of:
     {kind:'user', text} | {kind:'assistant', text}
     | {kind:'tool', name, summary, risky} | {kind:'tool_result', ok, text}"""
-    # `handle` is interpolated into the transcript glob in _find, so require it to be
-    # a safe single path component first (CodeQL py/path-injection). Callers already
-    # pass a resolve_session'd handle; an invalid one simply has no transcript.
+    # `handle` is interpolated into the transcript glob in _find, so require a safe
+    # single path component first; an invalid handle simply has no transcript.
     from tmux_runner import validate_session_id
     try:
         handle = validate_session_id(handle)

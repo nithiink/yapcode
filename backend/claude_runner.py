@@ -196,9 +196,8 @@ class SDKClaudeRunner(ClaudeRunner):
     # --- lifecycle --------------------------------------------------------
 
     async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
-        # Re-assert the directory sandbox at the sink (defense in depth alongside
-        # session_manager.resolve_project_path) so a session can never start outside
-        # ALLOWED_PROJECT_ROOTS (CodeQL py/path-injection).
+        # Re-assert the directory sandbox at the sink so a session can't start outside
+        # ALLOWED_PROJECT_ROOTS even if a caller bypasses resolve_project_path.
         cwd = config.resolve_within_roots(cwd)
         handle = str(uuid4())
         s = _Session(handle, cwd, model or self._default_model)

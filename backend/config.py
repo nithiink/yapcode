@@ -151,14 +151,12 @@ def resolve_within_roots(path: str) -> str:
     which resolves spoken folder references to an allowed path in the first place."""
     real = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
     for root in allowed_project_roots():
-        # Bare `real.startswith(root)` (no `or`, receiver is the tracked value) so it
-        # reads as an allowed-prefix path-injection barrier: `real` is only stat-ed
-        # inside this branch. The tail check then rejects a sibling like "<root>-evil"
-        # whose name merely shares the prefix but isn't actually under the root.
+        # Kept as a bare `real.startswith(root)` (no `or`, no wrapping the receiver)
+        # so CodeQL recognizes it as an allowed-prefix path-injection barrier.
         if real.startswith(root):
             tail = real[len(root):]
             if tail and not tail.startswith(os.sep):
-                continue
+                continue  # sibling like "<root>-evil", not actually under the root
             if not os.path.isdir(real):
                 raise ValueError(f"not a directory: {path!r}")
             return real

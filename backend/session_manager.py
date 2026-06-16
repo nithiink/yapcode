@@ -247,20 +247,15 @@ def resolve_project_path(name: str) -> str:
 
     def _contained(p: str) -> str | None:
         """Realpath `p`; return it iff it's an existing directory under an
-        allowed root. Otherwise None.
-
-        The containment check is an explicit in-scope guard (not a generator
-        expression) so the filesystem access reads as a path-injection barrier:
-        `real` is only stat-ed once proven to sit at or under an allowed root."""
+        allowed root. Otherwise None."""
         real = os.path.realpath(os.path.abspath(os.path.expanduser(p)))
         for root in roots:
-            # Bare `real.startswith(root)` (no `or`, receiver is the tracked value)
-            # so it reads as an allowed-prefix path-injection barrier; the tail check
-            # then rejects a sibling like "<root>-evil" that only shares the prefix.
+            # Kept as a bare `real.startswith(root)` (no `or`, no wrapping the
+            # receiver) so CodeQL recognizes it as an allowed-prefix path barrier.
             if real.startswith(root):
                 tail = real[len(root):]
                 if tail and not tail.startswith(os.sep):
-                    continue
+                    continue  # sibling like "<root>-evil", not under the root
                 return real if os.path.isdir(real) else None
         return None
 

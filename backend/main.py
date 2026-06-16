@@ -97,7 +97,7 @@ AZURE_DEPLOYMENTS: list[str] = [
 def _assert_allowed_mint_host(url: str) -> None:
     """Refuse to POST a realtime-token mint request anywhere but the known provider
     endpoints. The mint URL is built from the request-selected provider, so pin it
-    to https + an allowlisted host before the outbound call (CodeQL py/full-ssrf)."""
+    to https + an allowlisted host before the outbound call."""
     parsed = urlsplit(url)
     allowed = {"api.openai.com"}
     if AZURE_ENDPOINT:
@@ -662,9 +662,8 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
-        # Unexpected (non-ValueError/KeyError) failures can carry internal detail —
-        # log the full traceback server-side but return a generic message so it is
-        # not exposed to the caller (CodeQL py/stack-trace-exposure).
+        # Unexpected failures can carry internal detail, so log the traceback
+        # server-side but return a generic message rather than str(exc).
         log.exception("tool error after %.2fs", time.monotonic() - start)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": "the tool failed unexpectedly — see the backend logs"}
