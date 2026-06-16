@@ -1911,6 +1911,8 @@ export default function VoiceAgent() {
         const liveSess = sessions.find((x) => x.handle === liveSession);
         const liveTmuxCmd =
           liveSess?.backend === "cli" ? `tmux attach -t vc_${liveSess.handle.slice(0, 8)}` : null;
+        const liveName =
+          liveSess?.name || liveSess?.cwd.split("/").pop() || liveSess?.handle.slice(0, 8) || "Live Claude CLI";
         return (
           <div
             className="tx-overlay"
@@ -1921,7 +1923,7 @@ export default function VoiceAgent() {
           >
             <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
               <div className="tx-modal-head">
-                <span>Live Claude CLI</span>
+                <span>{liveName}</span>
                 <div className="tx-head-actions">
                   {liveTmuxCmd && (
                     <button
