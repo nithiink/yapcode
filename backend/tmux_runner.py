@@ -531,6 +531,13 @@ class TmuxClaudeRunner(ClaudeRunner):
     # hang the voice agent forever.
     ADVANCE_HARD_TIMEOUT_S = float(os.getenv("VC_ADVANCE_TIMEOUT_S", "600"))
 
+    # How long set_mode will wait for the turn lock before giving up. A session
+    # that's mid-turn holds that lock for the whole turn (up to
+    # ADVANCE_HARD_TIMEOUT_S), and it can't change mode mid-turn anyway, so we
+    # fail fast rather than hang the voice agent. Idle/parked sessions release
+    # the lock immediately, so the common case is unaffected.
+    SET_MODE_LOCK_TIMEOUT_S = float(os.getenv("VC_SET_MODE_LOCK_TIMEOUT_S", "2"))
+
     async def advance(self, handle: str, message: str) -> AdvanceResult:
         s = self._get(handle)
         async with s._turn_lock:
@@ -968,7 +975,18 @@ class TmuxClaudeRunner(ClaudeRunner):
                 "a plan-approval dialog is open — answer it instead "
                 "(e.g. 'auto mode' to approve the plan and auto-apply, or "
                 "'manually approve edits')")
-        async with s._turn_lock:  # don't toggle mid-turn
+        # Cycling Shift+Tab must not interleave with a turn's keystrokes, hence
+        # the turn lock. But don't block on it: a busy session holds the lock for
+        # the whole turn, so a blind `async with` would freeze the voice agent
+        # for minutes. Fail fast instead — a running session can't switch mode
+        # mid-turn, and has no pending prompt to auto-approve.
+        try:
+            await asyncio.wait_for(
+                s._turn_lock.acquire(), timeout=self.SET_MODE_LOCK_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return (f"Session is busy working — mode unchanged (still {s.mode}). "
+                    "Claude's mode can't switch mid-turn; try again once it's idle.")
+        try:
             if not await self._alive(s):
                 raise ValueError("session is not running")
             current = self._detect_mode(await self._capture(s))
@@ -979,6 +997,8 @@ class TmuxClaudeRunner(ClaudeRunner):
             await asyncio.sleep(0.2)
             s.mode = self._detect_mode(await self._capture(s))
             self._write_mode(s)  # keep the hook's view of the mode in sync
+        finally:
+            s._turn_lock.release()
         # The mode file only affects FUTURE tool calls — a PreToolUse hook
         # already parked on a permission prompt keeps waiting for its decision
         # file. If the new mode would have auto-approved that tool, approve it
