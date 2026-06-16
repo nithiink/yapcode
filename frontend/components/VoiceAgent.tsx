@@ -1046,7 +1046,13 @@ export default function VoiceAgent() {
   const onEvent = (e: RealtimeEvent) => {
     if (e.type === "status") setStatus(e.status);
     else if (e.type === "ready") readyRef.current = true; // open the orb gate
-    else if (e.type === "state") setVstate(e.state);
+    else if (e.type === "state") {
+      // Dropping back to "connecting" (a Gemini reconnect) means the session is
+      // no longer ready — close the orb gate until the next `ready` re-opens it,
+      // so the orb rests across the outage instead of scaling from mic input.
+      if (e.state === "connecting") readyRef.current = false;
+      setVstate(e.state);
+    }
     else if (e.type === "usage") setVoiceUsage(e.usage);
     else if (e.type === "error") {
       setStatus(`Error: ${e.message}`);
