@@ -97,6 +97,10 @@ def _normalize_key(key: str) -> str:
     k = key.strip()
     if not k:
         raise ValueError("empty key name")
+    # Bound the length before the chord regex below: a crafted value like
+    # "C-" + "-C"*N otherwise drives its backtracking into superlinear time.
+    if len(k) > 32:
+        raise ValueError(f"key name too long: {key!r}")
     if len(k) == 1 or _CHORD_RE.match(k):
         return k  # single char or modifier chord — tmux handles directly
     if k in _TMUX_KEYS:
@@ -142,6 +146,10 @@ def validate_session_id(session_id: str) -> str:
 
 class _TmuxSession:
     def __init__(self, handle: str, cwd: str, model: str):
+        # handle becomes a directory name under CTRL_ROOT and is interpolated into
+        # the transcript glob, so it must be a safe single path component. Validating
+        # at the source keeps every downstream os.path.join(self.ctrl, ...) contained.
+        handle = validate_session_id(handle)
         self.handle = handle               # == --session-id, also handoff id
         self.cwd = cwd                      # realpath
         self.model = model
@@ -223,10 +231,9 @@ class TmuxClaudeRunner(ClaudeRunner):
             raise ValueError("tmux is not installed — required to run Claude sessions (macOS: brew install tmux; Debian/Ubuntu: sudo apt install tmux)")
         if shutil.which("claude") is None:
             raise ValueError("the `claude` CLI is not on PATH — install Claude Code (curl -fsSL https://claude.ai/install.sh | bash) and run `claude` once to sign in")
-        cwd = os.path.realpath(os.path.expanduser(cwd))
-        if not os.path.isdir(cwd):
-            raise ValueError(f"not a directory: {cwd}")
-        return cwd
+        # Re-assert the directory sandbox at the sink so a session can't be spawned
+        # outside ALLOWED_PROJECT_ROOTS even if a caller bypasses resolve_project_path.
+        return config.resolve_within_roots(cwd)
 
     async def _spawn(self, s: _TmuxSession, claude_id_arg: str) -> None:
         """Create the detached tmux pane running `claude` (with our hooks wired via

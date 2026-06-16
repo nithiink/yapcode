@@ -35,6 +35,13 @@ def read_timeline(handle: str, limit: int = 300) -> dict[str, Any]:
     """Return {found, events:[...]} where each event is one of:
     {kind:'user', text} | {kind:'assistant', text}
     | {kind:'tool', name, summary, risky} | {kind:'tool_result', ok, text}"""
+    # `handle` is interpolated into the transcript glob in _find, so require a safe
+    # single path component first; an invalid handle simply has no transcript.
+    from tmux_runner import validate_session_id
+    try:
+        handle = validate_session_id(handle)
+    except ValueError:
+        return {"found": False, "events": []}
     path = _find(handle)
     if not path or not os.path.exists(path):
         return {"found": False, "events": []}
