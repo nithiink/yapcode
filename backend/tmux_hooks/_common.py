@@ -12,10 +12,24 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 
 CTRL = os.environ.get("VC_CTRL", "")
+
+# tool_use_id is interpolated into a decisions/<id>.json path that reaches
+# open()/os.remove()/os.replace(). It is normally a CLI-minted `toolu_*` token,
+# but — like every other externally-derived path component in this codebase
+# (session_id/handle, validated via tmux_runner._SESSION_ID_RE) — it must be
+# validated so it can never escape the decisions/ dir via traversal or
+# separators. Same charset/length bound as validate_session_id.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def safe_id(value: str) -> str:
+    """Return value if it is a safe single path component, else 'none'."""
+    return value if value and _SAFE_ID_RE.match(value) else "none"
 
 
 def read_input() -> dict:
@@ -38,7 +52,7 @@ def append_event(event: dict) -> None:
 
 
 def decision_path(tool_use_id: str) -> str:
-    return os.path.join(CTRL, "decisions", f"{tool_use_id or 'none'}.json")
+    return os.path.join(CTRL, "decisions", f"{safe_id(tool_use_id)}.json")
 
 
 def read_mode() -> str:

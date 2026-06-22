@@ -37,16 +37,16 @@ if [ -z "${VC_AUTH_TOKEN:-}" ]; then
   exit 1
 fi
 
-# --reload: hot-reload on backend code changes. With detach-on-shutdown the
-# reload preserves running CLI sessions (they're rehydrated on the restart).
-# --reload-dir . limits the watcher to backend/ so the session store under the
-# project root (rapidly-written events.jsonl) never triggers reloads.
+# NOTE: unlike the localhost run.sh, this network-exposed (0.0.0.0) mode does
+# NOT enable uvicorn --reload. The autoreloader's file-watcher and child-process
+# supervisor are extra attack surface that shouldn't run on a LAN-reachable
+# service (and any writable-code scenario would become reload-triggered RCE).
 # --timeout-graceful-shutdown: long-lived SSE/poll/terminal-WS connections
-# never drain on their own, so a reload (or stop) would hang on "Waiting for
-# connections to close". 3s lets an in-flight request finish, then force-closes.
+# never drain on their own, so a stop would hang on "Waiting for connections to
+# close". 3s lets an in-flight request finish, then force-closes.
 exec .venv/bin/python -m uvicorn main:app \
   --host 0.0.0.0 --port 8000 \
   --ssl-keyfile ../frontend/.certs/dev-key.pem \
   --ssl-certfile ../frontend/.certs/dev-cert.pem \
   --log-level info \
-  --reload --reload-dir . --timeout-graceful-shutdown 3
+  --timeout-graceful-shutdown 3
