@@ -671,7 +671,12 @@ class TmuxClaudeRunner(ClaudeRunner):
                               "tool_use_id": s.pending_tool_use_id})
             return None
         allow = decision == "allow"
-        path = os.path.join(s.ctrl, "decisions", f"{s.pending_tool_use_id or 'none'}.json")
+        # pending_tool_use_id is interpolated into a filesystem path, so validate
+        # it as a safe single path component (matches the hook's _common.safe_id);
+        # fall back to 'none' rather than letting a malformed id escape decisions/.
+        tu_id = (s.pending_tool_use_id or "").strip()
+        decision_id = tu_id if _SESSION_ID_RE.match(tu_id) else "none"
+        path = os.path.join(s.ctrl, "decisions", f"{decision_id}.json")
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"decision": decision,
