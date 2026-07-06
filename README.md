@@ -15,7 +15,9 @@ watch (and take over by keyboard) at any time.
 
 [![Watch the demo](https://img.youtube.com/vi/PFuo4jB9LQg/maxresdefault.jpg)](https://www.youtube.com/watch?v=PFuo4jB9LQg)
 
-**▶ [Watch the demo](https://www.youtube.com/watch?v=PFuo4jB9LQg)**
+[![Watch the full demo](docs/demo/watch-demo-button.svg)](https://www.youtube.com/watch?v=PFuo4jB9LQg)
+
+*5.5 minutes, unedited: a spoken sentence becomes a real command, running hands-free.*
 
 ### What it does
 

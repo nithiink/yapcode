@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="68" viewBox="0 0 340 68" role="img" aria-label="Watch the full demo">
+  <title>Watch the full demo</title>
+  <defs>
+    <linearGradient id="btnFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF3B30"/>
+      <stop offset="0.45" stop-color="#FF1A1A"/>
+      <stop offset="1" stop-color="#CC0000"/>
+    </linearGradient>
+    <linearGradient id="glossTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- fake drop shadow: darker rect offset below the face -->
+  <rect x="4" y="7" width="332" height="57" rx="12" fill="#7A0000" opacity="0.55"/>
+  <rect x="4" y="5" width="332" height="57" rx="12" fill="#990000"/>
+
+  <!-- button face -->
+  <rect x="4" y="2" width="332" height="57" rx="12" fill="url(#btnFace)"/>
+
+  <!-- 1px inner top highlight line (gloss) -->
+  <rect x="6" y="4" width="328" height="2" rx="1" fill="#FFFFFF" opacity="0.45"/>
+  <!-- soft top gloss band -->
+  <rect x="8" y="4" width="324" height="26" rx="10" fill="url(#glossTop)"/>
+
+  <!-- play control: translucent white seat -->
+  <circle cx="42" cy="30.5" r="19" fill="#FFFFFF" opacity="0.16"/>
+  <circle cx="42" cy="30.5" r="19" fill="none" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="1.5"/>
+  <!-- solid white play triangle -->
+  <polygon points="35,20.5 35,40.5 53,30.5" fill="#FFFFFF"/>
+
+  <!-- label -->
+  <text x="203" y="38" text-anchor="middle" fill="#FFFFFF"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="21" font-weight="700" letter-spacing="0.2">Watch the full demo</text>
+</svg>
