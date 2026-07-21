@@ -690,6 +690,13 @@ class TmuxClaudeRunner(ClaudeRunner):
         (3. refine with Ultraplan on the web), or 'decline' (stay in plan mode,
         forward any feedback). Order matters: 'manually approve' contains an
         approve-word, so the more specific intents are checked first."""
+        # Fail closed: an explicit decline wins even when the phrase also contains
+        # an intent substring — "do not approve edits" / "don't switch to auto"
+        # must decline, not approve. decide_permission resolves genuine approvals
+        # ("manually approve edits") to "allow", so the intent paths below are
+        # unchanged; only true negations are short-circuited here.
+        if decide_permission(c) == "deny":
+            return "decline"
         if "manual" in c or "approve edit" in c or "each edit" in c or "review edit" in c:
             return "manual"
         if "ultraplan" in c or "on the web" in c or "refine on" in c:

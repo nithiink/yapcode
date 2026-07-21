@@ -589,6 +589,11 @@ class SDKClaudeRunner(ClaudeRunner):
         if tool_name == "ExitPlanMode":
             # Plan approval isn't binary: "auto"/"manual"/"proceed" leave plan
             # mode; anything else keeps planning and forwards the text as feedback.
+            # Fail closed: an explicit decline wins even when the phrase also
+            # contains an intent word — "do not proceed" / "don't approve" must
+            # NOT be read as approval just because they contain "proceed"/"approve".
+            if decide_permission(choice) == "deny":
+                return sdk.PermissionResultDeny(message=f"Keep planning: {choice}")
             if (decide_permission(choice) == "allow"
                     or any(w in c for w in ("auto", "manual", "proceed", "approve"))):
                 return sdk.PermissionResultAllow()
