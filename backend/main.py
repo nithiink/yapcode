@@ -209,6 +209,11 @@ async def require_auth(request: Request) -> None:
     # malicious page could otherwise fire a side-effecting "simple" request from
     # a loopback-trusted browser. The same-origin Next proxy and native clients
     # send no Origin; only real cross-origin browser requests carry one.
+    # Host-header allowlist: defeats DNS rebinding against the loopback-trusted
+    # backend. Enforced unconditionally (not just when an Origin is present), since
+    # a same-origin GET/EventSource — the rebinding vector — carries no Origin at all.
+    if not config.host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="host not allowed")
     origin = request.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
@@ -222,6 +227,8 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     """Authorize a WebSocket handshake (CORS middleware does not apply to WS).
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
+    if not config.host_allowed(ws.headers.get("host")):
+        return False, 4403  # forbidden host (DNS-rebinding defense)
     origin = ws.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         return False, 4403  # forbidden origin
