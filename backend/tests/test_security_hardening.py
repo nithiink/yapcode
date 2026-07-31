@@ -98,5 +98,31 @@ class MintHostAllowlist(unittest.TestCase):
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
 
 
+class HostHeaderAllowlist(unittest.TestCase):
+    """DNS-rebinding defense: only loopback / private-LAN Host headers pass."""
+
+    def test_loopback_hosts_allowed(self):
+        for good in ["localhost", "localhost:8000", "127.0.0.1:8000",
+                     "[::1]:8000", "::1"]:
+            self.assertTrue(config.host_allowed(good), good)
+
+    def test_private_lan_hosts_allowed(self):
+        for good in ["192.168.1.5:8000", "10.0.0.7:3000", "172.16.0.9:8000"]:
+            self.assertTrue(config.host_allowed(good), good)
+
+    def test_rebound_public_name_rejected(self):
+        for bad in ["evil.com", "evil.com:8000", "attacker.example:8000",
+                    "8.8.8.8:8000", "169.254.169.254"]:
+            self.assertFalse(config.host_allowed(bad), bad)
+
+    def test_missing_host_rejected(self):
+        self.assertFalse(config.host_allowed(None))
+        self.assertFalse(config.host_allowed(""))
+
+    def test_trailing_suffix_cannot_sneak_past(self):
+        self.assertFalse(config.host_allowed("127.0.0.1:8000.evil.com"))
+        self.assertFalse(config.host_allowed("localhost:8000\nevil.com"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -253,3 +253,48 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+# --- Host-header allowlist (DNS-rebinding defense) --------------------------
+# The loopback trust in _access_ok (localhost mode, no token) rests on the socket
+# peer being 127.0.0.1. That alone does NOT stop DNS rebinding: a remote page at
+# http://evil.com:8000 whose name the attacker re-points to 127.0.0.1 reaches the
+# backend over a loopback socket, and same-origin GET/EventSource requests carry
+# no Origin header, so origin_allowed() is never consulted. Validating the Host
+# header closes that hole — the browser sets Host from the connection's name and
+# page JS cannot forge it (Host is a forbidden header), so a rebound public name
+# is rejected while genuine localhost / private-LAN access is allowed.
+# Same private ranges as the Origin regex; scheme-less, host[:port] only.
+_DEFAULT_HOST_REGEX = (
+    r"^("
+    r"localhost|127\.0\.0\.1|\[::1\]|::1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(:\d{1,5})?$"
+)
+# Override/disable the regex with VC_ALLOWED_HOST_REGEX (set empty to disable and
+# rely solely on the exact VC_ALLOWED_HOSTS list — useful for a custom hostname).
+_host_regex_raw = os.getenv("VC_ALLOWED_HOST_REGEX")
+ALLOWED_HOST_REGEX: str | None = (
+    _DEFAULT_HOST_REGEX if _host_regex_raw is None else (_host_regex_raw.strip() or None)
+)
+_HOST_RE = re.compile(ALLOWED_HOST_REGEX) if ALLOWED_HOST_REGEX else None
+# Extra exact Host header values (host or host:port), comma-separated. Mirrors
+# VC_ALLOWED_ORIGINS for deployments reached via a custom DNS name.
+ALLOWED_HOSTS: list[str] = [
+    h.strip().lower() for h in (os.getenv("VC_ALLOWED_HOSTS") or "").split(",") if h.strip()
+]
+
+
+def host_allowed(host: str | None) -> bool:
+    """Whether an HTTP/WS Host header is permitted. Rejects a missing/empty Host
+    and any name outside the loopback / private-LAN allowlist (plus VC_ALLOWED_HOSTS),
+    defeating DNS-rebinding attacks against the loopback-trusted backend."""
+    if not host:
+        return False
+    h = host.strip().lower()
+    if h in ALLOWED_HOSTS:
+        return True
+    # fullmatch anchors both ends so a trailing suffix can't slip past.
+    return bool(_HOST_RE and _HOST_RE.fullmatch(h))
