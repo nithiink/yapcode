@@ -248,7 +248,11 @@ class FakeOpenCode:
         self.state = FakeOpenCodeState()
         handler = type("_H", (_Handler,), {"state": self.state})
         self._srv = _FastBindHTTPServer(("127.0.0.1", 0), handler)
-        self._thread = threading.Thread(target=self._srv.serve_forever, daemon=True)
+        # poll_interval is what shutdown() waits on, and __exit__ blocks the
+        # event loop for it. The 0.5s default showed up as an asyncio
+        # slow-callback warning per fake-using test, plus real wall clock.
+        self._thread = threading.Thread(
+            target=lambda: self._srv.serve_forever(poll_interval=0.01), daemon=True)
 
     @property
     def url(self) -> str:
