@@ -437,6 +437,11 @@ body {
 .htag.backend { color: var(--mut); }
 .htag.claude { color: var(--acc); }
 .htag.user { color: var(--good); }
+/* Yuri's domain events, mirrored into the Activity feed by
+   yuri.events.bus.bridge_to_event_log — those rows are "yuri" → "ui", and
+   both halves of the hop need a colour or the row renders uncoloured. */
+.htag.yuri { color: var(--warn); }
+.htag.ui { color: var(--dim); }
 .logrow .lk { color: var(--dim); flex: none; min-width: 74px; }
 .logrow .lsess { color: var(--mut); flex: none; }
 .logrow .lsum { color: var(--ink); flex: none; }
