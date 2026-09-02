@@ -1,8 +1,13 @@
-# Yuri foundation — follow-ups and decisions
+# Yuri — follow-ups and decisions
 
-Carried out of the phase 1-3 build (merged as `4d47cb8`). Every item here was
-found by review, judged non-blocking, and deliberately left. Nothing here is
-a known-broken flow — the suite is green and the app runs.
+Everything here was found by review, judged non-blocking, and deliberately
+left. Nothing here is a known-broken flow — the suite is green and the app
+runs. Items are grouped by the phase that carried them:
+
+* **Phase 4 (narration)** — event-driven narration, the quiet/normal/verbose
+  mode, the mission voice commands, and one home for agent selection.
+* **Phase 1-3 (foundation)** — the domain, store, providers and services build
+  (merged as `4d47cb8`).
 
 ## Recommended next fixes
 
@@ -24,7 +29,70 @@ the de-dupe belongs in `_touch` alongside the revive path.
 **`ClaudeRunner._notify` coverage is one test deep.** The "an observer bug must
 never break a turn" guarantee is the safety net under the whole event pipeline.
 
-## Known gaps that matter for phase 4 (narration)
+## Carried out of phase 4 (narration)
+
+**The narration invariant is "one owner per FACT", not per event type.** This
+was the whole-branch review's central finding, and it is now implemented (see
+`yuri/narration/policy.py`'s module docstring, which carries the derivation).
+The event-type ownership table is still there and still necessary — it is just
+not sufficient, because two different types can carry the same fact
+(`_fail_if_alone` derives a mission failure from an agent error with the same
+reason string) and because a voice tool's own spoken result is a third carrier
+the table never modelled. Anyone adding a mission-level event should decide who
+owns the FACT before adding a row to the table.
+
+**`session.lost`'s narration is unreachable in practice.** `rehydrate()` is the
+only publisher and it runs at startup, before any voice session can be
+connected; by the time one connects the event is history, and the spoken gate's
+seed correctly suppresses it. The line is written, tested and honest — it just
+has no live path today. It becomes reachable the moment anything detects a lost
+session outside startup.
+
+**`mode_reader` reads the module-global `container()`.** `narration_mode()`
+resolves the process-wide container rather than the `store` its own
+SessionService was constructed with. Harmless while there is exactly one
+container per process (and `test_container` sets it), but it is a hidden global
+in an otherwise injected service.
+
+**`"X" is paused."` drops the payload's `reason`.** The status-changed payload
+carries why, and the `failed` branch reads it; `paused` and `cancelled` do not.
+Nothing is wrong today — the only system-driven pause is a closed session,
+which is now suppressed as a duplicate anyway — but a ui/api pause says less
+than it knows.
+
+**`narrationBusy` has no timeout.** The mode toggle disables itself for the
+duration of the PUT, exactly as the per-session mode buttons do. A PUT that
+never settles leaves the control disabled until the page is reloaded.
+
+**No component-level test for "the prompt card is still set when narration is
+suppressed".** `handleClaudeResult` sets the UI card and injects the line
+independently, on purpose — quiet mode must still show a permission prompt on
+screen. That independence is asserted at the service level (quiet suppresses
+the line) but not through the component.
+
+**`SCAN_MAX` is a recall ceiling on mission resolution.** `resolve()` scans the
+500 most recently updated missions for an exact-title or id-prefix match. A
+full id still resolves by primary key, but a mission older than that by title
+does not. Fine for spoken references; wrong if the tool ever becomes a search.
+
+**`resolve()`'s docstring "Order:" line omits the deictic branch.** The code
+runs the deictic check FIRST (yielding to a real title), which the paragraph
+below the list explains — but the ordered list itself starts at "exact id".
+
+**`AgentRouter`'s final `registry.get` can raise on a misconfigured
+container.** The router is hardened against an unknown agent everywhere the
+caller supplies the id; the last lookup trusts its own container's default.
+
+**`_frame` (yuri/api/routes.py) has no try/except.** The review judged no
+exception currently reachable — `line_for` is pure, every field goes through
+`_clip`, and `json.dumps(default=str)` absorbs odd payload values. It is worth
+noting anyway because it is the one place a narration bug stops being a wrong
+line and becomes a dead transport: a raise inside the generator kills the SSE
+stream for that client, and the frontend's EventSource would reconnect into the
+same failure. A `try/except` that logs and skips the frame would make a
+narration bug degrade instead of disconnect.
+
+## Known gaps carried out of phase 1-3
 
 **The tmux runner notifies only from its hook path.** Three completion paths
 now notify, but a multi-question `AskUserQuestion` still emits an event only
@@ -47,6 +115,20 @@ per-session cost still renders in the session list.
 
 ## Deliberate decisions worth knowing
 
+- **There is no orchestrator.** Phase 4 ruled one out: missions are created
+  implicitly by `SessionService.start`/`adopt` and driven by `_mission_to`
+  (derived from session events) plus `MissionService.pause/resume/cancel`. The
+  docstrings in `domain/mission.py` and `services/missions.py` that promised
+  one were corrected rather than left as a forward reference.
+- **Narration wording is server-side** (spec §4): it is testable in
+  `yuri/narration/service.py`, identical for any future non-browser surface,
+  and the two load-bearing instructions the old frontend injections carried
+  travel with the text. The frontend's whole rule is "if a carrier attached a
+  line, inject it".
+- **A bounded injection queue drops the OLDEST line.** Every queued line is
+  already in the model's conversation via its own `conversation.item.create`,
+  so a dropped line stays context and only loses its own spoken response;
+  falling further behind for the rest of a long turn is worse.
 - **Unset `ALLOWED_PROJECT_ROOTS` falls back to `~/Yuri` alone.** No escape (the
   home is realpath-contained) and `yuri doctor` now fails loudly on it.
 - **`check_same_thread=False` on store connections.** Required so shutdown can
@@ -66,11 +148,16 @@ per-session cost still renders in the session list.
 ## Verification status
 
 The live Gemini voice round-trip (connect, start a session, close it) was
-confirmed working by the user on 2026-09-02 — plan task 21's voice leg is
+confirmed working by the user on 2026-09-02 — the phase 1-3 voice leg is
 verified. Azure and OpenAI realtime remain unchanged code covered only by the
 existing mint tests; neither has been exercised live.
 
-## Smaller items
+Phase 4 is verified by the suite and by a `/health` + `/yuri/narration` boot,
+with the home both present and absent. The narration flows themselves —
+mission lines arriving over SSE mid-conversation, the mode toggle, the mission
+voice commands — have not been exercised in a live voice round-trip.
+
+## Smaller items (phase 1-3 tasks)
 
 - Task 1 coverage ceiling — only brief-prescribed cases (no extra EDIT_TOOLS/classify members)
 - Task 2 two assertions (test_fuzzy_name_case_insensitive, test_symlinked_root_resolves) pin macOS case-insensitive-FS casing; would fail on case-sensitive Linux CI. Fix = one comment or os.path.samefile. Reviewer verified the behavior is real, not a masked regression.
