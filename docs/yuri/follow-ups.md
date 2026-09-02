@@ -63,11 +63,12 @@ per-session cost still renders in the session list.
 - **`ProjectService.list()` returns more per-project keys than the old
   `list_projects`** (`registered`, `id`, `slug`, `kind`, `default_agent`). Additive.
 
-## Not yet verified
+## Verification status
 
-A live voice round-trip. Azure and OpenAI realtime are unchanged code covered
-only by the existing mint tests; Gemini Live is the path in use and needs a
-human at a microphone (plan task 21).
+The live Gemini voice round-trip (connect, start a session, close it) was
+confirmed working by the user on 2026-09-02 — plan task 21's voice leg is
+verified. Azure and OpenAI realtime remain unchanged code covered only by the
+existing mint tests; neither has been exercised live.
 
 ## Smaller items
 
