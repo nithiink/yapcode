@@ -13,6 +13,7 @@ import json
 import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlsplit
 from typing import Any
 
 
@@ -129,13 +130,32 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    @staticmethod
+    def _int_param(query: dict[str, str], name: str, default: int) -> int | None:
+        """An absent or blank param means `default`; garbage means None (-> 400).
+
+        A malformed value is the caller's bug, so it has to be loud -- but loud
+        as a 400 the client raises on, not as a traceback from a daemon thread
+        that would break the suite's pristine output.
+        """
+        raw = query.get(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
     # --- routes ---------------------------------------------------------
     def do_GET(self):                       # noqa: N802
         if not self._pre("GET"):
             return
-        s, path = self.state, self.path.split("?")[0]
-        query = dict(p.split("=", 1) for p in (self.path.split("?")[1].split("&")
-                     if "?" in self.path and self.path.split("?")[1] else []))
+        split = urlsplit(self.path)
+        s, path = self.state, split.path
+        # keep_blank_values so `?after=` (what httpx emits for None or "") parses
+        # to "" rather than vanishing -- _int_param below turns it into the default.
+        query = {k: v[-1] for k, v in
+                 parse_qs(split.query, keep_blank_values=True).items()}
         if path == "/api/session":
             return self._data(list(s.sessions.values()))
         parts = path.strip("/").split("/")
@@ -147,7 +167,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not tail:
                 return self._data(s.sessions[sid])
             if tail == ["history"]:
-                after = int(query.get("after", 0))
+                after = self._int_param(query, "after", 0)
+                if after is None:
+                    return self._bad("Expected a number", "after")
                 return self._data([e for e in s.events.get(sid, [])
                                    if e["durable"]["seq"] > after])
             if tail == ["message"]:

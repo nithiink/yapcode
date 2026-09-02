@@ -107,6 +107,34 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await c.close()
 
+    async def test_a_blank_cursor_param_is_treated_as_no_cursor(self):
+        """httpx renders both None and "" as `after=`, and an unset cursor on the
+        first poll is naturally None -- so a blank value has to mean "from the
+        start", not crash the handler thread."""
+        with FakeOpenCode() as fake:
+            sid = fake.state.new_session()
+            fake.state.push_event(sid, "a")
+            fake.state.push_event(sid, "b")
+            c = OpenCodeClient(fake.url)
+            try:
+                for blank in (None, ""):
+                    got = await c.get(f"/api/session/{sid}/history", after=blank)
+                    self.assertEqual(len(got), 2, f"after={blank!r}")
+            finally:
+                await c.close()
+
+    async def test_a_malformed_cursor_param_is_a_clean_request_error(self):
+        """Loud as a 400 the caller raises on -- not as a daemon-thread traceback,
+        which would break the suite's pristine output."""
+        with FakeOpenCode() as fake:
+            sid = fake.state.new_session()
+            c = OpenCodeClient(fake.url)
+            try:
+                with self.assertRaises(OpenCodeRequestError):
+                    await c.get(f"/api/session/{sid}/history", after="abc")
+            finally:
+                await c.close()
+
     async def test_base_url_trailing_slash_is_normalised(self):
         with FakeOpenCode() as fake:
             c = OpenCodeClient(fake.url + "/")
