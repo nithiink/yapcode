@@ -1,7 +1,13 @@
 // Run: npm test (node --test)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { NARRATION_MODES, createSpokenGate, isNarrationMode, narrationOf } from "./narration.ts";
+import {
+  NARRATION_MODES,
+  NARRATION_REPLAY_LIMIT,
+  createSpokenGate,
+  isNarrationMode,
+  narrationOf,
+} from "./narration.ts";
 
 test("a frame with a narration line yields it", () => {
   assert.equal(narrationOf({ narration: 'Starting "Fix billing".' }), 'Starting "Fix billing".');
@@ -91,6 +97,31 @@ test("a blank frame is dropped and never reaches injectUpdate", () => {
   assert.equal(gate.lineFor({ id: "e1" }), null);
   assert.equal(gate.lineFor(null), null);
   assert.equal(gate.lineFor("not an object"), null);
+});
+
+test("the replay limit is inside the backend's clamp and wide enough to be worth it", () => {
+  // _clamp_limit is max(1, min(limit, 1000)): outside that the backend silently
+  // substitutes its own number and the seed would no longer cover the replay.
+  assert.ok(Number.isInteger(NARRATION_REPLAY_LIMIT));
+  assert.ok(NARRATION_REPLAY_LIMIT >= 1 && NARRATION_REPLAY_LIMIT <= 1000);
+  // > 1, or a reconnect narrates nothing that happened during the blip.
+  assert.ok(NARRATION_REPLAY_LIMIT > 1);
+});
+
+test("a full replay is silent when the seed covered it, and the gap after it is not", () => {
+  // The connect sequence: seed the newest NARRATION_REPLAY_LIMIT ids, then the
+  // stream replays those same events. Nothing may be spoken. Events that
+  // happened during a later blip are NOT in the seed, so they must speak —
+  // that is the dividend the wider replay buys.
+  const gate = createSpokenGate();
+  const history = Array.from({ length: NARRATION_REPLAY_LIMIT }, (_, i) => `h${i}`);
+  gate.seed(history);
+  for (const id of history) {
+    assert.equal(gate.lineFor({ id, narration: `stale ${id}` }), null, `${id} spoke`);
+  }
+  assert.equal(gate.lineFor({ id: "gap1", narration: "Missed during a blip." }), "Missed during a blip.");
+  // ...and a reconnect that replays that same gap event stays silent.
+  assert.equal(gate.lineFor({ id: "gap1", narration: "Missed during a blip." }), null);
 });
 
 test("the seen set is capped, and the newest ids survive eviction", () => {

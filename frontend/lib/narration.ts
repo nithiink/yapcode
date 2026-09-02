@@ -31,6 +31,26 @@ export function narrationOf(x: unknown): string | null {
 /** A frame off /yuri/events/stream: a serialized YuriEvent plus the line. */
 export type NarratedEvent = NarratedFrame & { id?: unknown };
 
+/**
+ * How many events the narration stream replays, and how many ids are seeded
+ * into the gate before it opens.
+ *
+ * ONE constant for BOTH numbers, deliberately. The seed is what makes the
+ * replay silent, so the two must always match: raise the stream's limit
+ * without the seed's and every replayed-but-unseeded event is spoken as news
+ * at connect — the exact failure the gate exists to prevent. Callers must use
+ * this for both `/yuri/events?limit=` and `/yuri/events/stream?limit=`.
+ *
+ * 50 rather than 1: the stream has no Last-Event-ID resume (`_frame` emits no
+ * `id:` line), so after an EventSource blip everything that happened in the
+ * gap would otherwise never be narrated. A replay wide enough to cover a
+ * typical blip closes that gap, and the gate dedupes the overlap for free.
+ * Well inside the backend's own bounds — `_clamp_limit` is
+ * `max(1, min(limit, 1000))` — and comfortably under the gate's cap, so the
+ * replayed ids can never be evicted before they are replayed.
+ */
+export const NARRATION_REPLAY_LIMIT = 50;
+
 export type SpokenGate = {
   /** Mark ids as already delivered without speaking them. */
   seed(ids: Iterable<unknown>): void;

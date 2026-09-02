@@ -9,10 +9,12 @@ import { authHeaders, withAuthParam } from "@/lib/auth";
 import { scopedClearPending } from "@/lib/promptState";
 import {
   NARRATION_MODES,
+  NARRATION_REPLAY_LIMIT,
   createSpokenGate,
   isNarrationMode,
   narrationOf,
   type NarrationMode,
+  type SpokenGate,
 } from "@/lib/narration";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
@@ -510,8 +512,11 @@ export default function VoiceAgent() {
   // panel's /debug/stream above: different endpoint, different payload, and it
   // only lives while a voice session is connected.
   const narrationEsRef = useRef<EventSource | null>(null);
-  // Held across reconnects on purpose — see createSpokenGate's comment.
-  const narrationGateRef = useRef(createSpokenGate());
+  // Held across reconnects on purpose — see createSpokenGate's comment. Built
+  // lazily at first use: this component re-renders on every debug event and
+  // volume tick, and useRef(createSpokenGate()) would allocate a gate on each
+  // one only to throw it away.
+  const narrationGateRef = useRef<SpokenGate | null>(null);
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -876,9 +881,13 @@ export default function VoiceAgent() {
     }
   }, []);
 
+  // On mount, and again on every connect/disconnect. The retry matters: if the
+  // backend was down at page load (it answers 503 while its home dir is
+  // unavailable) a mount-only read would leave the control showing no
+  // selection forever, even after the backend came back.
   useEffect(() => {
     refreshNarrationMode();
-  }, [refreshNarrationMode]);
+  }, [refreshNarrationMode, connected]);
 
   const changeNarrationMode = async (mode: NarrationMode) => {
     const prev = narrationMode;
@@ -1013,16 +1022,17 @@ export default function VoiceAgent() {
   useEffect(() => {
     if (!connected) return;
     let cancelled = false;
-    const gate = narrationGateRef.current;
+    const gate = (narrationGateRef.current ??= createSpokenGate());
     (async () => {
-      // The stream ALWAYS replays its newest events, and `limit` is clamped to
-      // a minimum of 1 server-side, so there is no way to ask for no replay.
-      // Seeding the gate with the newest event id is what makes that replay
-      // silent — without it, connecting would re-speak the last thing that
-      // happened, possibly from hours ago. Best-effort: if this read fails the
-      // cost is one stale line, not a broken stream.
+      // The stream ALWAYS replays its newest events — `limit` is clamped to a
+      // minimum of 1 server-side, so there is no way to ask for no replay.
+      // Seeding the gate with those same ids is what makes the replay silent;
+      // without it, connecting would re-speak whatever happened last, possibly
+      // hours ago. BOTH limits are NARRATION_REPLAY_LIMIT and must stay equal
+      // (see its comment). Best-effort: if this read fails the cost is a few
+      // stale lines, not a broken stream.
       try {
-        const r = await fetch("/api/yuri/events?limit=1", { headers: authHeaders() });
+        const r = await fetch(`/api/yuri/events?limit=${NARRATION_REPLAY_LIMIT}`, { headers: authHeaders() });
         if (r.ok) {
           const d = await r.json();
           gate.seed((Array.isArray(d?.events) ? d.events : []).map((e: any) => e?.id));
@@ -1031,7 +1041,9 @@ export default function VoiceAgent() {
         /* nothing to seed; the gate still dedupes every later reconnect */
       }
       if (cancelled) return; // disconnected while we were seeding
-      const es = new EventSource(withAuthParam(`${backendBase()}/yuri/events/stream?limit=1`));
+      const es = new EventSource(
+        withAuthParam(`${backendBase()}/yuri/events/stream?limit=${NARRATION_REPLAY_LIMIT}`),
+      );
       narrationEsRef.current = es;
       es.onmessage = (m) => {
         try {
