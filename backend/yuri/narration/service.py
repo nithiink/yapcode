@@ -79,9 +79,12 @@ class NarrationService:
             return f'Starting "{title}"{where}.'
 
         if t == "mission.status_changed":
-            # One owner per FACT: "voice" was reported by the tool result,
-            # "system" is derived from a session event poll already spoke.
-            if not mission_status_change_is_news(p.get("by")):
+            # One owner per FACT: "voice" was reported by the tool result, and a
+            # `derived` system change restates a session event poll already
+            # spoke. An UNMARKED system change is original — start()'s
+            # provider-failure path has no session row, so nothing else can
+            # report it (policy.py).
+            if not mission_status_change_is_news(p.get("by"), p.get("derived")):
                 return None
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "that mission"
             to = p.get("to")

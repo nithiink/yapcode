@@ -68,15 +68,29 @@ class Lines(unittest.TestCase):
                                          {"title": "payments", "from": "running",
                                           "to": to, "by": "voice"}), to)
 
-    def test_a_system_status_change_is_never_narrated(self):
-        # Derived from a session-level event poll owns and already spoke:
-        # failed <- agent.error (same reason string), paused <- session closed.
+    def test_a_derived_system_status_change_is_never_narrated(self):
+        # `derived` is _mission_to's marker: this restates a session-level event
+        # poll owns and already spoke — failed <- agent.error (same reason
+        # string), paused <- the session the user closed.
         self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
                                      {"title": "billing", "from": "running", "to": "failed",
-                                      "by": "system", "reason": "tmux pane died"}))
+                                      "by": "system", "reason": "tmux pane died",
+                                      "derived": True}))
         self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
                                      {"title": "billing", "from": "running", "to": "paused",
-                                      "by": "system", "reason": "session closed"}))
+                                      "by": "system", "reason": "session closed",
+                                      "derived": True}))
+
+    def test_an_unmarked_system_failure_is_spoken(self):
+        # start()'s provider-failure path: no session row, so no poll can ever
+        # report it, and the agent.error beside it is poll-owned (silent on the
+        # stream). Suppressing this would leave a failed start unnarrated.
+        line = self._line(EventType.MISSION_STATUS_CHANGED,
+                          {"title": "billing", "from": "running", "to": "failed",
+                           "by": "system", "reason": "Claude Code unavailable: boom"})
+        self.assertIn("billing", line)
+        self.assertIn("failed", line)
+        self.assertIn("Claude Code unavailable: boom", line)
 
     def test_a_ui_status_change_is_still_narrated(self):
         line = self._line(EventType.MISSION_STATUS_CHANGED,

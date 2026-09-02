@@ -118,6 +118,26 @@ class OneOwnerPerFact(unittest.IsolatedAsyncioTestCase):
         # Silence is not because nothing happened: the mission really failed.
         self.assertEqual([m.status for m in self.c.store.missions.list()], ["failed"])
 
+    async def test_a_failed_start_is_spoken_exactly_once(self):
+        """`start`'s provider-failure path calls set_status directly, so it is
+        NOT one of _mission_to's restatements: no session row was ever
+        inserted, so no poll can report it, and the agent.error beside it is
+        poll-owned (silent on the stream). Nobody else speaks for this — if the
+        stream stays silent too, a mission failing to start is unnarrated."""
+        q = self.c.bus.subscribe()
+
+        async def boom(*a, **kw):
+            raise RuntimeError("claude is not installed")
+        with mock.patch.object(self.fake, "create_session", boom):
+            with self.assertRaises(RuntimeError):
+                await self.c.sessions.start("proj", name="billing")
+        spoken = self._stream_lines(q)
+        self.assertEqual(len(spoken), 1, spoken)
+        self.assertIn("billing", spoken[0])
+        self.assertIn("failed", spoken[0])
+        self.assertIn("claude is not installed", spoken[0])
+        self.assertEqual([m.status for m in self.c.store.missions.list()], ["failed"])
+
     async def test_start_session_speaks_only_its_own_result(self):
         q = self.c.bus.subscribe()
         res = await tools.dispatch_tool("start_session", {"project_path": "proj", "name": "billing"})

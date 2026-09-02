@@ -70,9 +70,26 @@ class OneOwnerPerFact(unittest.TestCase):
         self.assertFalse(policy.mission_status_change_is_news("voice"))
         self.assertFalse(policy.mission_created_is_news("voice"))
 
-    def test_a_system_status_change_is_derived_and_silent(self):
-        # failed ← agent.error, paused ← the session the user closed.
-        self.assertFalse(policy.mission_status_change_is_news("system"))
+    def test_a_MARKED_system_status_change_is_derived_and_silent(self):
+        # failed ← agent.error, paused ← the session the user closed. Only
+        # _mission_to sets `derived`, and only because those are restatements.
+        self.assertFalse(policy.mission_status_change_is_news("system", True))
+
+    def test_an_UNMARKED_system_status_change_is_original_news(self):
+        # start()'s provider-failure path calls set_status directly: no session
+        # row exists, so no poll can report it, and the agent.error beside it is
+        # poll-owned (silent on the stream). If this were suppressed, a mission
+        # failing to start would be narrated by nobody.
+        self.assertTrue(policy.mission_status_change_is_news("system"))
+        self.assertTrue(policy.mission_status_change_is_news("system", False))
+        self.assertTrue(policy.mission_status_change_is_news("system", None))
+
+    def test_the_marker_never_silences_a_non_system_origin(self):
+        # `derived` is only meaningful for a system change; a ui/api change is
+        # news whatever the marker says, and voice is silent either way.
+        for d in (True, False):
+            self.assertTrue(policy.mission_status_change_is_news("ui", d), d)
+            self.assertFalse(policy.mission_status_change_is_news("voice", d), d)
 
     def test_a_system_or_handoff_mission_is_still_news(self):
         # Nobody spoke for these: Yuri started work herself, or picked up a
@@ -88,12 +105,13 @@ class OneOwnerPerFact(unittest.TestCase):
     def test_an_unknown_or_missing_origin_fails_open(self):
         # A rare repeat beats a silently swallowed line.
         for by in (None, "", "   ", 7, {}, "orchestrator"):
+            self.assertTrue(policy.mission_status_change_is_news(by, True), repr(by))
             self.assertTrue(policy.mission_status_change_is_news(by), repr(by))
             self.assertTrue(policy.mission_created_is_news(by), repr(by))
 
     def test_origin_is_case_and_space_insensitive(self):
         self.assertEqual(policy.origin("  VOICE "), "voice")
-        self.assertFalse(policy.mission_status_change_is_news(" System "))
+        self.assertFalse(policy.mission_status_change_is_news(" System ", True))
 
 
 class ModeFilter(unittest.TestCase):

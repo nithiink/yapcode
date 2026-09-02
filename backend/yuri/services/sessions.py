@@ -665,10 +665,19 @@ class SessionService:
         self.journal.append(f"turn completed in '{row.name or handle[:8]}': {' '.join((text or '').split())[:160]}")
 
     def _mission_to(self, row: AgentSession, to: str, reason: str | None) -> None:
+        """Move the row's mission in response to a SESSION-level event. Every
+        transition made here restates something a session carrier already
+        delivered (failed ← agent.error with the same reason, paused ← the
+        session the user closed, waiting_for_approval ← the approval request),
+        so it is marked `derived` and narration stays silent — see
+        yuri/narration/policy.py. `start`'s provider-failure path deliberately
+        does NOT come through here: no session row exists, so nothing else can
+        report it and it must be spoken."""
         if not row.mission_id:
             return
         try:
-            self.missions.set_status(self.missions.get(row.mission_id), to, by="system", reason=reason)
+            self.missions.set_status(self.missions.get(row.mission_id), to, by="system",
+                                     reason=reason, derived=True)
         except InvalidTransition:
             pass   # e.g. paused mission receiving a late completion — leave it
 

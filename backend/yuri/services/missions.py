@@ -128,7 +128,14 @@ class MissionService:
         mission.goal = " ".join(goal.split())[:GOAL_MAX]
         self.store.missions.update(mission)
 
-    def set_status(self, mission: Mission, to: str, by: str, reason: str | None = None) -> bool:
+    def set_status(self, mission: Mission, to: str, by: str, reason: str | None = None,
+                   *, derived: bool = False) -> bool:
+        """Transition and publish. `derived=True` marks a change that merely
+        RESTATES a session-level event another carrier already delivered, so
+        narration can stay silent without swallowing an original fact — see
+        yuri/narration/policy.py. Only SessionService._mission_to sets it;
+        defaulting to False fails OPEN (spoken), matching the rest of the rule.
+        """
         frm = mission.status
         if not mission.transition(to):      # raises InvalidTransition on bad edges
             return False
@@ -136,7 +143,7 @@ class MissionService:
         self.bus.publish(YuriEvent.make(EventType.MISSION_STATUS_CHANGED, mission_id=mission.id,
                                         project_id=mission.project_id,
                                         payload={"from": frm, "to": to, "by": by, "reason": reason,
-                                                 "title": mission.title}))
+                                                 "title": mission.title, "derived": derived}))
         self.journal.append(f"mission '{mission.title}': {frm} → {to}" + (f" ({reason})" if reason else ""))
         return True
 

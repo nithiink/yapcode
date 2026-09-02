@@ -34,21 +34,45 @@ The payload's origin field decides that, and it is the only input needed:
                    spoken in the same breath and IS the report. Saying it again
                    is telling the user what they just did — verbatim the
                    rationale the `none` bucket already rests on.
-  by == "system"   The change is derived, never original. `_mission_to` is the
-                   sole producer of a system transition, and every transition it
-                   makes echoes a session-level event poll owns and has already
-                   spoken: failed ← agent.error (same `reason` string), paused ←
-                   the session the user just closed, waiting_for_approval ← the
-                   approval request. Nothing is lost by staying silent: poll is
-                   the reliable carrier for those facts — every provider
-                   surfaces an error through `poll_status` whether or not it
-                   streams events — which is why poll owns them in the first
-                   place.
+  by == "system"   NOT sufficient on its own — `by` says who, not whether
+                   anyone else already said it. There are exactly TWO producers
+                   of a system transition, and they differ:
+
+                     1. `SessionService._mission_to` — every transition it makes
+                        RESTATES a session-level event poll owns and has already
+                        spoken: failed ← agent.error (same `reason` string),
+                        paused ← the session the user just closed,
+                        waiting_for_approval ← the approval request, running ←
+                        a completed turn (no line exists). Nothing is lost by
+                        staying silent: poll is the reliable carrier for those
+                        facts — every provider surfaces an error through
+                        `poll_status` whether or not it streams events — which
+                        is why poll owns them in the first place.
+                     2. `SessionService.start`'s provider-failure path
+                        (sessions.py, the `except` around `create_session`) —
+                        ORIGINAL news. No session row was ever inserted, so no
+                        poll can ever happen; the `agent.error` published beside
+                        it is poll-owned, so `line_for` returns None for it on
+                        the stream; and `start_session`'s exception is neither
+                        ValueError nor KeyError, so main.py hands the voice
+                        model only the generic "the tool failed unexpectedly".
+                        If this event is silent, a mission failing to start is
+                        narrated by NOBODY.
+
+                   So the marker, not the origin, decides: `set_status`'s
+                   `derived=True` (passed only by `_mission_to`) means "this
+                   restates something already delivered". A system transition
+                   with no marker is spoken.
   anything else    News. "ui" and "api" mean someone clicked a button or called
-                   the API, and no spoken line covered it. Unknown origins
-                   deliberately fail OPEN (spoken): a rare repeat beats a
-                   silently swallowed line, the same trade the frontend's spoken
-                   gate makes on a frame with no id.
+                   the API, and no spoken line covered it. Unknown origins, and
+                   a system change with no `derived` marker, deliberately fail
+                   OPEN (spoken): a rare repeat beats a silently swallowed line,
+                   the same trade the frontend's spoken gate makes on a frame
+                   with no id.
+
+If you add a new mission transition, the question to answer is not "what is
+`by`" but "does any other carrier already tell the user this fact". Only pass
+`derived=True` when the answer is yes, and name the carrier in a comment.
 
 `mission.created` is judged the same way but on `created_by`, and suppresses
 ONLY "voice": a mission that Yuri or a script creates unprompted IS news, and
@@ -103,18 +127,18 @@ ALWAYS_SPEAK: frozenset[str] = frozenset({
 _LOUD_SEVERITIES = frozenset({"warning", "error"})
 
 # Origins whose facts another carrier already delivered — see "ONE OWNER PER
-# FACT" above. Split per event type because the reasoning differs: a
-# voice-commanded change is reported by the tool result for both, but only a
-# *status change* is derived-and-therefore-silent when it comes from "system".
+# FACT" above. A voice-commanded change is reported by the tool result for both
+# event types; "system" is NOT in either set, because whether a system change
+# was already told depends on the `derived` marker, not on the origin.
 VOICE = "voice"
+SYSTEM = "system"
 HANDOFF = "handoff"
 ALREADY_TOLD_ON_CREATE: frozenset[str] = frozenset({VOICE})
-ALREADY_TOLD_ON_STATUS_CHANGE: frozenset[str] = frozenset({VOICE, "system"})
 
 
 def origin(value: object) -> str:
     """Normalize a payload `by` / `created_by` field. Anything unrecognizable
-    becomes "", which is not in either suppression set — so it is spoken."""
+    becomes "", which is not in any suppression set — so it is spoken."""
     return value.strip().lower() if isinstance(value, str) else ""
 
 
@@ -123,9 +147,17 @@ def mission_created_is_news(created_by: object) -> bool:
     return origin(created_by) not in ALREADY_TOLD_ON_CREATE
 
 
-def mission_status_change_is_news(by: object) -> bool:
-    """Whether a mission.status_changed event is the first carrier of its fact."""
-    return origin(by) not in ALREADY_TOLD_ON_STATUS_CHANGE
+def mission_status_change_is_news(by: object, derived: object = False) -> bool:
+    """Whether a mission.status_changed event is the first carrier of its fact.
+
+    `derived` is the payload marker MissionService.set_status writes: True means
+    this transition restates a session-level event another carrier already
+    delivered. A `system` change WITHOUT it is original news (start's
+    provider-failure path) and must be spoken."""
+    o = origin(by)
+    if o == VOICE:
+        return False
+    return not (o == SYSTEM and bool(derived))
 
 
 def normalize_mode(value: object) -> Mode:
