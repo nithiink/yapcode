@@ -1,0 +1,216 @@
+"""Composition root (spec §5.9). Builds the object graph once at startup;
+tools.py and the routes fetch services from container(). Tests build their own
+with a temp home and a fake provider via test_container().
+
+WHY the shape:
+
+* One place, one graph. Every wire that cannot be expressed as a constructor
+  argument lives here and nowhere else: the provider observers (provider event
+  -> SessionService), `missions.stop_sessions` (injected to break the
+  Mission<->Session cycle), and `session_manager.set_provider` (the module's
+  provider slot must hold the SAME ClaudeCodeProvider as the services — two
+  live TmuxClaudeRunners would fight over the same tmux control dirs and both
+  rehydrate the same panes).
+* A module-level singleton, not a FastAPI dependency, because the callers are
+  not all request handlers: tools.py is dispatched from a WebSocket-driven
+  voice loop and the tmux runner's sync callbacks reach the bus too.
+* `container()` raises rather than lazily building: a lazily built container
+  would silently open a SECOND store and a second provider on any code path
+  that runs before startup.
+"""
+from __future__ import annotations
+
+import asyncio
+import functools
+import logging
+from dataclasses import dataclass
+from typing import Callable
+
+import config
+import session_manager
+from yuri.domain.event import YuriEvent
+from yuri.events.bus import EventBus, bridge_to_event_log
+from yuri.home import Home, default_home
+from yuri.providers.base import AgentProvider
+from yuri.providers.registry import AgentRegistry, build_registry
+from yuri.services.approvals import ApprovalService
+from yuri.services.journal import Journal
+from yuri.services.memory import Memory
+from yuri.services.missions import MissionService
+from yuri.services.projects import ProjectService
+from yuri.services.sessions import SessionService
+from yuri.store.base import Store
+from yuri.store.sqlite import SqliteStore
+
+log = logging.getLogger("yuri.app")
+
+Bridge = Callable[[YuriEvent], None]
+
+# How long shutdown waits for the event writer to flush what is already queued.
+# Bounded: a wedged writer must not hold the process open, and losing the tail
+# of the event log is preferable to never exiting.
+DRAIN_TIMEOUT_S = 2.0
+
+
+@dataclass
+class Container:
+    home: Home
+    store: Store
+    bus: EventBus
+    registry: AgentRegistry
+    journal: Journal
+    memory: Memory
+    projects: ProjectService
+    approvals: ApprovalService
+    missions: MissionService
+    sessions: SessionService
+
+
+_container: Container | None = None
+_startup_error: str | None = None
+
+
+class YuriUnavailable(RuntimeError):
+    """There is no container: `startup()` has not run, or it failed and the host
+    app chose to serve without the Yuri layer (see main.py's lifespan).
+
+    A named type, not a bare RuntimeError, so the surfaces that sit above it can
+    turn "Yuri's storage is down" into ONE clear, actionable message — a 503
+    from the API, `{ok: false, error: ...}` from a voice tool — instead of a
+    stack trace. Still a RuntimeError: nothing that catches RuntimeError today
+    changes behavior."""
+
+
+def note_startup_failure(exc: BaseException | None) -> None:
+    """Record why startup failed, so container() can say so. None clears it."""
+    global _startup_error
+    _startup_error = None if exc is None else f"{type(exc).__name__}: {exc}"
+
+
+def unavailable_message() -> str:
+    if _startup_error is None:
+        return "Yuri is not initialised (app startup has not run)."
+    return (
+        "Yuri's state layer failed to start, so missions, sessions, approvals and the "
+        f"journal cannot be recorded. Cause: {_startup_error}. Check that YURI_HOME "
+        f"({config.YURI_HOME}) is a writable DIRECTORY, not a file, then restart the backend.")
+
+
+def container() -> Container:
+    if _container is None:
+        raise YuriUnavailable(unavailable_message())
+    return _container
+
+
+def container_or_none() -> Container | None:
+    return _container
+
+
+def set_container(c: Container | None) -> None:
+    global _container
+    _container = c
+
+
+def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | None = bridge_to_event_log,
+                    default_agent: str = "claude-code") -> Container:
+    """Wire the graph and install it as the process container.
+
+    `bridge` defaults to bridge_to_event_log on purpose: with bridge=None every
+    Yuri event is still persisted and still reaches SSE subscribers, but the
+    Activity panel mirror silently never happens — no error, just missing
+    events. Tests pass bridge=None deliberately (see test_container).
+    """
+    home.ensure()
+    store = SqliteStore(home.db_path)
+    try:
+        store.migrate()
+        bus = EventBus(repo=store.events, bridge=bridge)
+        journal = Journal(home)
+        memory = Memory(home)
+        projects = ProjectService(store, home, bus)
+        approvals = ApprovalService(store, bus, journal)
+        missions = MissionService(store, bus, journal)
+        sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
+                                  default_agent=default_agent)
+        missions.stop_sessions = sessions.stop_many
+        for p in registry.all():
+            # Observer is (handle, ProviderEvent); on_provider_event also wants
+            # the agent id, which the provider never sends — bind it here.
+            p.set_observer(functools.partial(sessions.on_provider_event, p.id))
+        projects.ensure_home()
+        try:
+            session_manager.set_provider(registry.get("claude-code"))   # one instance per process
+        except KeyError:
+            # No Claude provider in this registry — clear the slot rather than
+            # leaving it pointed at a PREVIOUS container's provider, or a
+            # fake-provider test inherits a real one. The invariant is "the slot
+            # holds this container's provider or nothing", unconditionally.
+            session_manager.set_provider(None)
+    except BaseException:
+        # A half-built container must not leak an open sqlite connection, and
+        # must never be published via set_container().
+        store.close()
+        raise
+    c = Container(home, store, bus, registry, journal, memory, projects, approvals, missions, sessions)
+    set_container(c)
+    return c
+
+
+async def startup() -> Container:
+    """Build the process container and start the event writer."""
+    if _container is not None:
+        # Exactly one ClaudeCodeProvider (and one store) per process. A second
+        # startup without a shutdown would orphan the first — two runners
+        # competing over the same tmux control dirs.
+        log.warning("yuri: startup() called with a container already installed; replacing it")
+        await shutdown()
+    home = default_home().ensure()
+    registry = build_registry(config.YURI_AGENTS)
+    c = build_container(home, registry)
+    c.bus.start_writer()
+    note_startup_failure(None)   # a successful start clears any earlier failure
+    log.info("yuri: home=%s db=%s agents=%s", home.path, home.db_path, registry.ids())
+    return c
+
+
+async def shutdown() -> None:
+    """Stop, flush and forget everything startup() built, in the reverse order:
+    providers -> drain -> event writer -> store. Safe to call twice, and safe on
+    a container whose writer was never started (see test_container)."""
+    c = _container
+    if c is None:
+        return
+    try:
+        # Order matters, and it is the reverse of startup: providers stop FIRST,
+        # because tearing one down can still publish (a cancelled turn, or
+        # session.stopped when VC_KILL_SESSIONS_ON_SHUTDOWN=1). Only then is it
+        # safe to drain, and only after that to stop the writer — draining after
+        # the writer is gone would leave those last events in the queue forever.
+        await c.registry.shutdown()
+        if c.bus.writer_running():
+            try:
+                await asyncio.wait_for(c.bus.drain(), DRAIN_TIMEOUT_S)
+            except TimeoutError:
+                # Only wait_for's own timeout. A CancelledError here is the
+                # shutdown task itself being cancelled; swallowing that would
+                # discard the cancellation, so it propagates.
+                log.warning("yuri: event writer did not drain in %.1fs; dropping the tail",
+                            DRAIN_TIMEOUT_S)
+            except Exception:
+                log.exception("yuri: draining the event writer failed")
+        await c.bus.stop_writer()
+    finally:
+        c.store.close()
+        set_container(None)
+        session_manager.reset()
+
+
+def test_container(home_path: str, provider: AgentProvider, default_agent: str | None = None) -> Container:
+    """Container for tests: one provider, a temp home, and NO event_log bridge.
+
+    No writer is started either, so tests must never call `bus.drain()` — it
+    would block forever on a repo-backed bus with nothing consuming the queue.
+    """
+    reg = AgentRegistry()
+    reg.register(provider)
+    return build_container(Home(home_path), reg, bridge=None, default_agent=default_agent or provider.id)
