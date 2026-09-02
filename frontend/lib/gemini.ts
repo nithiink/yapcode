@@ -349,7 +349,10 @@ export class GeminiSession implements VoiceSession {
     this.lastSend = Date.now();
   }
 
-  injectUpdate(text: string): void {
+  // `opts.blocking` is accepted for interface parity and ignored: this
+  // transport sends every update immediately (no queue, so no bound and nothing
+  // to prioritize). Only RealtimeSession queues.
+  injectUpdate(text: string, _opts?: { blocking?: boolean }): void {
     // Socket down (e.g. mid-reconnect): hold the latest update and flush it once
     // we're back, so a result that completed during the outage isn't dropped.
     if (this.ws?.readyState !== WebSocket.OPEN) {

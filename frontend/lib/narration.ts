@@ -73,23 +73,61 @@ export function replayLimitFor(seeded: boolean): number {
  * Verbose mode publishes a `tool.started` per tool call while
  * `drainPendingInjections` fires one `response.create` per queued item — so
  * during a single long turn the queue grows faster than it drains and Yuri
- * ends up narrating tool calls from minutes ago. Bound it and drop the OLDEST:
- * every queued item is already in the model's conversation (its own
- * `conversation.item.create`), so a dropped item is still context — it just
- * doesn't get a spoken line of its own. Losing the oldest texture is strictly
- * better than falling further behind, and the newest line is the one that is
- * still true.
+ * ends up narrating tool calls from minutes ago. Bound it and drop the oldest
+ * EVICTABLE item: every queued item is already in the model's conversation
+ * (its own `conversation.item.create`), so a dropped item is still context —
+ * it just doesn't get a spoken line of its own. Losing the oldest texture is
+ * strictly better than falling further behind, and the newest line is the one
+ * that is still true.
  */
 export const MAX_PENDING_INJECTIONS = 8;
 
-/** Queue `text` under the bound, evicting oldest-first. Returns how many were
- *  dropped, so the caller can say so in the log rather than losing it. */
-export function enqueueInjection(queue: string[], text: string,
+/**
+ * A queued line, plus whether it is allowed to be dropped.
+ *
+ * `blocking` marks a line the agent is WAITING on an answer for — a permission
+ * request or a question. This is the frontend half of the backend's
+ * `ALWAYS_SPEAK` set (yuri/narration/policy.py): the two ends of the pipeline
+ * are the same rule, so that neither the narration mode nor the queue bound can
+ * swallow an ask. It has to be enforced here too, because a dropped prompt is
+ * unrecoverable — `poll_status` hands back each buffered result exactly once,
+ * so the line is never re-offered, and `setPending` drawing the card is not the
+ * product: being ASKED out loud is.
+ */
+export type PendingInjection = { text: string; blocking?: boolean };
+
+/** The poll statuses (and their event types) that block on the user. Mirrors
+ *  ALWAYS_SPEAK — `approval.requested` and `session.question`. */
+const BLOCKING = new Set([
+  "needs_permission", "needs_choice", "approval.requested", "session.question",
+]);
+
+/** Whether a carrier's frame is a line the agent is waiting on an answer for.
+ *  Reads the poll result's `status` or an SSE frame's `type`; anything else,
+ *  including malformed input, is non-blocking texture. */
+export function isBlockingNarration(x: unknown): boolean {
+  if (!x || typeof x !== "object") return false;
+  const f = x as { status?: unknown; type?: unknown };
+  return ((typeof f.status === "string" && BLOCKING.has(f.status)) ||
+          (typeof f.type === "string" && BLOCKING.has(f.type)));
+}
+
+/**
+ * Queue `item` under the bound, evicting the OLDEST NON-BLOCKING entry.
+ * Returns how many were dropped, so the caller can log it rather than lose it.
+ *
+ * When every queued entry is blocking the queue grows past the cap instead:
+ * nine pending permission asks is not a runaway to be trimmed, and each one is
+ * a question the agent is stalled on. Texture is what the cap exists to shed.
+ */
+export function enqueueInjection(queue: PendingInjection[], item: PendingInjection,
                                  cap = MAX_PENDING_INJECTIONS): number {
-  queue.push(text);
+  queue.push(item);
   let dropped = 0;
   while (queue.length > Math.max(1, cap)) {
-    queue.shift();
+    const evictable = queue.findIndex((q) => !q.blocking);
+    if (evictable === -1) break;      // all blocking: exceed the cap, drop nothing
+    queue.splice(evictable, 1);
     dropped += 1;
   }
   return dropped;

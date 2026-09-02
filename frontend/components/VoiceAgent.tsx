@@ -11,6 +11,7 @@ import {
   NARRATION_MODES,
   NARRATION_REPLAY_LIMIT,
   createSpokenGate,
+  isBlockingNarration,
   isNarrationMode,
   narrationOf,
   replayLimitFor,
@@ -727,7 +728,11 @@ export default function VoiceAgent() {
     // the same result never also arrives narrated on the event stream.
     const line = narrationOf(res);
     if (line) {
-      sessionRef.current?.injectUpdate(line);
+      // A permission request or a question BLOCKS the agent on an answer, so
+      // the transport's queue bound must never evict it — the frontend half of
+      // the backend's ALWAYS_SPEAK set. poll_status hands back each buffered
+      // result exactly once, so a dropped ask is never re-offered.
+      sessionRef.current?.injectUpdate(line, { blocking: isBlockingNarration(res) });
       logDebug("inject", line, { session: sid }, "backend", "voice");
     }
     refreshSessions();
@@ -1054,9 +1059,13 @@ export default function VoiceAgent() {
       narrationEsRef.current = es;
       es.onmessage = (m) => {
         try {
-          const line = gate.lineFor(JSON.parse(m.data));
+          const frame = JSON.parse(m.data);
+          const line = gate.lineFor(frame);
           if (line) {
-            sessionRef.current?.injectUpdate(line);
+            // Always false today (the blocking types are poll-owned, so they
+            // carry no line here) — passed anyway so both carriers apply the
+            // one rule if ownership ever moves.
+            sessionRef.current?.injectUpdate(line, { blocking: isBlockingNarration(frame) });
             logDebug("inject", line, undefined, "backend", "voice");
           }
         } catch {

@@ -7,9 +7,11 @@ import {
   MAX_PENDING_INJECTIONS,
   createSpokenGate,
   enqueueInjection,
+  isBlockingNarration,
   isNarrationMode,
   narrationOf,
   replayLimitFor,
+  type PendingInjection,
 } from "./narration.ts";
 
 test("a frame with a narration line yields it", () => {
@@ -145,31 +147,82 @@ test("a failed seed narrows the replay to one line, not fifty", () => {
   assert.equal(replayLimitFor(false), 1);
 });
 
+const texture = (t: string): PendingInjection => ({ text: t });
+
 test("the injection queue is bounded, dropping the oldest", () => {
   // Verbose mode publishes a tool.started per tool call while the drain fires
   // one response.create per item, so an unbounded queue falls behind for the
   // rest of the turn and narrates tool calls from minutes ago.
-  const q: string[] = [];
+  const q: PendingInjection[] = [];
   for (let i = 0; i < MAX_PENDING_INJECTIONS; i++) {
-    assert.equal(enqueueInjection(q, `line ${i}`), 0);
+    assert.equal(enqueueInjection(q, texture(`line ${i}`)), 0);
   }
   assert.equal(q.length, MAX_PENDING_INJECTIONS);
-  assert.equal(enqueueInjection(q, "newest"), 1);
+  assert.equal(enqueueInjection(q, texture("newest")), 1);
   assert.equal(q.length, MAX_PENDING_INJECTIONS);
-  assert.equal(q[0], "line 1");                                  // oldest evicted
-  assert.equal(q[q.length - 1], "newest");                       // newest kept
+  assert.equal(q[0].text, "line 1");                             // oldest evicted
+  assert.equal(q[q.length - 1].text, "newest");                  // newest kept
 });
 
 test("the injection bound is a real ceiling under a burst", () => {
-  const q: string[] = [];
+  const q: PendingInjection[] = [];
   let dropped = 0;
-  for (let i = 0; i < 500; i++) dropped += enqueueInjection(q, `t${i}`);
+  for (let i = 0; i < 500; i++) dropped += enqueueInjection(q, texture(`t${i}`));
   assert.equal(q.length, MAX_PENDING_INJECTIONS);
   assert.equal(dropped, 500 - MAX_PENDING_INJECTIONS);
-  assert.equal(q[q.length - 1], "t499");
+  assert.equal(q[q.length - 1].text, "t499");
   // A nonsense cap must not produce an empty queue that silently swallows the
   // line the caller just handed us.
-  const one: string[] = [];
-  enqueueInjection(one, "only", 0);
-  assert.deepEqual(one, ["only"]);
+  const one: PendingInjection[] = [];
+  enqueueInjection(one, texture("only"), 0);
+  assert.deepEqual(one, [texture("only")]);
+});
+
+test("the bound can never evict a blocking ask", () => {
+  // The regression this guards: the cap was added for verbose texture, but the
+  // SAME queue carries the poll's needs_permission / needs_choice line. A tool
+  // burst — exactly the condition the cap exists for — could evict the ask, and
+  // poll_status hands back each buffered result once, so it is never
+  // re-offered. This is the frontend half of the backend's ALWAYS_SPEAK set.
+  const q: PendingInjection[] = [];
+  for (let i = 0; i < MAX_PENDING_INJECTIONS + 20; i++) enqueueInjection(q, texture(`tool ${i}`));
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+
+  const ask = { text: "Claude needs permission to run rm -rf build.", blocking: true };
+  const dropped = enqueueInjection(q, ask);
+  assert.equal(dropped, 1, "something non-blocking must go instead");
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+  assert.ok(q.includes(ask), "the ask survived");
+
+  // Keep burying it in texture: it still survives, and only texture is shed.
+  for (let i = 0; i < 100; i++) enqueueInjection(q, texture(`more ${i}`));
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+  assert.ok(q.includes(ask), "the ask survived a 100-line burst");
+  assert.equal(q.filter((x) => x.blocking).length, 1);
+});
+
+test("an all-blocking queue grows past the cap rather than dropping an ask", () => {
+  // Nine pending permission asks is not a runaway to be trimmed — each is a
+  // question the agent is stalled on. Texture is what the cap exists to shed.
+  const q: PendingInjection[] = [];
+  let dropped = 0;
+  for (let i = 0; i < MAX_PENDING_INJECTIONS + 3; i++) {
+    dropped += enqueueInjection(q, { text: `ask ${i}`, blocking: true });
+  }
+  assert.equal(dropped, 0);
+  assert.equal(q.length, MAX_PENDING_INJECTIONS + 3);
+});
+
+test("blocking is read off the carrier, mirroring ALWAYS_SPEAK", () => {
+  // Poll results carry `status`; SSE frames carry `type`.
+  assert.equal(isBlockingNarration({ status: "needs_permission" }), true);
+  assert.equal(isBlockingNarration({ status: "needs_choice" }), true);
+  assert.equal(isBlockingNarration({ type: "approval.requested" }), true);
+  assert.equal(isBlockingNarration({ type: "session.question" }), true);
+  // Everything else is texture the cap may shed.
+  for (const x of [{ status: "completed" }, { status: "error" }, { type: "tool.started" },
+                   { type: "mission.status_changed" }, {}, null, undefined, "needs_permission",
+                   { status: 7 }]) {
+    assert.equal(isBlockingNarration(x), false, JSON.stringify(x) ?? String(x));
+  }
 });
