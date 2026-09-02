@@ -13,11 +13,19 @@ prompt engineering that belongs with the text, not with the transport.
 """
 from __future__ import annotations
 
-from yuri.domain.event import YuriEvent
+from yuri.domain.event import DEFAULTS, EventType, YuriEvent
 from .policy import Mode, owner_of, speaks
 
 ASSISTANT_TEXT_CAP = 900
 REQUEST_CAP = 90
+# Names, not prose: a mission title or project/session name is a short label,
+# so each cap sits well under REASON_CAP/prose caps even though none of these
+# fields is bounded upstream (mission titles come straight from the session
+# name via SessionService._pick_name, which only whitespace-normalizes).
+TITLE_CAP = 80
+PROJECT_CAP = 60
+SESSION_NAME_CAP = 60
+REASON_CAP = 160
 
 
 def _clip(text: str, cap: int) -> str:
@@ -55,15 +63,15 @@ class NarrationService:
         t = event.type
 
         if t == "mission.created":
-            title = p.get("title") or "a new mission"
-            project = p.get("project")
+            title = _clip(str(p.get("title") or ""), TITLE_CAP) or "a new mission"
+            project = _clip(str(p.get("project") or ""), PROJECT_CAP)
             where = f" in {project}" if project else ""
             return f'Starting "{title}"{where}.'
 
         if t == "mission.status_changed":
-            title = p.get("title") or "that mission"
+            title = _clip(str(p.get("title") or ""), TITLE_CAP) or "that mission"
             to = p.get("to")
-            reason = _clip(str(p.get("reason") or ""), 160)
+            reason = _clip(str(p.get("reason") or ""), REASON_CAP)
             if to == "completed":
                 return f'"{title}" is done.'
             if to == "failed":
@@ -77,7 +85,7 @@ class NarrationService:
             return None
 
         if t == "session.lost":
-            name = p.get("session_name") or "a session"
+            name = _clip(str(p.get("session_name") or ""), SESSION_NAME_CAP) or "a session"
             return (f'I lost contact with "{name}" — its agent did not survive '
                     "the restart.")
 
@@ -107,7 +115,8 @@ class NarrationService:
             text = _clip(str(prompt.get("text") or ""), 300)
             if not text:
                 return None
-            if not speaks("approval.requested", "notice", mode):
+            if not speaks(EventType.APPROVAL_REQUESTED,
+                          DEFAULTS[EventType.APPROVAL_REQUESTED][0], mode):
                 return None
             lead = ("That's a destructive action — " if result.get("risk") == "dangerous"
                     else "")
@@ -119,7 +128,8 @@ class NarrationService:
             text = _clip(str(prompt.get("text") or ""), 300)
             if not text:
                 return None
-            if not speaks("session.question", "notice", mode):
+            if not speaks(EventType.SESSION_QUESTION,
+                          DEFAULTS[EventType.SESSION_QUESTION][0], mode):
                 return None
             opts = _numbered(prompt.get("options") or [])
             tail = f" The options are: {opts}." if opts else ""
@@ -127,7 +137,8 @@ class NarrationService:
                     "Read the options to the user and get their choice.")
 
         if status == "completed":
-            if not speaks("session.turn_completed", "info", mode):
+            if not speaks(EventType.SESSION_TURN_COMPLETED,
+                          DEFAULTS[EventType.SESSION_TURN_COMPLETED][0], mode):
                 return None
             said = _clip(str(result.get("assistant_text") or ""), ASSISTANT_TEXT_CAP)
             # The honesty rule: report that the turn finished and quote the
@@ -138,7 +149,8 @@ class NarrationService:
                     "this request is still in progress.")
 
         if status == "error":
-            if not speaks("agent.error", "error", mode):
+            if not speaks(EventType.AGENT_ERROR,
+                          DEFAULTS[EventType.AGENT_ERROR][0], mode):
                 return None
             msg = _clip(str(result.get("error") or "unknown"), 300)
             return f"{who} hit an error{_for_request(result)}: {msg}. Tell the user."

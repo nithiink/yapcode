@@ -12,7 +12,8 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from yuri.domain.event import EventType, YuriEvent  # noqa: E402
+import yuri.domain.event as event_mod  # noqa: E402
+from yuri.domain.event import DEFAULTS, EventType, YuriEvent  # noqa: E402
 from yuri.narration.service import NarrationService  # noqa: E402
 
 
@@ -69,6 +70,24 @@ class Lines(unittest.TestCase):
                   EventType.SESSION_QUESTION, EventType.AGENT_ERROR):
             self.assertIsNone(self._line(t, {"assistant_text": "x", "description": "y",
                                              "text": "z", "message": "m"}), t)
+
+    def test_a_very_long_mission_title_and_project_stay_bounded(self):
+        # Neither field is bounded upstream: MissionService.create caps `goal`
+        # but never `title`, and titles come straight from the session name
+        # via SessionService._pick_name, which only whitespace-normalizes.
+        line = self._line(EventType.MISSION_CREATED,
+                          {"title": "T" * 5000, "project": "P" * 5000})
+        self.assertLess(len(line), 200, line)
+
+    def test_a_very_long_mission_title_stays_bounded_in_every_status_branch(self):
+        for to in ("completed", "failed", "paused", "cancelled"):
+            line = self._line(EventType.MISSION_STATUS_CHANGED,
+                              {"title": "T" * 5000, "to": to})
+            self.assertLess(len(line), 300, (to, line))
+
+    def test_a_very_long_session_name_stays_bounded_on_session_lost(self):
+        line = self._line(EventType.SESSION_LOST, {"session_name": "S" * 5000})
+        self.assertLess(len(line), 200, line)
 
 
 class PollLines(unittest.TestCase):
@@ -138,6 +157,28 @@ class PollLines(unittest.TestCase):
     def test_long_assistant_text_is_capped(self):
         line = self._poll({"status": "completed", "assistant_text": "x" * 5000})
         self.assertLess(len(line), 1200)
+
+    def test_error_severity_gating_reads_through_to_domain_defaults(self):
+        # Guards against poll-side gating silently desyncing from stream-side
+        # gating: if line_for_poll ever reverts to a hardcoded "error"
+        # literal, patching DEFAULTS has no effect and this test catches it.
+        original = DEFAULTS[EventType.AGENT_ERROR]
+        event_mod.DEFAULTS[EventType.AGENT_ERROR] = ("info", original[1])
+        try:
+            self.assertIsNone(self._poll({"status": "error", "error": "boom"}, mode="quiet"))
+        finally:
+            event_mod.DEFAULTS[EventType.AGENT_ERROR] = original
+
+    def test_completed_severity_gating_reads_through_to_domain_defaults(self):
+        # Same guard for session.turn_completed: bumping its DEFAULTS severity
+        # to something quiet-mode treats as loud must change poll's gating.
+        original = DEFAULTS[EventType.SESSION_TURN_COMPLETED]
+        event_mod.DEFAULTS[EventType.SESSION_TURN_COMPLETED] = ("warning", original[1])
+        try:
+            self.assertIsNotNone(self._poll({"status": "completed", "assistant_text": "x"},
+                                            mode="quiet"))
+        finally:
+            event_mod.DEFAULTS[EventType.SESSION_TURN_COMPLETED] = original
 
 
 if __name__ == "__main__":
