@@ -122,6 +122,17 @@ class SessionService:
             return entry[0]
         raise KeyError(f"unknown session: {handle}")
 
+    def _agent_name(self, agent_id: str | None) -> str:
+        """A provider's display name, or "" when that agent is not registered.
+        Guarded for the same reason `_provider_for` is: a stored row outlives
+        its provider whenever YURI_AGENTS changes between runs."""
+        if not agent_id:
+            return ""
+        try:
+            return self.registry.get(agent_id).name
+        except KeyError:
+            return ""
+
     def row_for(self, handle: str) -> AgentSession | None:
         return self.store.sessions.get_by_native(handle)
 
@@ -613,8 +624,13 @@ class SessionService:
                 return
             k, p = ev.kind, ev.payload
             if k == "tool_started":
+                # agent_name is what verbose narration reads to say
+                # "<agent> is using <tool>" — no other publisher needs it, and
+                # nothing else in the payload can supply it (agent_id lives at
+                # the event level, and the narration service is pure).
                 self.bus.publish(self._ev(EventType.TOOL_STARTED, row, handle,
-                                          {"tool_name": p.get("tool_name"), "tool_input": p.get("tool_input")}))
+                                          {"tool_name": p.get("tool_name"), "tool_input": p.get("tool_input"),
+                                           "agent_name": self._agent_name(row.agent_id or agent_id)}))
             elif k == "needs_permission":
                 self.approvals.record_request(row, {**p, "kind": "permission"})
                 self._touch(row, "needs_permission")

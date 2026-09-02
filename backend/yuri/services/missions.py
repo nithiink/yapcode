@@ -1,12 +1,14 @@
-"""Missions (spec §5.3). In this phase missions are created implicitly by
-SessionService.start; explicit start/routing arrives with the orchestrator."""
+"""Missions (spec §5.3). Missions are created implicitly by
+SessionService.start/adopt — there is no orchestrator (Phase 4 ruled one out),
+so this service is the whole of mission lifecycle: spoken resolution, the
+speech shapes the voice tools read back, and pause/resume/cancel."""
 from __future__ import annotations
 
 import re
 from typing import Awaitable, Callable
 
 from yuri.domain.event import EventType, YuriEvent
-from yuri.domain.mission import Mission, MissionStep
+from yuri.domain.mission import TRANSITIONS, InvalidTransition, Mission, MissionStep
 from yuri.domain.project import Project
 from yuri.domain.session import AgentSession
 from yuri.events.bus import EventBus
@@ -266,6 +268,33 @@ class MissionService:
         raise ValueError(f"I could not match '{clip_speech(ref, TITLE_SPEECH_MAX)}', "
                          "and nothing is active right now.")
 
+    def speech_list(self, status: str | None = None, limit: int = 40) -> list[dict]:
+        """Missions shaped for speaking, one row each. The list counterpart of
+        `speech_detail`, and the reason tools.py no longer reaches into the
+        store: the same clipping rules live in one place, applied by the layer
+        that owns missions.
+
+        `status` filters; omitting it means live work (`active()`), which is
+        what the voice model means by "what's running".
+
+        The per-mission session query is deliberate: `sessions_mission` is an
+        index, so `limit` indexed lookups beat one unbounded scan of the whole
+        sessions table (which is what grouping a single `sessions.list()` in
+        Python would cost).
+        """
+        missions = (self.list(status=status) if status else self.active())[:limit]
+        projects = {p.id: p.name for p in self.store.projects.list()}
+        out = []
+        for m in missions:
+            sessions = self.store.sessions.list(mission_id=m.id)
+            out.append({"id": m.id, "title": clip_speech(m.title, TITLE_SPEECH_MAX),
+                        "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None,
+                        "status": m.status, "project": projects.get(m.project_id),
+                        "agents": sorted({s.agent_id for s in sessions}),
+                        "sessions": [clip_speech(s.name, SESSION_NAME_SPEECH_MAX)
+                                     for s in sessions if s.name][:SESSIONS_SPEECH_MAX]})
+        return out
+
     def speech_detail(self, mission_id: str) -> dict:
         """A mission shaped for speaking, not the full detail() dump."""
         m = self.get(mission_id)
@@ -289,8 +318,18 @@ class MissionService:
 
     # --- lifecycle ------------------------------------------------------------
 
+    def _require_edge(self, m: Mission, to: str) -> None:
+        """Reject an illegal transition BEFORE any side effect. `transition()`
+        raises on its own, but only after the caller has already interrupted or
+        stopped the mission's agents — and a `queued` mission is ACTIVE (so
+        resolvable by voice) while `queued → paused` is not in TRANSITIONS, so
+        "pause that" would kill the agents and then fail."""
+        if to != m.status and to not in TRANSITIONS.get(m.status, frozenset()):
+            raise InvalidTransition(f"mission {m.id[:8]}: {m.status} → {to} is not allowed")
+
     async def pause(self, mission_id: str, by: str) -> Mission:
         m = self.get(mission_id)
+        self._require_edge(m, "paused")
         live = self.store.sessions.list(mission_id=m.id, live_only=True)
         if live and self.interrupt_sessions is not None:
             # Interrupt BEFORE transitioning so a stop-triggered status change

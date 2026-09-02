@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import config  # noqa: E402
 import tools  # noqa: E402
+import yuri.services.missions as missions_mod  # noqa: E402
 from yuri import app as yapp  # noqa: E402
 from yuri.providers.fake import FakeAgentProvider  # noqa: E402
 
@@ -131,6 +132,14 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
         res = await tools.dispatch_tool("list_missions", {})
         self.assertLess(len(res["missions"][0]["goal"]), 300)
 
+    def test_tools_py_never_reaches_into_the_store(self):
+        """`list_missions` was the one place tools.py used `c.store.…`, and it
+        duplicated the clipping rules speech_detail already owned. Shaping now
+        lives in MissionService; keep the layer boundary."""
+        with open(tools.__file__, encoding="utf-8") as f:
+            src = f.read()
+        self.assertNotIn(".store.", src)
+
     async def test_list_missions_is_bounded(self):
         for i in range(3):
             await self._start(name=f"s{i}")
@@ -143,7 +152,9 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
         res = await tools.dispatch_tool("list_missions", {})
         names = res["missions"][0]["sessions"]
         self.assertTrue(all(len(n) <= 60 for n in names), names)
-        with mock.patch.object(tools, "SESSIONS_SPEECH_MAX", 0):
+        # The cap is read where the shaping now lives (MissionService.speech_list),
+        # not in tools.py — tools.py's only reach into the store moved with it.
+        with mock.patch.object(missions_mod, "SESSIONS_SPEECH_MAX", 0):
             res = await tools.dispatch_tool("list_missions", {})
         self.assertEqual(res["missions"][0]["sessions"], [])
         self.assertTrue(out["mission_id"])

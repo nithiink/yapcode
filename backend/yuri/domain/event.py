@@ -1,5 +1,14 @@
-"""YuriEvent — the normalized event every subsystem emits (spec §11). `severity`
-and `speakable` are hints the narration layer (Phase 4) filters on."""
+"""YuriEvent — the normalized event every subsystem emits (spec §11).
+
+`severity` IS load-bearing: narration/policy.py's `speaks()` reads it to decide
+what quiet mode still says out loud (warnings and errors get through).
+
+`speakable` is NOT read by the narration layer. It survived as the design's
+first sketch of "would we ever say this", and the DEFAULTS below are what
+narration/policy.py's ownership table was derived FROM — but the table is the
+authority now, and it is finer-grained (it also names the carrier, and the
+mode). Treat `speakable` as a persisted hint for consumers of /yuri/events, not
+as a narration switch."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

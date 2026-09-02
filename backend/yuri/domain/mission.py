@@ -1,5 +1,10 @@
-"""Mission — the unit of work (spec §8). A deterministic state machine; the
-orchestrator (Phase 4) drives it, services enforce it."""
+"""Mission — the unit of work (spec §8). A deterministic state machine.
+
+There is no orchestrator. Phase 4 ruled it out: missions are created implicitly
+by SessionService.start/adopt and driven by the callers that already exist —
+`_mission_to` (derived from session events), MissionService.pause/resume/cancel
+(voice tools and the HTTP API), and nothing else. The services enforce the
+table; this module only defines it."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

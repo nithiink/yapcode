@@ -24,8 +24,7 @@ from typing import Any
 from slash_commands import list_slash_commands
 from yuri.app import container
 from yuri.domain.mission import InvalidTransition
-from yuri.services.missions import (GOAL_SPEECH_MAX, SESSION_NAME_SPEECH_MAX, SESSIONS_SPEECH_MAX,
-                                    TITLE_SPEECH_MAX, clip_speech)
+from yuri.services.missions import TITLE_SPEECH_MAX, clip_speech
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
@@ -553,20 +552,10 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"mode": mode, "message": blurb}
 
     if name == "list_missions":
-        c = container()
+        # Shaping (and the store access it needs) belongs to MissionService,
+        # next to speech_detail's identical clipping rules.
         status = (args.get("status") or "").strip() or None
-        missions = c.missions.list(status=status) if status else c.missions.active()
-        projects = {p.id: p.name for p in c.projects.registered()}
-        out = []
-        for m in missions[:MISSION_LIST_MAX]:
-            sessions = c.store.sessions.list(mission_id=m.id)
-            out.append({"id": m.id, "title": clip_speech(m.title, TITLE_SPEECH_MAX),
-                        "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None,
-                        "status": m.status, "project": projects.get(m.project_id),
-                        "agents": sorted({s.agent_id for s in sessions}),
-                        "sessions": [clip_speech(s.name, SESSION_NAME_SPEECH_MAX)
-                                     for s in sessions if s.name][:SESSIONS_SPEECH_MAX]})
-        return {"missions": out}
+        return {"missions": container().missions.speech_list(status, limit=MISSION_LIST_MAX)}
 
     if name == "mission_status":
         c = container()
