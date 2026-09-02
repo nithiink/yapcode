@@ -139,7 +139,8 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         approvals = ApprovalService(store, bus, journal)
         missions = MissionService(store, bus, journal)
         sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
-                                  default_agent=default_agent, router=router)
+                                  default_agent=default_agent, router=router,
+                                  narration=narration, mode_reader=narration_mode)
         missions.stop_sessions = sessions.stop_many
         missions.interrupt_sessions = sessions.interrupt_many
         for p in registry.all():

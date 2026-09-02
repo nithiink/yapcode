@@ -195,17 +195,25 @@ def build_router(require_auth: Callable) -> APIRouter:
         c = container()
         limit = _clamp_limit(limit)
 
+        def _frame(e) -> str:
+            # narration_mode() is called PER EVENT (not once, before the loop) so
+            # a mode change made mid-stream (PUT /yuri/narration) takes effect on
+            # the very next frame, without restarting the connection.
+            mode = narration_mode()
+            payload = {**e.to_dict(), "narration": c.narration.line_for(e, mode)}
+            return f"data: {json.dumps(payload, default=str)}\n\n"
+
         async def gen():
             q = c.bus.subscribe()
             try:
                 for e in c.store.events.list(mission_id=mission_id, limit=limit):
-                    yield f"data: {json.dumps(e.to_dict(), default=str)}\n\n"
+                    yield _frame(e)
                 while True:
                     try:
                         e = await asyncio.wait_for(q.get(), timeout=15.0)
                         if mission_id and e.mission_id != mission_id:
                             continue
-                        yield f"data: {json.dumps(e.to_dict(), default=str)}\n\n"
+                        yield _frame(e)
                     except asyncio.TimeoutError:
                         yield ": ping\n\n"
             finally:

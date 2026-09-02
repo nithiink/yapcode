@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+from typing import Callable
 
 from claude_runner import normalize_mode
 from permissions import mode_covers
@@ -42,6 +43,8 @@ from yuri.domain.event import EventType, YuriEvent
 from yuri.domain.mission import InvalidTransition
 from yuri.domain.session import AgentSession
 from yuri.events.bus import EventBus
+from yuri.narration.policy import DEFAULT_MODE, Mode
+from yuri.narration.service import NarrationService
 from yuri.providers.base import AgentProvider, ProjectContext, ProviderEvent, SessionOptions
 from yuri.providers.registry import AgentRegistry
 from yuri.services.approvals import ApprovalService
@@ -61,7 +64,9 @@ _IN_FLIGHT = ("working", "running")
 class SessionService:
     def __init__(self, store: Store, bus: EventBus, journal: Journal, registry: AgentRegistry,
                  projects: ProjectService, approvals: ApprovalService, missions: MissionService,
-                 default_agent: str = "claude-code", router: AgentRouter | None = None):
+                 default_agent: str = "claude-code", router: AgentRouter | None = None,
+                 narration: NarrationService | None = None,
+                 mode_reader: Callable[[], Mode] | None = None):
         self.store = store
         self.bus = bus
         self.journal = journal
@@ -71,6 +76,10 @@ class SessionService:
         self.missions = missions
         self.default_agent = default_agent
         self.router = router or AgentRouter(registry, default_agent)
+        self.narration = narration or NarrationService()
+        # The mode lives in the store, which yuri.app reads — importing app here
+        # would be a cycle, so the container injects a reader instead.
+        self._mode_reader = mode_reader or (lambda: DEFAULT_MODE)
 
     # --- lookup ---------------------------------------------------------------
 
@@ -392,13 +401,14 @@ class SessionService:
         res = p.poll(handle)
         row = self.row_for(handle)
         if row is None:
-            return res
+            return {**res, "narration": None}
         status = res.get("status")
         emits = not p.capabilities().supports_events   # otherwise the observer already did
         if status == "needs_permission":
             prompt = res.get("prompt")
             if prompt:
-                self.approvals.record_request(row, prompt)   # dedups on request_id
+                approval = self.approvals.record_request(row, prompt)   # dedups on request_id
+                res = {**res, "risk": approval.risk}
             self._touch(row, "needs_permission")
             self._mission_to(row, "waiting_for_approval", "agent asked for permission")
         elif status == "needs_choice":
@@ -418,6 +428,12 @@ class SessionService:
             self._fail_if_alone(row, res.get("error") or "agent error")
         elif status in _IN_FLIGHT:
             self._touch(row, "running")
+        # The frontend's whole rule is "if it has a narration line, inject it".
+        # Poll owns the four session-turn events (yuri/narration/policy.py); the
+        # stream must not also narrate them or the user hears each one twice.
+        agent = self.registry.get(row.agent_id).name if row.agent_id else ""
+        res = {**res, "narration": self.narration.line_for_poll(
+            res, row.name, agent, self._mode_reader())}
         return res
 
     async def interrupt(self, ref: str) -> dict:
