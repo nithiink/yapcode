@@ -1,15 +1,60 @@
-"""Which carrier narrates which event, and what each mode speaks.
+"""Who narrates which fact, and what each mode speaks.
 
-Yuri has two ways to learn something happened: the per-session poll result the
-frontend already drains, and the domain event stream. Both are correct, and all
-four events the poll loop narrates are ALSO marked speakable in
-domain/event.py's DEFAULTS — so without a declared split she says everything
-twice. This module is that declaration.
+Yuri has THREE ways the user learns something happened: the per-session poll
+result the frontend already drains, the domain event stream, and the result of a
+voice tool she just called (which she speaks). The first two both carry facts
+that are ALSO marked speakable in domain/event.py's DEFAULTS — so without a
+declared split she says everything twice. This module is that declaration.
 
 Poll owns the session-turn events because its result is the only carrier that
 sees EVERY sub-question of a multi-question AskUserQuestion (the tmux runner
 notifies only from its hook path — see docs/yuri/follow-ups.md). The stream owns
 mission-level state, which poll cannot see at all.
+
+ONE OWNER PER FACT, NOT PER EVENT TYPE
+--------------------------------------
+The NARRATION_OWNER table below is necessary but NOT sufficient. The invariant
+we actually want is "the user hears each fact once", and per-type ownership is
+strictly weaker than that: two different event types can carry the same fact.
+Two counterexamples were confirmed on this branch —
+
+  one agent error   poll:   'Fake Agent hit an error: tmux pane died.'
+                  + stream: '"billing" failed: tmux pane died.'
+                    (`_fail_if_alone` turns the error into a mission failure
+                     carrying the SAME reason string)
+
+  pause_mission     tool:   'Mission "payments" is now paused.'
+                  + stream: '"payments" is paused.'
+                    (the tool result Yuri speaks is itself a carrier)
+
+— so a mission event is narrated only when it is the FIRST carrier of its fact.
+The payload's origin field decides that, and it is the only input needed:
+
+  by == "voice"    The user commanded the change; the voice tool's own result is
+                   spoken in the same breath and IS the report. Saying it again
+                   is telling the user what they just did — verbatim the
+                   rationale the `none` bucket already rests on.
+  by == "system"   The change is derived, never original. `_mission_to` is the
+                   sole producer of a system transition, and every transition it
+                   makes echoes a session-level event poll owns and has already
+                   spoken: failed ← agent.error (same `reason` string), paused ←
+                   the session the user just closed, waiting_for_approval ← the
+                   approval request. Nothing is lost by staying silent: poll is
+                   the reliable carrier for those facts — every provider
+                   surfaces an error through `poll_status` whether or not it
+                   streams events — which is why poll owns them in the first
+                   place.
+  anything else    News. "ui" and "api" mean someone clicked a button or called
+                   the API, and no spoken line covered it. Unknown origins
+                   deliberately fail OPEN (spoken): a rare repeat beats a
+                   silently swallowed line, the same trade the frontend's spoken
+                   gate makes on a frame with no id.
+
+`mission.created` is judged the same way but on `created_by`, and suppresses
+ONLY "voice": a mission that Yuri or a script creates unprompted IS news, and
+"handoff" is news with a different verb — `adopt()` picks up a session that was
+already running, so asserting it is "starting" is the honesty class spec §5.2
+forbids (see narration/service.py).
 """
 from __future__ import annotations
 
@@ -56,6 +101,31 @@ ALWAYS_SPEAK: frozenset[str] = frozenset({
     EventType.APPROVAL_REQUESTED, EventType.SESSION_QUESTION})
 
 _LOUD_SEVERITIES = frozenset({"warning", "error"})
+
+# Origins whose facts another carrier already delivered — see "ONE OWNER PER
+# FACT" above. Split per event type because the reasoning differs: a
+# voice-commanded change is reported by the tool result for both, but only a
+# *status change* is derived-and-therefore-silent when it comes from "system".
+VOICE = "voice"
+HANDOFF = "handoff"
+ALREADY_TOLD_ON_CREATE: frozenset[str] = frozenset({VOICE})
+ALREADY_TOLD_ON_STATUS_CHANGE: frozenset[str] = frozenset({VOICE, "system"})
+
+
+def origin(value: object) -> str:
+    """Normalize a payload `by` / `created_by` field. Anything unrecognizable
+    becomes "", which is not in either suppression set — so it is spoken."""
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+def mission_created_is_news(created_by: object) -> bool:
+    """Whether a mission.created event is the first carrier of its fact."""
+    return origin(created_by) not in ALREADY_TOLD_ON_CREATE
+
+
+def mission_status_change_is_news(by: object) -> bool:
+    """Whether a mission.status_changed event is the first carrier of its fact."""
+    return origin(by) not in ALREADY_TOLD_ON_STATUS_CHANGE
 
 
 def normalize_mode(value: object) -> Mode:

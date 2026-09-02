@@ -59,6 +59,43 @@ class OwnershipTable(unittest.TestCase):
         self.assertEqual(policy.owner_of("something.invented"), "none")
 
 
+class OneOwnerPerFact(unittest.TestCase):
+    """Per-TYPE ownership is strictly weaker than "the user hears each fact
+    once": `_fail_if_alone` turns one agent.error into a mission.status_changed
+    carrying the same reason string, and a voice tool's own spoken result is a
+    third carrier the type table never modelled. The origin field decides who
+    speaks. See the policy module docstring."""
+
+    def test_a_voice_commanded_change_is_not_news(self):
+        self.assertFalse(policy.mission_status_change_is_news("voice"))
+        self.assertFalse(policy.mission_created_is_news("voice"))
+
+    def test_a_system_status_change_is_derived_and_silent(self):
+        # failed ← agent.error, paused ← the session the user closed.
+        self.assertFalse(policy.mission_status_change_is_news("system"))
+
+    def test_a_system_or_handoff_mission_is_still_news(self):
+        # Nobody spoke for these: Yuri started work herself, or picked up a
+        # session that was already running.
+        self.assertTrue(policy.mission_created_is_news("system"))
+        self.assertTrue(policy.mission_created_is_news("handoff"))
+
+    def test_ui_and_api_are_news_on_both(self):
+        for by in ("ui", "api"):
+            self.assertTrue(policy.mission_status_change_is_news(by), by)
+            self.assertTrue(policy.mission_created_is_news(by), by)
+
+    def test_an_unknown_or_missing_origin_fails_open(self):
+        # A rare repeat beats a silently swallowed line.
+        for by in (None, "", "   ", 7, {}, "orchestrator"):
+            self.assertTrue(policy.mission_status_change_is_news(by), repr(by))
+            self.assertTrue(policy.mission_created_is_news(by), repr(by))
+
+    def test_origin_is_case_and_space_insensitive(self):
+        self.assertEqual(policy.origin("  VOICE "), "voice")
+        self.assertFalse(policy.mission_status_change_is_news(" System "))
+
+
 class ModeFilter(unittest.TestCase):
     def _speaks(self, t, mode):
         sev = DEFAULTS.get(t, ("info", False))[0]

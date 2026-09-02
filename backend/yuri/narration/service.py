@@ -14,7 +14,8 @@ prompt engineering that belongs with the text, not with the transport.
 from __future__ import annotations
 
 from yuri.domain.event import DEFAULTS, EventType, YuriEvent
-from .policy import Mode, owner_of, speaks
+from .policy import (HANDOFF, Mode, mission_created_is_news,
+                     mission_status_change_is_news, origin, owner_of, speaks)
 
 ASSISTANT_TEXT_CAP = 900
 REQUEST_CAP = 90
@@ -63,12 +64,25 @@ class NarrationService:
         t = event.type
 
         if t == "mission.created":
+            # One owner per FACT: a mission the user asked for by voice is
+            # already reported by start_session's own spoken result (policy.py).
+            if not mission_created_is_news(p.get("created_by")):
+                return None
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "a new mission"
             project = _clip(str(p.get("project") or ""), PROJECT_CAP)
             where = f" in {project}" if project else ""
+            if origin(p.get("created_by")) == HANDOFF:
+                # adopt(): the tmux session was already running before Yuri saw
+                # it. "Starting" would assert something that did not happen —
+                # the honesty class spec §5.2 forbids.
+                return f'Picking up "{title}"{where}.'
             return f'Starting "{title}"{where}.'
 
         if t == "mission.status_changed":
+            # One owner per FACT: "voice" was reported by the tool result,
+            # "system" is derived from a session event poll already spoke.
+            if not mission_status_change_is_news(p.get("by")):
+                return None
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "that mission"
             to = p.get("to")
             reason = _clip(str(p.get("reason") or ""), REASON_CAP)

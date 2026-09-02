@@ -17,6 +17,7 @@ from unittest import mock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config  # noqa: E402
+import tools  # noqa: E402
 from yuri import app as yapp  # noqa: E402
 from yuri.domain.event import EventType  # noqa: E402
 from yuri.providers.fake import FakeAgentProvider  # noqa: E402
@@ -78,6 +79,72 @@ class PollNarration(unittest.IsolatedAsyncioTestCase):
         res = self.c.sessions.poll(sid)
         for k in ("status", "session_id", "assistant_text"):
             self.assertIn(k, res)
+
+
+class OneOwnerPerFact(unittest.IsolatedAsyncioTestCase):
+    """End-to-end count of the SPOKEN lines one happening produces.
+
+    The type-level ownership table is not enough — `_fail_if_alone` turns one
+    agent error into a mission failure carrying the same reason string, and a
+    voice tool's own result is a third carrier. Everything that reaches
+    `injectUpdate` is counted here, so a regression shows up as "she said it
+    twice" rather than as a passing per-type assertion.
+    """
+
+    def setUp(self):
+        PollNarration.setUp(self)
+
+    def tearDown(self):
+        tools._last_start = None       # the duplicate-start guard is module state
+        PollNarration.tearDown(self)
+
+    def _stream_lines(self, q) -> list[str]:
+        """Every line the SSE stream would carry for what was just published."""
+        out = []
+        while not q.empty():
+            line = self.c.narration.line_for(q.get_nowait(), yapp.narration_mode())
+            if line:
+                out.append(line)
+        return out
+
+    async def test_one_agent_error_is_spoken_exactly_once(self):
+        sid = (await self.c.sessions.start("proj", name="billing"))["session_id"]
+        q = self.c.bus.subscribe()
+        self.fake.script(sid, {"status": "error", "error": "tmux pane died"})
+        poll_line = self.c.sessions.poll(sid)["narration"]
+        spoken = [l for l in [poll_line] if l] + self._stream_lines(q)
+        self.assertEqual(len(spoken), 1, spoken)
+        self.assertIn("tmux pane died", spoken[0])
+        # Silence is not because nothing happened: the mission really failed.
+        self.assertEqual([m.status for m in self.c.store.missions.list()], ["failed"])
+
+    async def test_start_session_speaks_only_its_own_result(self):
+        q = self.c.bus.subscribe()
+        res = await tools.dispatch_tool("start_session", {"project_path": "proj", "name": "billing"})
+        self.assertIn("billing", res["message"])
+        self.assertEqual(self._stream_lines(q), [])
+
+    async def test_close_session_speaks_only_its_own_result(self):
+        sid = (await self.c.sessions.start("proj", name="payments"))["session_id"]
+        q = self.c.bus.subscribe()
+        res = await tools.dispatch_tool("close_session", {"session_id": sid})
+        self.assertEqual(res["status"], "closed")
+        self.assertEqual(self._stream_lines(q), [])
+        self.assertEqual([m.status for m in self.c.store.missions.list()], ["paused"])
+
+    async def test_pause_mission_speaks_only_its_own_result(self):
+        await self.c.sessions.start("proj", name="payments")
+        q = self.c.bus.subscribe()
+        res = await tools.dispatch_tool("pause_mission", {})
+        self.assertIn("paused", res["message"])
+        self.assertEqual(self._stream_lines(q), [])
+
+    async def test_a_ui_pause_is_still_narrated(self):
+        # Nothing spoke for this one, so the stream must.
+        out = await self.c.sessions.start("proj", name="payments")
+        q = self.c.bus.subscribe()
+        await self.c.missions.pause(out["mission_id"], by="ui")
+        self.assertEqual(len(self._stream_lines(q)), 1)
 
 
 class StreamNarration(unittest.IsolatedAsyncioTestCase):

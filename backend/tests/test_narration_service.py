@@ -40,6 +40,50 @@ class Lines(unittest.TestCase):
         self.assertIn("failed", failed)
         self.assertIn("tests did not pass", failed)
 
+    def test_a_voice_commanded_mission_is_never_narrated(self):
+        # The user asked for it and start_session's own result is spoken in the
+        # same breath — a second line is telling them what they just did.
+        self.assertIsNone(self._line(EventType.MISSION_CREATED,
+                                     {"title": "billing", "project": "proj",
+                                      "created_by": "voice"}))
+
+    def test_an_adopted_mission_is_picked_up_not_started(self):
+        # adopt() creates the mission for a tmux session that was ALREADY
+        # running. "Starting" asserts something that did not happen.
+        line = self._line(EventType.MISSION_CREATED,
+                          {"title": "billing", "project": "proj", "created_by": "handoff"})
+        self.assertIn("Picking up", line)
+        self.assertNotIn("Starting", line)
+        self.assertIn("billing", line)
+
+    def test_a_ui_created_mission_still_starts(self):
+        for by in ("ui", "api", "system", None):
+            line = self._line(EventType.MISSION_CREATED,
+                              {"title": "billing", "created_by": by})
+            self.assertIn("Starting", line or "", repr(by))
+
+    def test_a_voice_commanded_status_change_is_never_narrated(self):
+        for to in ("paused", "cancelled", "completed", "failed"):
+            self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
+                                         {"title": "payments", "from": "running",
+                                          "to": to, "by": "voice"}), to)
+
+    def test_a_system_status_change_is_never_narrated(self):
+        # Derived from a session-level event poll owns and already spoke:
+        # failed <- agent.error (same reason string), paused <- session closed.
+        self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
+                                     {"title": "billing", "from": "running", "to": "failed",
+                                      "by": "system", "reason": "tmux pane died"}))
+        self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
+                                     {"title": "billing", "from": "running", "to": "paused",
+                                      "by": "system", "reason": "session closed"}))
+
+    def test_a_ui_status_change_is_still_narrated(self):
+        line = self._line(EventType.MISSION_STATUS_CHANGED,
+                          {"title": "payments", "from": "running", "to": "paused", "by": "ui"})
+        self.assertIn("payments", line)
+        self.assertIn("paused", line)
+
     def test_waiting_for_approval_is_silent_the_approval_speaks(self):
         self.assertIsNone(self._line(EventType.MISSION_STATUS_CHANGED,
                                      {"title": "t", "from": "running",
