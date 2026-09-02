@@ -23,12 +23,20 @@ from typing import Any
 
 from slash_commands import list_slash_commands
 from yuri.app import container
+from yuri.domain.mission import InvalidTransition
+from yuri.services.missions import GOAL_SPEECH_MAX, TITLE_SPEECH_MAX, clip_speech
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
 # spawning a twin. {"ts": monotonic, "handle": str, "name": str} or None.
 START_GUARD_SECS = 15.0
 _last_start: dict[str, Any] | None = None
+
+# Ceiling on list_missions. The store's own cap is 200 rows, and each row
+# carries a title, a goal and its session names — a list that long is not
+# something the voice model can read back, and it is text the user never asked
+# for. Newest first, so the cap drops the least relevant end.
+MISSION_LIST_MAX = 40
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -276,6 +284,56 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["fact"],
         },
     },
+    {
+        "type": "function",
+        "name": "list_missions",
+        "description": "List Yuri's missions — the units of work. Call this when the user asks what's running, what you're working on, or what happened. Omit status for the active ones; pass a status to filter (running, waiting_for_approval, paused, completed, failed, cancelled). Only the most recently updated missions are returned.",
+        "parameters": {
+            "type": "object",
+            "properties": {"status": {"type": "string", "description": "Optional status filter."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "mission_status",
+        "description": "Details of one mission: its goal, status, which agents are on it, its sessions and any pending approval. Omit mission to mean the one active mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "pause_mission",
+        "description": "Pause a mission, interrupting any agent currently working on it. Use this for 'pause that', 'hold on', or 'stop the payment one'. Omit mission to mean the one active mission. Resume it later with resume_mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "resume_mission",
+        "description": "Resume a paused mission. Omit mission to mean the one active mission. Resuming does not itself give the agent new instructions — use tell_claude for that.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "cancel_mission",
+        "description": "Cancel a mission and stop its agents. This ends the work — confirm with the user first, naming the mission you are about to cancel. Omit mission to mean the one active mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -472,5 +530,38 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         c.journal.append(f"remembered{' for ' + slug if slug else ''}: {args.get('fact', '')}")
         return {"ok": True, "path": path,
                 "message": "Remembered." if not slug else f"Noted under {slug}."}
+
+    if name == "list_missions":
+        c = container()
+        status = (args.get("status") or "").strip() or None
+        missions = c.missions.list(status=status) if status else c.missions.active()
+        projects = {p.id: p.name for p in c.projects.registered()}
+        out = []
+        for m in missions[:MISSION_LIST_MAX]:
+            sessions = c.store.sessions.list(mission_id=m.id)
+            out.append({"id": m.id, "title": clip_speech(m.title, TITLE_SPEECH_MAX),
+                        "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None,
+                        "status": m.status, "project": projects.get(m.project_id),
+                        "agents": sorted({s.agent_id for s in sessions}),
+                        "sessions": [s.name for s in sessions if s.name]})
+        return {"missions": out}
+
+    if name == "mission_status":
+        c = container()
+        # resolve() raises ValueError on an unknown or ambiguous reference —
+        # a soft error the model reads back to the user (see main.py).
+        return c.missions.speech_detail(c.missions.resolve(args.get("mission", "")).id)
+
+    if name in ("pause_mission", "resume_mission", "cancel_mission"):
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        verb = name.split("_")[0]
+        try:
+            m = await getattr(c.missions, verb)(m.id, by="voice")
+        except InvalidTransition as exc:
+            raise ValueError(str(exc)) from exc     # soft error the model can recover from
+        title = clip_speech(m.title, TITLE_SPEECH_MAX)
+        return {"mission_id": m.id, "title": title, "status": m.status,
+                "message": f'Mission "{title}" is now {m.status}.'}
 
     raise KeyError(f"unknown tool: {name}")

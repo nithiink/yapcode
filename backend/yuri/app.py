@@ -6,7 +6,8 @@ WHY the shape:
 
 * One place, one graph. Every wire that cannot be expressed as a constructor
   argument lives here and nowhere else: the provider observers (provider event
-  -> SessionService), `missions.stop_sessions` (injected to break the
+  -> SessionService), `missions.stop_sessions` / `missions.interrupt_sessions`
+  (both injected to break the
   Mission<->Session cycle), and `session_manager.set_provider` (the module's
   provider slot must hold the SAME ClaudeCodeProvider as the services — two
   live TmuxClaudeRunners would fight over the same tmux control dirs and both
@@ -136,6 +137,7 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
                                   default_agent=default_agent, router=router)
         missions.stop_sessions = sessions.stop_many
+        missions.interrupt_sessions = sessions.interrupt_many
         for p in registry.all():
             # Observer is (handle, ProviderEvent); on_provider_event also wants
             # the agent id, which the provider never sends — bind it here.

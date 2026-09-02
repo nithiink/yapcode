@@ -471,6 +471,20 @@ class SessionService:
                 log.exception("stop failed for session %s; marking it lost", r.id)
                 self._touch(r, "lost")
 
+    async def interrupt_many(self, rows: list[AgentSession]) -> None:
+        """Interrupt each session, surviving a provider that fails on one.
+
+        Unlike stop_many this records nothing on failure: an interrupt that did
+        not land leaves the session exactly as it was (still live, still
+        whatever status it held), so there is no honest status change to make
+        (spec §38). MissionService.pause depends on this returning rather than
+        raising, so one wedged provider cannot block the pause."""
+        for r in rows:
+            try:
+                await self.interrupt(r.native_session_id)
+            except Exception:
+                log.exception("interrupt failed for session %s (%s)", r.id, r.agent_id)
+
     async def set_mode(self, ref: str, mode: str) -> dict:
         handle = self.resolve(ref)
         p = self._provider_for(handle)

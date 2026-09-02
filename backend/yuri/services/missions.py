@@ -2,6 +2,7 @@
 SessionService.start; explicit start/routing arrives with the orchestrator."""
 from __future__ import annotations
 
+import re
 from typing import Awaitable, Callable
 
 from yuri.domain.event import EventType, YuriEvent
@@ -14,14 +15,71 @@ from yuri.store.base import Store
 
 GOAL_MAX = 500
 
+# Caps on every string this module hands to the voice model. None of these
+# fields is bounded upstream (a mission title comes straight from a session
+# name; an approval description can be an entire plan), and the model reads
+# them aloud, so clip here rather than trusting the producer.
+TITLE_SPEECH_MAX = 80
+GOAL_SPEECH_MAX = 240
+APPROVAL_SPEECH_MAX = 300
+# How many candidate titles a refusal names. Reading out 200 titles is not a
+# question the user can answer; the model asks with the newest few.
+CANDIDATES_MAX = 6
+# Ceiling on the id/title scan in resolve(). store.missions.list() orders by
+# updated_at DESC, so this keeps the most recent work reachable by name; a full
+# id still resolves via the indexed get() regardless of the cap.
+SCAN_MAX = 500
+
+# Spoken references to "the mission" rather than a name. Resolution treats these
+# as "the one obvious mission" and refuses when more than one is active.
+_DEICTIC = frozenset({"", "it", "that", "this", "this one", "that one", "the current one",
+                      "current", "the mission", "mission", "the current mission",
+                      "the one", "the active one"})
+_WORD_RE = re.compile(r"[a-z0-9]+")
+# Words that carry no identifying information. Without this, "the docs one"
+# matches every active title containing "the" and resolution refuses a
+# reference that was actually unambiguous.
+_NOISE = frozenset({"a", "an", "and", "at", "be", "for", "from", "in", "into", "is", "it",
+                    "me", "my", "of", "on", "one", "ones", "or", "our", "please", "that",
+                    "the", "then", "there", "these", "this", "those", "to", "with",
+                    "mission", "missions", "task", "tasks", "job", "jobs", "work",
+                    "current", "active", "thing", "stuff", "about", "just", "now"})
+# A spoken phrase must never enter the id-prefix branch: uuid4 ids are hex
+# with dashes, so anything outside that alphabet cannot be an id fragment.
+# Most words fail on one letter ("cashfree" has s/h/r) — but "cafe", "dead",
+# "added" and "facade" are all valid hex, and at four characters one of those
+# prefixes a real uuid roughly once in 65k missions. So require a full uuid
+# segment (8), which no English word satisfies, and match exact titles BEFORE
+# prefixes anyway. Below 8 a hex-spelled word falls through to the fuzzy step,
+# where it is compared against titles instead of ids.
+_ID_FRAGMENT_RE = re.compile(r"^[0-9a-f][0-9a-f-]{7,}$")
+
+
+def clip_speech(text: str | None, cap: int) -> str:
+    """Whitespace-normalize and cap. Everything spoken goes through here."""
+    text = " ".join((text or "").split())
+    return text if len(text) <= cap else text[: cap - 1] + "…"
+
+
+def _words(text: str) -> set[str]:
+    return set(_WORD_RE.findall((text or "").lower()))
+
 
 class MissionService:
+    #: Statuses that mean "live work". Fuzzy resolution and the deictic
+    #: ("it", "that one") path are scoped to these, so a spoken reference can
+    #: never land on finished work the user has stopped thinking about.
+    ACTIVE: tuple[str, ...] = ("running", "waiting_for_approval", "paused", "queued")
+
     def __init__(self, store: Store, bus: EventBus, journal: Journal):
         self.store = store
         self.bus = bus
         self.journal = journal
         # Injected by the container (SessionService.stop_many) to avoid a cycle.
         self.stop_sessions: Callable[[list[AgentSession]], Awaitable[None]] | None = None
+        # Injected by the container (SessionService.interrupt_many) to avoid a
+        # circular import, same as stop_sessions.
+        self.interrupt_sessions: Callable[[list[AgentSession]], Awaitable[None]] | None = None
 
     def get(self, mission_id: str) -> Mission:
         m = self.store.missions.get(mission_id)
@@ -88,8 +146,123 @@ class MissionService:
                 "approvals": [a.to_dict() for a in approvals],
                 "events": [e.to_dict() for e in self.store.events.list(mission_id=m.id, limit=50)]}
 
+    # --- spoken references ----------------------------------------------------
+
+    def active(self) -> list[Mission]:
+        """Missions that are live work, newest first."""
+        out: list[Mission] = []
+        for status in self.ACTIVE:
+            out.extend(self.store.missions.list(status=status))
+        return sorted(out, key=lambda m: m.updated_at, reverse=True)
+
+    @staticmethod
+    def _refuse(candidates: list[Mission], lead: str) -> ValueError:
+        """Build the refusal. Titles are clipped and the list is capped: the
+        message is read aloud, and neither field is bounded upstream."""
+        shown = candidates[:CANDIDATES_MAX]
+        names = ", ".join(f'"{clip_speech(m.title, TITLE_SPEECH_MAX)}"' for m in shown)
+        extra = len(candidates) - len(shown)
+        if extra > 0:
+            names += f", and {extra} more"
+        return ValueError(f"{lead} {names}. Ask the user which one.")
+
+    def resolve(self, ref: str) -> Mission:
+        """Resolve a spoken mission reference, refusing to guess.
+
+        Order: exact id, exact title (any status), unique id prefix, then word
+        overlap against ACTIVE titles. A deictic phrase ("it", "the current
+        one") means the sole active mission. Ambiguity raises ValueError listing
+        the candidates — cancelling the wrong mission is worse than asking.
+
+        Exact titles are matched BEFORE id prefixes, inverting design §8.1's
+        order: uuid4 ids are hex, and hex-spelled words ("cafe", "added",
+        "facade") are plausible titles, so a title said in full could otherwise
+        be read as some *other* mission's id prefix — a silent wrong pick. The
+        prefix branch is additionally gated on the ref looking like an id
+        fragment at all (see _ID_FRAGMENT_RE). Nothing reachable before is lost:
+        a full id is still matched first, by primary key.
+        """
+        ref = " ".join((ref or "").strip().split())
+        low = ref.lower()
+        active = self.active()
+
+        if low in _DEICTIC:
+            if len(active) == 1:
+                return active[0]
+            if not active:
+                raise ValueError("There are no active missions right now.")
+            raise self._refuse(active, f"Which mission? {len(active)} are active:")
+
+        exact = self.store.missions.get(ref)
+        if exact is not None:
+            return exact
+
+        all_missions = self.store.missions.list(limit=SCAN_MAX)
+
+        titled = [m for m in all_missions if m.title.lower() == low]
+        if len(titled) == 1:
+            return titled[0]
+        if len(titled) > 1:
+            # Same title twice: prefer a live one, else refuse.
+            live = [m for m in titled if m.status in self.ACTIVE]
+            if len(live) == 1:
+                return live[0]
+            raise self._refuse(titled, "Several missions have that name:")
+
+        if _ID_FRAGMENT_RE.match(low):
+            prefix = [m for m in all_missions if m.id.startswith(low)]
+            if len(prefix) == 1:
+                return prefix[0]
+            if len(prefix) > 1:
+                raise self._refuse(prefix, "That id prefix matches several missions:")
+
+        # Fuzzy: scoped to ACTIVE, so "the payment one" means live work.
+        wanted = _words(low) - _NOISE
+        if wanted:
+            hits = [m for m in active if wanted & _words(m.title)]
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                raise self._refuse(hits, f"{len(hits)} active missions match that:")
+
+        if not all_missions:
+            raise ValueError("There are no missions yet.")
+        if active:
+            raise self._refuse(active,
+                               f"I could not match '{clip_speech(ref, TITLE_SPEECH_MAX)}'. "
+                               "Active missions:")
+        raise ValueError(f"I could not match '{clip_speech(ref, TITLE_SPEECH_MAX)}', "
+                         "and nothing is active right now.")
+
+    def speech_detail(self, mission_id: str) -> dict:
+        """A mission shaped for speaking, not the full detail() dump."""
+        m = self.get(mission_id)
+        project = self.store.projects.get(m.project_id)
+        sessions = self.store.sessions.list(mission_id=m.id)
+        pending = None
+        for s in sessions:
+            a = self.store.approvals.pending_for_session(s.id)
+            if a is not None:
+                pending = clip_speech(a.description or a.tool_name, APPROVAL_SPEECH_MAX)
+                break
+        events = self.store.events.list(mission_id=m.id, limit=1)
+        return {"mission_id": m.id, "title": clip_speech(m.title, TITLE_SPEECH_MAX),
+                "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None, "status": m.status,
+                "project": project.name if project else None,
+                "agents": sorted({s.agent_id for s in sessions}),
+                "sessions": [{"name": s.name, "status": s.status} for s in sessions],
+                "pending_approval": pending,
+                "last_event": events[-1].type if events else None}
+
+    # --- lifecycle ------------------------------------------------------------
+
     async def pause(self, mission_id: str, by: str) -> Mission:
         m = self.get(mission_id)
+        live = self.store.sessions.list(mission_id=m.id, live_only=True)
+        if live and self.interrupt_sessions is not None:
+            # Interrupt BEFORE transitioning so a stop-triggered status change
+            # cannot race the pause (same ordering cancel() already uses).
+            await self.interrupt_sessions(live)
         self.set_status(m, "paused", by)
         return m
 
