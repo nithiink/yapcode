@@ -7,6 +7,13 @@ import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSess
 import { INSTRUCTIONS, yuriContextBlock, type YuriContext } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
 import { scopedClearPending } from "@/lib/promptState";
+import {
+  NARRATION_MODES,
+  createSpokenGate,
+  isNarrationMode,
+  narrationOf,
+  type NarrationMode,
+} from "@/lib/narration";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
 
@@ -391,6 +398,14 @@ const BACKEND_LABEL: Record<ClaudeBackend, string> = {
   sdk: "SDK",
 };
 
+// How much Yuri says out loud. Wording matches the voice instructions in
+// lib/operating.ts so the button and the spoken command mean the same thing.
+const NARRATION_LABEL: Record<NarrationMode, { label: string; title: string }> = {
+  quiet: { label: "Quiet", title: "Only problems and things needing your answer" },
+  normal: { label: "Normal", title: "Meaningful progress (recommended)" },
+  verbose: { label: "Verbose", title: "Every tool call and cost update too" },
+};
+
 // A calm, coarse caption for the orb. The orb's volume animation conveys the
 // moment-to-moment activity, so we deliberately collapse listening/hearing/
 // speaking into one steady "Listening" label instead of churning the words.
@@ -443,6 +458,12 @@ export default function VoiceAgent() {
   // can prompt them to disconnect first.
   const [modelLockHint, setModelLockHint] = useState(false);
   const [modelLabel, setModelLabel] = useState("");
+  // How much Yuri narrates. Deliberately NOT persisted to localStorage: the
+  // backend remembers it (settings row) and voice can change it mid-sentence,
+  // so a second copy here could disagree with what she actually speaks. null
+  // means "not read yet / backend unreachable" — the control stays clickable.
+  const [narrationMode, setNarrationMode] = useState<NarrationMode | null>(null);
+  const [narrationBusy, setNarrationBusy] = useState(false);
   const [vstate, setVstate] = useState<VoiceState>("idle");
   const [muted, setMuted] = useState(false);
   const [status, setStatus] = useState("Tap connect and start talking.");
@@ -485,6 +506,12 @@ export default function VoiceAgent() {
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const logAtBottomRef = useRef(true);
   const esRef = useRef<EventSource | null>(null);
+  // The narration stream is a SECOND, separate subscription from the Activity
+  // panel's /debug/stream above: different endpoint, different payload, and it
+  // only lives while a voice session is connected.
+  const narrationEsRef = useRef<EventSource | null>(null);
+  // Held across reconnects on purpose — see createSpokenGate's comment.
+  const narrationGateRef = useRef(createSpokenGate());
 
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -675,11 +702,9 @@ export default function VoiceAgent() {
   const handleClaudeResult = (res: any) => {
     if (!res || typeof res !== "object") return;
     const sid = res.session_id;
-    // Name the originating request so the model can't confuse this update with a
-    // previous prompt's (the backend threads it through as res.request).
-    const reqRaw = (res.request || "").trim();
-    const req = reqRaw.length > 90 ? `${reqRaw.slice(0, 90)}…` : reqRaw;
-    const forReq = req ? ` for your request “${req}”` : "";
+    // The prompt card is UI state and stays client-side; only the WORDING moved
+    // to the backend, which threads the originating request, the option
+    // numbering and the risk lead-in into res.narration.
     if ((res.status === "needs_permission" || res.status === "needs_choice") && res.prompt) {
       setPending({
         sessionId: sid,
@@ -687,29 +712,17 @@ export default function VoiceAgent() {
         text: res.prompt.text,
         options: res.prompt.options || [],
       });
-      // Number the options and separate them with semicolons. The raw option
-      // strings can themselves contain commas and arrows (e.g. '"Train-Us" →
-      // "Train"'), so a bare comma-join renders them ambiguously when spoken.
-      const opts = (res.prompt.options || [])
-        .map((o: string, i: number) => `(${i + 1}) ${o}`)
-        .join("; ");
-      const msg =
-        res.prompt.kind === "choice"
-          ? `[Claude update] Claude is asking${forReq}: ${res.prompt.text}${opts ? ` The options are: ${opts}.` : ""} Read the options to the user and get their choice.`
-          : `[Claude update] Claude needs permission${forReq} to ${res.prompt.text}. Ask the user to approve or deny.`;
-      sessionRef.current?.injectUpdate(msg);
-      logDebug("inject", msg, { session: sid }, "backend", "voice");
-    } else if (res.status === "completed") {
+    } else if (res.status === "completed" || res.status === "error") {
       clearPendingFor(sid);
-      const txt = (res.assistant_text || "").trim();
-      const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${txt}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
-      sessionRef.current?.injectUpdate(msg);
-      logDebug("inject", msg, { session: sid }, "backend", "voice");
-    } else if (res.status === "error") {
-      clearPendingFor(sid);
-      const msg = `[Claude update] Claude hit an error${forReq}: ${res.error || "unknown"}. Tell the user.`;
-      sessionRef.current?.injectUpdate(msg);
-      logDebug("inject", msg, { session: sid }, "backend", "voice");
+    }
+    // Wording comes from the backend so it is consistent, testable, and the
+    // same for any future non-browser surface. See lib/narration.ts. The poll
+    // owns the four session-turn events (backend yuri/narration/policy.py), so
+    // the same result never also arrives narrated on the event stream.
+    const line = narrationOf(res);
+    if (line) {
+      sessionRef.current?.injectUpdate(line);
+      logDebug("inject", line, { session: sid }, "backend", "voice");
     }
     refreshSessions();
   };
@@ -848,6 +861,46 @@ export default function VoiceAgent() {
     }
   };
 
+  // Read the server's narration mode. The backend is the single source of
+  // truth, so a failure (it answers 503 while the home dir is unavailable)
+  // leaves the last known value on screen rather than blanking the control —
+  // and the buttons still work, because a PUT sets the mode outright.
+  const refreshNarrationMode = useCallback(async () => {
+    try {
+      const r = await fetch("/api/yuri/narration", { headers: authHeaders() });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (isNarrationMode(d?.mode)) setNarrationMode(d.mode);
+    } catch {
+      /* keep the last known mode */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshNarrationMode();
+  }, [refreshNarrationMode]);
+
+  const changeNarrationMode = async (mode: NarrationMode) => {
+    const prev = narrationMode;
+    setNarrationMode(mode); // optimistic, like switchMode; reconciled below
+    setNarrationBusy(true);
+    try {
+      const r = await fetch("/api/yuri/narration", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ mode }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (isNarrationMode(d?.mode)) setNarrationMode(d.mode);
+    } catch (err: any) {
+      setNarrationMode(prev); // never show a mode the backend didn't accept
+      logDebug("error", `narration mode change failed: ${err?.message || err}`, { mode }, "user", "backend");
+    } finally {
+      setNarrationBusy(false);
+    }
+  };
+
   // Point-in-time context appended to the static instructions at connect():
   // Claude sessions outlive voice connections, so a fresh model otherwise wakes
   // up blind to what's running and re-asks (or worse, re-creates). Built ONCE
@@ -902,7 +955,7 @@ export default function VoiceAgent() {
     return `${proto}://${host}:${process.env.BACKEND_PORT || "8000"}`;
   };
 
-  // Push a browser-only event (voice transcripts, [Claude update] injections,
+  // Push a browser-only event (voice transcripts, narration injections,
   // voice errors, connect/disconnect) into the backend bus so it lands in the
   // file and streams back to every panel alongside the backend events.
   const logDebug = (
@@ -947,6 +1000,57 @@ export default function VoiceAgent() {
       esRef.current = null;
     };
   }, []);
+
+  // Mission-level narration: the poll loop owns the session-turn events, the
+  // stream owns mission state and lost contact (the backend's
+  // yuri/narration/policy.py decides which, and sends narration:null on the
+  // carrier that doesn't own an event — so subscribing to both cannot
+  // double-speak). Only frames carrying a line are spoken.
+  //
+  // Gated on the voice session being connected: narrating into a closed
+  // session is pointless, and it avoids holding a stream open on a page nobody
+  // is talking to.
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+    const gate = narrationGateRef.current;
+    (async () => {
+      // The stream ALWAYS replays its newest events, and `limit` is clamped to
+      // a minimum of 1 server-side, so there is no way to ask for no replay.
+      // Seeding the gate with the newest event id is what makes that replay
+      // silent — without it, connecting would re-speak the last thing that
+      // happened, possibly from hours ago. Best-effort: if this read fails the
+      // cost is one stale line, not a broken stream.
+      try {
+        const r = await fetch("/api/yuri/events?limit=1", { headers: authHeaders() });
+        if (r.ok) {
+          const d = await r.json();
+          gate.seed((Array.isArray(d?.events) ? d.events : []).map((e: any) => e?.id));
+        }
+      } catch {
+        /* nothing to seed; the gate still dedupes every later reconnect */
+      }
+      if (cancelled) return; // disconnected while we were seeding
+      const es = new EventSource(withAuthParam(`${backendBase()}/yuri/events/stream?limit=1`));
+      narrationEsRef.current = es;
+      es.onmessage = (m) => {
+        try {
+          const line = gate.lineFor(JSON.parse(m.data));
+          if (line) {
+            sessionRef.current?.injectUpdate(line);
+            logDebug("inject", line, undefined, "backend", "voice");
+          }
+        } catch {
+          /* malformed frame; ignore */
+        }
+      };
+    })();
+    return () => {
+      cancelled = true;
+      narrationEsRef.current?.close();
+      narrationEsRef.current = null;
+    };
+  }, [connected]);
 
   // Auto-scroll to the newest line only when the user is already at the bottom,
   // so scrolling up to read history isn't yanked back down by new events.
@@ -1160,6 +1264,10 @@ export default function VoiceAgent() {
         setMuted(true);
         sessionRef.current?.setMuted(true);
       }
+      // The user changed how much she narrates by voice ("be quiet", "tell me
+      // everything"). Re-read the server value so the on-screen toggle agrees
+      // with what she'll actually speak.
+      if (e.name === "set_narration") refreshNarrationMode();
       if (
         ["start_session", "tell_claude", "answer_prompt", "interrupt_session", "set_mode", "close_session", "rename_session", "run_slash_command"].includes(
           e.name,
@@ -1514,6 +1622,30 @@ export default function VoiceAgent() {
                   onClick={() => setBackend(b)}
                 >
                   {BACKEND_LABEL[b]}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Narration is a live setting — unlike provider/backend/model it is
+              NOT locked while connected, because "be quiet" has to work
+              mid-conversation. It lives on the backend, so voice and this
+              control always show the same value. */}
+          <div className="grp">
+            <span className="grplab">Narration</span>
+            <div className="seg" role="group" aria-label="Narration mode" aria-busy={narrationBusy}>
+              {NARRATION_MODES.map((m) => (
+                <button
+                  key={m}
+                  className={`segbtn ${narrationMode === m ? "on" : ""}`}
+                  aria-pressed={narrationMode === m}
+                  // Same as switchMode's per-session buttons: one change at a
+                  // time, so two fast clicks can't land their PUTs out of order
+                  // and leave the control showing the mode that lost.
+                  disabled={narrationBusy}
+                  onClick={() => changeNarrationMode(m)}
+                  title={NARRATION_LABEL[m].title}
+                >
+                  {NARRATION_LABEL[m].label}
                 </button>
               ))}
             </div>
