@@ -17,9 +17,10 @@ from typing import Callable
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from yuri.app import container
+from yuri.app import container, narration_mode, set_narration_mode
 from yuri.domain.mission import InvalidTransition
-from .schemas import ProjectCreate
+from yuri.narration.policy import MODES
+from .schemas import NarrationUpdate, ProjectCreate
 
 ACTIVE = ("running", "waiting_for_approval", "paused", "queued")
 
@@ -51,7 +52,20 @@ def build_router(require_auth: Callable) -> APIRouter:
                 "journal_today": c.journal.read_today(),
                 "active_missions": [{"id": m.id, "title": m.title, "goal": m.goal, "status": m.status,
                                      "project": projects.get(m.project_id)} for m in missions],
-                "agents": [{"id": p.id, "name": p.name, **health[p.id].to_dict()} for p in c.registry.all()]}
+                "agents": [{"id": p.id, "name": p.name, **health[p.id].to_dict()} for p in c.registry.all()],
+                "narration_mode": narration_mode()}
+
+    # --- narration ------------------------------------------------------------
+    @r.get("/narration")
+    async def get_narration():
+        return {"mode": narration_mode(), "modes": list(MODES)}
+
+    @r.put("/narration")
+    async def put_narration(body: NarrationUpdate):
+        try:
+            return {"mode": set_narration_mode(body.mode)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     # --- projects -----------------------------------------------------------
     @r.get("/projects")

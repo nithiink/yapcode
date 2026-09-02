@@ -287,6 +287,16 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "set_narration",
+        "description": "Change how much you narrate. 'quiet' = only problems and things needing the user's answer; 'normal' = meaningful progress; 'verbose' = every tool and cost update too. Call this when the user says be quiet, stop narrating, tell me everything, or go back to normal. The setting is remembered.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mode": {"type": "string", "enum": ["quiet", "normal", "verbose"]}},
+            "required": ["mode"],
+        },
+    },
+    {
+        "type": "function",
         "name": "list_missions",
         "description": "List Yuri's missions — the units of work. Call this when the user asks what's running, what you're working on, or what happened. Omit status for the active ones; pass a status to filter (running, waiting_for_approval, paused, completed, failed, cancelled). Only the most recently updated missions are returned.",
         "parameters": {
@@ -531,6 +541,14 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         c.journal.append(f"remembered{' for ' + slug if slug else ''}: {args.get('fact', '')}")
         return {"ok": True, "path": path,
                 "message": "Remembered." if not slug else f"Noted under {slug}."}
+
+    if name == "set_narration":
+        from yuri.app import set_narration_mode
+        mode = set_narration_mode(args.get("mode"))
+        blurb = {"quiet": "Going quiet — I'll only speak up for problems and anything needing your answer.",
+                 "normal": "Back to normal narration.",
+                 "verbose": "I'll narrate everything, including each tool call."}[mode]
+        return {"mode": mode, "message": blurb}
 
     if name == "list_missions":
         c = container()

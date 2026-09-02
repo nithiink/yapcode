@@ -32,6 +32,8 @@ import session_manager
 from yuri.domain.event import YuriEvent
 from yuri.events.bus import EventBus, bridge_to_event_log
 from yuri.home import Home, default_home
+from yuri.narration.policy import MODES, Mode, normalize_mode
+from yuri.narration.service import NarrationService
 from yuri.providers.base import AgentProvider
 from yuri.providers.registry import AgentRegistry, build_registry
 from yuri.services.approvals import ApprovalService
@@ -63,6 +65,7 @@ class Container:
     router: AgentRouter
     journal: Journal
     memory: Memory
+    narration: NarrationService
     projects: ProjectService
     approvals: ApprovalService
     missions: MissionService
@@ -131,6 +134,7 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         router = AgentRouter(registry, default_agent)
         journal = Journal(home)
         memory = Memory(home)
+        narration = NarrationService()
         projects = ProjectService(store, home, bus)
         approvals = ApprovalService(store, bus, journal)
         missions = MissionService(store, bus, journal)
@@ -156,7 +160,8 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         # must never be published via set_container().
         store.close()
         raise
-    c = Container(home, store, bus, registry, router, journal, memory, projects, approvals, missions, sessions)
+    c = Container(home, store, bus, registry, router, journal, memory, narration, projects, approvals, missions,
+                 sessions)
     set_container(c)
     return c
 
@@ -208,6 +213,25 @@ async def shutdown() -> None:
         c.store.close()
         set_container(None)
         session_manager.reset()
+
+
+SETTINGS_NARRATION_MODE = "narration_mode"
+
+
+def narration_mode() -> Mode:
+    """The remembered narration mode. Defaults to normal, and never raises on a
+    corrupt stored value — normalize_mode absorbs it."""
+    return normalize_mode(container().store.settings.get(SETTINGS_NARRATION_MODE))
+
+
+def set_narration_mode(mode: object) -> Mode:
+    """Persist the mode. Raises ValueError naming the valid modes on bad input —
+    unlike narration_mode(), a caller setting a mode deserves to be told."""
+    if not isinstance(mode, str) or mode.strip().lower() not in MODES:
+        raise ValueError(f"narration mode must be one of: {', '.join(MODES)}")
+    m = normalize_mode(mode)
+    container().store.settings.set(SETTINGS_NARRATION_MODE, m)
+    return m
 
 
 def test_container(home_path: str, provider: AgentProvider, default_agent: str | None = None) -> Container:

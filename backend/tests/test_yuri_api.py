@@ -209,7 +209,8 @@ class YuriApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evs[-1]["type"], "tool.started")
         self.c.memory.remember("likes tea")
         ctx = self.client.get("/yuri/context").json()
-        self.assertEqual(set(ctx), {"home", "memory_user", "journal_today", "active_missions", "agents"})
+        self.assertEqual(set(ctx), {"home", "memory_user", "journal_today", "active_missions", "agents",
+                                    "narration_mode"})
         self.assertIn("likes tea", ctx["memory_user"])
         self.assertEqual(ctx["active_missions"][0]["title"], "s1")
         self.assertEqual(ctx["agents"][0]["id"], "fake")
