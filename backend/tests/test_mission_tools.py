@@ -138,6 +138,21 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
             res = await tools.dispatch_tool("list_missions", {})
         self.assertEqual(len(res["missions"]), 2)
 
+    async def test_list_missions_clips_and_caps_session_names(self):
+        out = await self._start(name="n" * 300)
+        res = await tools.dispatch_tool("list_missions", {})
+        names = res["missions"][0]["sessions"]
+        self.assertTrue(all(len(n) <= 60 for n in names), names)
+        with mock.patch.object(tools, "SESSIONS_SPEECH_MAX", 0):
+            res = await tools.dispatch_tool("list_missions", {})
+        self.assertEqual(res["missions"][0]["sessions"], [])
+        self.assertTrue(out["mission_id"])
+
+    async def test_a_stopword_only_reference_reaches_the_sole_mission(self):
+        out = await self._start()
+        res = await tools.dispatch_tool("mission_status", {"mission": "the task"})
+        self.assertEqual(res["mission_id"], out["mission_id"])
+
     async def test_cancel_stops_the_live_session(self):
         out = await self._start()
         await tools.dispatch_tool("cancel_mission", {})

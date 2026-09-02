@@ -22,6 +22,11 @@ GOAL_MAX = 500
 TITLE_SPEECH_MAX = 80
 GOAL_SPEECH_MAX = 240
 APPROVAL_SPEECH_MAX = 300
+# Session names are titles by another route (SessionService._pick_name only
+# whitespace-normalizes, and rename_session takes whatever it is given), and a
+# mission can hold arbitrarily many sessions, so cap both the name and the count.
+SESSION_NAME_SPEECH_MAX = 60
+SESSIONS_SPEECH_MAX = 12
 # How many candidate titles a refusal names. Reading out 200 titles is not a
 # question the user can answer; the model asks with the newest few.
 CANDIDATES_MAX = 6
@@ -31,7 +36,9 @@ CANDIDATES_MAX = 6
 SCAN_MAX = 500
 
 # Spoken references to "the mission" rather than a name. Resolution treats these
-# as "the one obvious mission" and refuses when more than one is active.
+# as "the one obvious mission" and refuses when more than one is active — but
+# only when no mission is actually NAMED one of them (see resolve): several are
+# ordinary English words, and a mission titled "current" must stay reachable.
 _DEICTIC = frozenset({"", "it", "that", "this", "this one", "that one", "the current one",
                       "current", "the mission", "mission", "the current mission",
                       "the one", "the active one"})
@@ -181,12 +188,33 @@ class MissionService:
         prefix branch is additionally gated on the ref looking like an id
         fragment at all (see _ID_FRAGMENT_RE). Nothing reachable before is lost:
         a full id is still matched first, by primary key.
+
+        The deictic step yields to a real name for the same reason. Half of
+        _DEICTIC is ordinary English ("current", "mission", "that"), so a
+        mission genuinely titled "current" would otherwise be unreachable by
+        name AND `resolve("current")` would return a different mission — a
+        silent wrong pick. A deictic phrase is only deictic when nothing bears
+        it as a title.
         """
         ref = " ".join((ref or "").strip().split())
         low = ref.lower()
         active = self.active()
+        # Fetched at most once, and lazily: the deictic branch needs it only to
+        # rule out a mission actually named "current", and the hottest path of
+        # all — tools.py passing "" because the model omitted the argument —
+        # short-circuits before the query, since no mission can be titled "".
+        scanned: list[Mission] | None = None
 
-        if low in _DEICTIC:
+        def all_missions() -> list[Mission]:
+            nonlocal scanned
+            if scanned is None:
+                scanned = self.store.missions.list(limit=SCAN_MAX)
+            return scanned
+
+        def named(title: str) -> list[Mission]:
+            return [m for m in all_missions() if m.title.lower() == title]
+
+        if low in _DEICTIC and not (low and named(low)):
             if len(active) == 1:
                 return active[0]
             if not active:
@@ -197,9 +225,7 @@ class MissionService:
         if exact is not None:
             return exact
 
-        all_missions = self.store.missions.list(limit=SCAN_MAX)
-
-        titled = [m for m in all_missions if m.title.lower() == low]
+        titled = named(low)
         if len(titled) == 1:
             return titled[0]
         if len(titled) > 1:
@@ -210,7 +236,7 @@ class MissionService:
             raise self._refuse(titled, "Several missions have that name:")
 
         if _ID_FRAGMENT_RE.match(low):
-            prefix = [m for m in all_missions if m.id.startswith(low)]
+            prefix = [m for m in all_missions() if m.id.startswith(low)]
             if len(prefix) == 1:
                 return prefix[0]
             if len(prefix) > 1:
@@ -224,8 +250,14 @@ class MissionService:
                 return hits[0]
             if len(hits) > 1:
                 raise self._refuse(hits, f"{len(hits)} active missions match that:")
+        elif len(active) == 1:
+            # An all-noise ref ("the task", "the work one") names nothing, but
+            # it is still a reference to *a* mission — the same thing "it"
+            # means. Refusing here was safe but needlessly obtuse. Ambiguity
+            # still refuses below, exactly as the deictic branch does.
+            return active[0]
 
-        if not all_missions:
+        if not all_missions():
             raise ValueError("There are no missions yet.")
         if active:
             raise self._refuse(active,
@@ -250,7 +282,8 @@ class MissionService:
                 "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None, "status": m.status,
                 "project": project.name if project else None,
                 "agents": sorted({s.agent_id for s in sessions}),
-                "sessions": [{"name": s.name, "status": s.status} for s in sessions],
+                "sessions": [{"name": clip_speech(s.name, SESSION_NAME_SPEECH_MAX) or None,
+                              "status": s.status} for s in sessions[:SESSIONS_SPEECH_MAX]],
                 "pending_approval": pending,
                 "last_event": events[-1].type if events else None}
 

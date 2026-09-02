@@ -200,6 +200,56 @@ class MissionResolve(unittest.TestCase):
             self.svc.resolve("fix billing")
         self.assertIn("Fix billing", str(cm.exception))
 
+    def test_a_mission_actually_titled_current_is_reachable_by_name(self):
+        # Half of _DEICTIC is ordinary English. Checking deixis FIRST made a
+        # mission named "current" unreachable AND returned a different mission
+        # — the silent wrong pick this whole method exists to prevent.
+        named = self._m("current")
+        self.svc.set_status(named, "completed", by="test")
+        other = self._m("Fix billing")
+        self.assertEqual(self.svc.resolve("current").id, named.id)
+        self.assertEqual(self.svc.resolve("CURRENT").id, named.id)
+        self.assertEqual(self.svc.resolve("it").id, other.id)     # still deictic
+
+    def test_a_mission_titled_it_is_reachable_by_name(self):
+        named = self._m("it")
+        other = self._m("Fix billing")
+        self.assertEqual(self.svc.resolve("it").id, named.id)
+        # "that" bears no title, so it stays deictic — and with two active
+        # missions that means a refusal, not a pick.
+        with self.assertRaises(ValueError):
+            self.svc.resolve("that")
+        self.assertIn(other.id, {m.id for m in self.svc.active()})
+
+    def test_an_empty_ref_is_always_deictic(self):
+        # tools.py passes "" when the model omits `mission`, and no mission can
+        # be titled "" — so the guard must never turn "" into a name lookup.
+        named = self._m("current")
+        self.assertEqual(self.svc.resolve("").id, named.id)       # sole active
+        self.assertEqual(self.svc.resolve("   ").id, named.id)
+        self._m("Fix billing")
+        with self.assertRaises(ValueError) as cm:                 # now ambiguous
+            self.svc.resolve("")
+        self.assertIn("2 are active", str(cm.exception))
+
+    def test_a_stopword_only_ref_means_the_sole_active_mission(self):
+        m = self._m("Fix billing")
+        for ref in ("the task", "the work one", "that job", "the thing"):
+            self.assertEqual(self.svc.resolve(ref).id, m.id, ref)
+
+    def test_a_stopword_only_ref_with_two_active_missions_refuses(self):
+        self._m("Fix billing")
+        self._m("Update the docs")
+        with self.assertRaises(ValueError) as cm:
+            self.svc.resolve("the task")
+        self.assertIn("Fix billing", str(cm.exception))
+
+    def test_a_stopword_only_ref_with_nothing_active_refuses(self):
+        done = self._m("Old work")
+        self.svc.set_status(done, "completed", by="test")
+        with self.assertRaises(ValueError):
+            self.svc.resolve("the task")
+
     def test_active_is_the_documented_status_set(self):
         self.assertEqual(MissionService.ACTIVE,
                          ("running", "waiting_for_approval", "paused", "queued"))
@@ -251,6 +301,31 @@ class SpeechDetail(unittest.TestCase):
         self.assertLess(len(d["pending_approval"]), 400)
         self.assertEqual(d["sessions"], [{"name": "s1", "status": "needs_permission"}])
         self.assertEqual(d["agents"], ["fake"])
+
+    def _session(self, mission, name, i):
+        row = AgentSession(project_id=self.project.id, agent_id="fake",
+                           native_session_id=f"h{i}", backend="cli",
+                           working_directory="/tmp/p", mission_id=mission.id,
+                           status="idle", name=name)
+        self.store.sessions.insert(row)
+        return row
+
+    def test_session_names_are_clipped_and_the_list_is_capped(self):
+        # A session name is a title by another route: _pick_name only
+        # whitespace-normalizes it and rename_session takes whatever it is
+        # given, so nothing bounds it upstream.
+        m = self.svc.create(self.project, "Fix billing", created_by="voice")
+        for i in range(20):
+            self._session(m, "n" * 300, i)
+        d = self.svc.speech_detail(m.id)
+        self.assertEqual(len(d["sessions"]), 12)
+        self.assertTrue(all(len(s["name"]) <= 60 for s in d["sessions"]), d["sessions"])
+
+    def test_an_unnamed_session_stays_none_rather_than_empty(self):
+        m = self.svc.create(self.project, "Fix billing", created_by="voice")
+        self._session(m, None, 0)
+        self.assertEqual(self.svc.speech_detail(m.id)["sessions"],
+                         [{"name": None, "status": "idle"}])
 
 
 if __name__ == "__main__":

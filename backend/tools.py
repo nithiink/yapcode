@@ -24,7 +24,8 @@ from typing import Any
 from slash_commands import list_slash_commands
 from yuri.app import container
 from yuri.domain.mission import InvalidTransition
-from yuri.services.missions import GOAL_SPEECH_MAX, TITLE_SPEECH_MAX, clip_speech
+from yuri.services.missions import (GOAL_SPEECH_MAX, SESSION_NAME_SPEECH_MAX, SESSIONS_SPEECH_MAX,
+                                    TITLE_SPEECH_MAX, clip_speech)
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
@@ -543,7 +544,8 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                         "goal": clip_speech(m.goal, GOAL_SPEECH_MAX) or None,
                         "status": m.status, "project": projects.get(m.project_id),
                         "agents": sorted({s.agent_id for s in sessions}),
-                        "sessions": [s.name for s in sessions if s.name]})
+                        "sessions": [clip_speech(s.name, SESSION_NAME_SPEECH_MAX)
+                                     for s in sessions if s.name][:SESSIONS_SPEECH_MAX]})
         return {"missions": out}
 
     if name == "mission_status":
