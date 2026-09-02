@@ -32,6 +32,13 @@ SESSIONS_SPEECH_MAX = 12
 # How many candidate titles a refusal names. Reading out 200 titles is not a
 # question the user can answer; the model asks with the newest few.
 CANDIDATES_MAX = 6
+# Ceiling on speech_list (and so on the list_missions voice tool). The store's
+# own cap is 200 rows, and each row carries a title, a goal and its session
+# names — a list that long is not something the voice model can read back, and
+# it is text the user never asked for. Newest first, so the cap drops the least
+# relevant end. tools.py re-exports and passes it explicitly, which is also the
+# patch point its test narrows.
+MISSION_LIST_MAX = 40
 # Ceiling on the id/title scan in resolve(). store.missions.list() orders by
 # updated_at DESC, so this keeps the most recent work reachable by name; a full
 # id still resolves via the indexed get() regardless of the cap.
@@ -268,7 +275,7 @@ class MissionService:
         raise ValueError(f"I could not match '{clip_speech(ref, TITLE_SPEECH_MAX)}', "
                          "and nothing is active right now.")
 
-    def speech_list(self, status: str | None = None, limit: int = 40) -> list[dict]:
+    def speech_list(self, status: str | None = None, limit: int = MISSION_LIST_MAX) -> list[dict]:
         """Missions shaped for speaking, one row each. The list counterpart of
         `speech_detail`, and the reason tools.py no longer reaches into the
         store: the same clipping rules live in one place, applied by the layer

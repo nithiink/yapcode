@@ -24,19 +24,13 @@ from typing import Any
 from slash_commands import list_slash_commands
 from yuri.app import container
 from yuri.domain.mission import InvalidTransition
-from yuri.services.missions import TITLE_SPEECH_MAX, clip_speech
+from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_speech
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
 # spawning a twin. {"ts": monotonic, "handle": str, "name": str} or None.
 START_GUARD_SECS = 15.0
 _last_start: dict[str, Any] | None = None
-
-# Ceiling on list_missions. The store's own cap is 200 rows, and each row
-# carries a title, a goal and its session names — a list that long is not
-# something the voice model can read back, and it is text the user never asked
-# for. Newest first, so the cap drops the least relevant end.
-MISSION_LIST_MAX = 40
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
