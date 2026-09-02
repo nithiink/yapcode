@@ -1,0 +1,260 @@
+"""Snapshot of every voice tool's result contract, taken BEFORE the provider /
+service refactor. If a later task changes a key here, that is a user-visible
+regression for the voice model — fix the code, not this file.
+
+Runner is a stub injected into the container's ClaudeCodeProvider; no
+tmux/Claude, a temp Yuri home and a temp DB.
+
+Two assertions were legitimately widened when tools.py moved onto
+SessionService (Task 17): start_session and list_sessions now also report the
+Yuri mission/session ids. Every other key here is byte-identical to the
+pre-refactor contract.
+
+    python -m unittest discover -s backend/tests
+"""
+import os
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import config  # noqa: E402
+import session_manager as sm  # noqa: E402
+import tools  # noqa: E402
+from yuri import app as yapp  # noqa: E402
+
+
+class _StubRunner:
+    """Mimics ClaudeRunner's surface with recorded calls and canned answers."""
+
+    def __init__(self):
+        self.sessions = {}
+        self.calls = []
+        self.next_poll = {"status": "idle"}
+        self.persisted = {}
+
+    async def start(self, cwd, model=None, mode="default"):
+        h = f"h{len(self.sessions) + 1}-" + "0" * 8
+        self.sessions[h] = {"handle": h, "session_id": h, "cwd": cwd, "model": model or "opus",
+                            "mode": mode, "status": "idle", "cost_usd": 0.0, "queued": 0}
+        self.calls.append(("start", cwd, model, mode))
+        return h
+
+    def list(self):
+        return list(self.sessions.values())
+
+    def start_advance(self, h, msg):
+        self.calls.append(("advance", h, msg))
+        self.sessions[h]["status"] = "working"
+
+    def start_answer(self, h, choice):
+        self.calls.append(("answer", h, choice))
+
+    def start_builtin_slash(self, h, text):
+        self.calls.append(("slash", h, text))
+
+    def poll_status(self, h):
+        return {**self.next_poll, "session_id": h}
+
+    async def interrupt(self, h):
+        self.calls.append(("interrupt", h))
+
+    async def close(self, h):
+        self.calls.append(("close", h))
+        self.sessions.pop(h)
+
+    async def set_mode(self, h, mode):
+        self.sessions[h]["mode"] = mode
+        return mode
+
+    async def read(self, h):
+        return "assistant text"
+
+    async def peek(self, h, lines=40):
+        return "screen"
+
+    async def send_keys(self, h, items):
+        return {"session_id": h, "screen": "after keys", "sent": items}
+
+    def pane_for(self, h):
+        return f"vc_{h[:8]}"
+
+    def persist_name(self, h, name):
+        self.persisted[h] = name
+
+    async def shutdown(self):
+        pass
+
+
+class ToolsDispatch(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.runner = _StubRunner()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self.tmp.name)
+        os.mkdir(os.path.join(self.root, "proj"))
+        self.patches = [mock.patch.dict(os.environ, {"ALLOWED_PROJECT_ROOTS": self.root}),
+                        mock.patch.object(config, "YURI_HOME", os.path.join(self.root, "Yuri"))]
+        for p in self.patches:
+            p.start()
+        from yuri.providers.claude_code import ClaudeCodeProvider
+        # test_container installs the container AND hands the provider to
+        # session_manager's shims — one provider, one stub runner.
+        self.c = yapp.test_container(os.path.join(self.root, "Yuri"),
+                                     ClaudeCodeProvider(runner_factory=lambda b: self.runner),
+                                     default_agent="claude-code")
+        tools._last_start = None
+
+    def tearDown(self):
+        yapp.set_container(None)
+        self.c.store.close()
+        sm.reset()
+        for p in self.patches:
+            p.stop()
+        tools._last_start = None
+        self.tmp.cleanup()
+
+    async def _start(self, **kw):
+        return await tools.dispatch_tool("start_session", {"project_path": "proj", **kw})
+
+    def test_every_definition_has_name_and_object_params(self):
+        for d in tools.TOOL_DEFINITIONS:
+            self.assertEqual(d["type"], "function")
+            self.assertEqual(d["parameters"]["type"], "object")
+        names = [d["name"] for d in tools.TOOL_DEFINITIONS]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertNotIn("poll_session", names)  # app-level only
+
+    async def test_list_projects_keys(self):
+        out = await tools.dispatch_tool("list_projects", {})
+        self.assertEqual(set(out), {"roots", "projects"})
+
+    async def test_start_session_keys_and_default_name(self):
+        out = await self._start()
+        self.assertEqual(set(out), {"session_id", "name", "project_path", "backend", "mode",
+                                    "message", "mission_id", "yuri_session_id"})
+        self.assertEqual(out["name"], "proj")
+        self.assertEqual(out["backend"], "cli")
+        self.assertEqual(out["project_path"], os.path.join(self.root, "proj"))
+
+    async def test_start_session_duplicate_guard(self):
+        first = await self._start()
+        second = await self._start()
+        self.assertTrue(second["duplicate_guard"])
+        self.assertEqual(second["existing_session"]["session_id"], first["session_id"])
+        third = await self._start(another=True)
+        self.assertNotIn("duplicate_guard", third)
+        self.assertEqual(third["name"], "proj 2")
+
+    async def test_list_sessions_keys(self):
+        await self._start()
+        out = await tools.dispatch_tool("list_sessions", {})
+        s = out["sessions"][0]
+        for k in ["handle", "session_id", "cwd", "model", "mode", "status", "cost_usd",
+                  "backend", "name", "agent_id", "mission_id", "yuri_session_id"]:
+            self.assertIn(k, s)
+
+    async def test_tell_claude_returns_working(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("tell_claude", {"session_id": sid, "message": "hi"})
+        self.assertEqual(out, {"status": "working", "session_id": sid})
+        self.assertIn(("advance", sid, "hi"), self.runner.calls)
+
+    async def test_session_id_falls_back_to_sole_session(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("tell_claude", {"message": "hi"})
+        self.assertEqual(out["session_id"], sid)
+
+    async def test_no_sessions_is_soft_error(self):
+        with self.assertRaises(ValueError):
+            await tools.dispatch_tool("tell_claude", {"message": "hi"})
+
+    async def test_ambiguous_session_is_soft_error_listing_names(self):
+        await self._start()
+        await self._start(another=True, name="second")
+        with self.assertRaises(ValueError) as cm:
+            await tools.dispatch_tool("tell_claude", {"message": "hi"})
+        self.assertIn("second", str(cm.exception))
+
+    async def test_unknown_session_is_soft_error(self):
+        await self._start()
+        with self.assertRaises(ValueError):
+            await tools.dispatch_tool("tell_claude", {"session_id": "nope", "message": "x"})
+
+    async def test_answer_prompt(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("answer_prompt", {"session_id": sid, "choice": "allow"})
+        self.assertEqual(out, {"status": "working", "session_id": sid})
+        self.assertIn(("answer", sid, "allow"), self.runner.calls)
+
+    async def test_poll_session_forwards(self):
+        sid = (await self._start())["session_id"]
+        self.runner.next_poll = {"status": "completed", "assistant_text": "done"}
+        out = await tools.dispatch_tool("poll_session", {"session_id": sid})
+        self.assertEqual(out["status"], "completed")
+        self.assertEqual(out["session_id"], sid)
+
+    async def test_interrupt_and_close(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("interrupt_session", {"session_id": sid})
+        self.assertEqual(out, {"status": "interrupted", "session_id": sid})
+        out = await tools.dispatch_tool("close_session", {"session_id": sid})
+        self.assertEqual(out, {"status": "closed", "session_id": sid})
+        self.assertEqual(await tools.dispatch_tool("list_sessions", {}), {"sessions": []})
+
+    async def test_rename(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("rename_session", {"session_id": sid, "name": "Neo"})
+        self.assertEqual(set(out), {"session_id", "name", "message"})
+        self.assertEqual(out["name"], "Neo")
+        out = await tools.dispatch_tool("tell_claude", {"session_id": "neo", "message": "x"})
+        self.assertEqual(out["session_id"], sid)
+
+    async def test_set_mode_without_prompt(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("set_mode", {"session_id": sid, "mode": "plan"})
+        self.assertEqual(out, {"session_id": sid, "mode": "plan"})
+
+    async def test_read_and_peek(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("read_session", {"session_id": sid})
+        self.assertEqual(out, {"session_id": sid, "text": "assistant text"})
+        out = await tools.dispatch_tool("peek_screen", {"session_id": sid})
+        self.assertEqual(out["screen"], "screen")
+        self.assertEqual(out["session_id"], sid)
+
+    async def test_get_handoff_keys(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("get_handoff", {"session_id": sid})
+        self.assertEqual(set(out), {"session_id", "name", "cwd", "attach_command",
+                                    "resume_command", "command"})
+        self.assertTrue(out["attach_command"].startswith("tmux attach -t vc_"))
+        self.assertIn("claude --resume", out["resume_command"])
+
+    async def test_send_keys(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("send_keys", {"session_id": sid,
+                                                      "items": [{"key": "Escape"}]})
+        self.assertEqual(out["screen"], "after keys")
+        with self.assertRaises(ValueError):
+            await tools.dispatch_tool("send_keys", {"session_id": sid, "items": []})
+
+    async def test_run_slash_command(self):
+        sid = (await self._start())["session_id"]
+        out = await tools.dispatch_tool("run_slash_command",
+                                        {"session_id": sid, "command": "/init", "args": "x"})
+        self.assertEqual(out, {"status": "working", "session_id": sid, "sent": "/init x"})
+        self.assertIn(("slash", sid, "/init x"), self.runner.calls)
+
+    async def test_list_slash_commands_keys(self):
+        out = await tools.dispatch_tool("list_slash_commands", {})
+        self.assertIn("commands", out)
+
+    async def test_unknown_tool(self):
+        with self.assertRaises(KeyError):
+            await tools.dispatch_tool("nope", {})
+
+
+if __name__ == "__main__":
+    unittest.main()

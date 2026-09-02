@@ -135,10 +135,14 @@ SESSION_STORE_DIR: str = os.path.abspath(os.path.expanduser(
 
 def allowed_project_roots() -> list[str]:
     """Realpath'd ALLOWED_PROJECT_ROOTS entries — the directory sandbox a session's
-    cwd must live under. Realpath (not just abspath) so symlinked roots compare
-    correctly against a realpath'd candidate."""
+    cwd must live under — plus Yuri's home once it exists. Realpath (not just
+    abspath) so symlinked roots compare correctly against a realpath'd candidate."""
     raw = os.getenv("ALLOWED_PROJECT_ROOTS", "")
-    return [os.path.realpath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+    roots = [os.path.realpath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+    home = os.path.realpath(YURI_HOME)
+    if os.path.isdir(home) and home not in roots:
+        roots.append(home)
+    return roots
 
 
 def resolve_within_roots(path: str) -> str:
@@ -171,6 +175,16 @@ def resolve_within_roots(path: str) -> str:
 # sessions. Set VC_KILL_SESSIONS_ON_SHUTDOWN=1 to restore the old behavior where
 # stopping the backend kills every CLI session and removes its control dir.
 KILL_SESSIONS_ON_SHUTDOWN: bool = _env_bool("VC_KILL_SESSIONS_ON_SHUTDOWN", False)
+
+# Which agent providers Yuri registers (comma-separated ids). Default: Claude
+# Code only. A configured agent is still shown "offline" until its health check
+# passes (spec §7).
+YURI_AGENTS: str = (os.getenv("YURI_AGENTS") or "claude-code").strip()
+
+# Yuri's home: her state store (yuri.db), memory/, journal/ and workspace/.
+# She may read/write freely here; it is appended to the project sandbox roots
+# at runtime (see allowed_project_roots) once it exists.
+YURI_HOME: str = os.path.abspath(os.path.expanduser(os.getenv("YURI_HOME") or "~/Yuri"))
 
 
 # --- Access control ---------------------------------------------------------

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement, type React
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
-import { INSTRUCTIONS } from "@/lib/instructions";
+import { INSTRUCTIONS, yuriContextBlock, type YuriContext } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
 import { scopedClearPending } from "@/lib/promptState";
 import LiveTerminal from "./LiveTerminal";
@@ -1182,10 +1182,20 @@ export default function VoiceAgent() {
     } catch {
       /* offline backend surfaces in start(); use the last poll for the snapshot */
     }
+    // Yuri's own context (memory, journal, missions, agent health). Best-effort:
+    // an unreachable backend must not block connecting — the snapshot above
+    // already covers live sessions.
+    let yuriCtx: YuriContext | null = null;
+    try {
+      const r = await fetch("/api/yuri/context", { headers: authHeaders() });
+      if (r.ok) yuriCtx = (await r.json()) as YuriContext;
+    } catch {
+      logDebug("error", "yuri context unavailable at connect", undefined, "voice", "backend");
+    }
     const params = connectionParams(provider, model);
     const opts: RealtimeOptions = {
       ...params,
-      instructions: INSTRUCTIONS + dynamicContext(snapshot),
+      instructions: INSTRUCTIONS + dynamicContext(snapshot) + yuriContextBlock(yuriCtx),
       backend,
       onEvent,
       onDebug: (msg) => logDebug("info", `transport: ${msg}`, undefined, "voice", "backend"),

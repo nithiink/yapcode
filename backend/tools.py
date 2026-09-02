@@ -2,33 +2,27 @@
 
 Each tool has an OpenAI function definition (sent to the session via
 `session.update`) and an async handler. Handlers drive the Claude session
-through the ClaudeRunner. `tell_claude` / `answer_prompt` return the runner's
-AdvanceResult so the voice model can narrate progress and surface prompts.
+through Yuri's SessionService (`container().sessions`), which owns the domain
+side effects — missions, session rows, approvals, events — and forwards the
+provider call unchanged in shape. `tell_claude` / `answer_prompt` still return
+immediately with status "working" so the voice model stays responsive.
+
+The result dicts here are a CONTRACT with the voice model (and with
+frontend/lib/operating.ts): tests/test_tools_dispatch.py snapshots every key.
+Changing one is a user-visible regression, not a refactor.
+
+Two things deliberately stay in this module rather than moving into the domain:
+the `_last_start` duplicate-start guard (a voice-model quirk, not a rule about
+sessions) and `_require_session`'s sole-session fallback plus its soft-error
+ValueError texts (recovery instructions written for the model to read).
 """
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from permissions import mode_covers
-from session_manager import (
-    backend_of,
-    cli_pane_for,
-    close_session,
-    default_name_for,
-    get_runner,
-    handoff_command,
-    list_all_sessions,
-    list_projects,
-    peek_session,
-    register_owner,
-    resolve_project_path,
-    resolve_session,
-    runner_for,
-    set_session_mode,
-    set_session_name,
-)
 from slash_commands import list_slash_commands
+from yuri.app import container
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
@@ -269,7 +263,27 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         ),
         "parameters": {"type": "object", "properties": {}},
     },
+    {
+        "type": "function",
+        "name": "remember",
+        "description": "Store a durable fact in Yuri's memory (~/Yuri/memory). Use it when the user states a preference, corrects you, or says 'remember this'. Pass project to file it under that project's notes instead of the user's.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fact": {"type": "string", "description": "One sentence, in the user's terms."},
+                "project": {"type": "string", "description": "Optional project folder name the fact is about."},
+            },
+            "required": ["fact"],
+        },
+    },
 ]
+
+
+def _svc():
+    """The live SessionService. Fetched per call, never cached at import time:
+    the container is built during app startup (and rebuilt per test), so a
+    module-level binding would pin a dead one."""
+    return container().sessions
 
 
 def _require_session(args: dict[str, Any], action: str) -> str:
@@ -289,8 +303,9 @@ def _require_session(args: dict[str, Any], action: str) -> str:
     A non-empty but unknown session_id also becomes a ValueError here instead of
     a 404, for the same recoverable behavior."""
     ref = (args.get("session_id") or "").strip()
+    svc = _svc()
     if not ref:
-        sessions = list_all_sessions()
+        sessions = svc.list()
         if len(sessions) == 1:
             return sessions[0]["handle"]
         if not sessions:
@@ -300,17 +315,17 @@ def _require_session(args: dict[str, Any], action: str) -> str:
             f"which session should I {action}? {len(sessions)} are open: {names}. "
             "Ask the user which one, then pass its session_id.")
     try:
-        return resolve_session(ref)
+        return svc.resolve(ref)
     except KeyError as exc:
         raise ValueError(str(exc)) from exc
 
 
 async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "list_projects":
-        return list_projects()
+        return container().projects.list()
 
     if name == "list_sessions":
-        return {"sessions": list_all_sessions()}
+        return {"sessions": _svc().list()}
 
     if name == "start_session":
         # Duplicate guard: in voice flows the model sometimes re-calls
@@ -336,64 +351,37 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
         backend = args.get("backend") or "cli"
-        path = resolve_project_path(args.get("project_path", ""))
         mode = args.get("mode") or "default"
-        runner = get_runner(backend)
         # Record before the (slow) start so a concurrent duplicate call also trips
         # the guard rather than racing past it.
         _last_start = {"ts": now, "handle": "", "name": "(starting…)"}
         try:
-            handle = await runner.start(path, args.get("model"), mode)
+            out = await _svc().start(args.get("project_path", ""), backend=backend, mode=mode,
+                                     model=args.get("model"), name=args.get("name"),
+                                     created_by="voice")
         except BaseException:
             _last_start = recent  # failed start shouldn't block a retry
             raise
-        register_owner(handle, backend)
-        try:
-            sess_name = set_session_name(handle, args.get("name") or default_name_for(path))
-        except ValueError:
-            # A user-supplied name clashed — fall back to a guaranteed-unique default.
-            sess_name = set_session_name(handle, default_name_for(path))
-        _last_start = {"ts": time.monotonic(), "handle": handle, "name": sess_name}
-        return {"session_id": handle, "name": sess_name, "project_path": path,
-                "backend": backend, "mode": mode,
-                "message": f"Started Claude session '{sess_name}' in {path}."}
+        _last_start = {"ts": time.monotonic(), "handle": out["session_id"], "name": out["name"]}
+        return out
 
     if name == "rename_session":
-        sid = _require_session(args, "rename")
-        new_name = set_session_name(sid, args["name"])
-        return {"session_id": sid, "name": new_name,
-                "message": f"Renamed the session to '{new_name}'."}
+        return _svc().rename(_require_session(args, "rename"), args["name"])
 
     if name == "set_mode":
-        sid = _require_session(args, "change the mode for")
-        # Snapshot any pending permission BEFORE the switch: the runner resolves
-        # a covered prompt asynchronously, so checking afterwards would race.
-        sess = next((x for x in list_all_sessions() if x["handle"] == sid), None)
-        prompt = (sess or {}).get("prompt")
-        mode = await set_session_mode(sid, args["mode"])
-        out = {"session_id": sid, "mode": mode}
-        if prompt and prompt.get("kind") == "permission":
-            if mode_covers(mode, prompt.get("tool_name", "")):
-                # Runner approved the parked prompt under the new mode; the flag
-                # lets the frontend dismiss the stale card and resume polling.
-                out["prompt_resolved"] = True
-                out["message"] = (f"Mode is now '{mode}'. The pending permission "
-                                  f"({prompt['text']}) was approved under the new mode — "
-                                  "the session is continuing.")
-            else:
-                out["prompt_resolved"] = False
-                out["message"] = (f"Mode is now '{mode}', but the pending permission "
-                                  f"({prompt['text']}) is NOT covered by it and still "
-                                  "needs an allow/deny from the user.")
-        return out
+        # SessionService snapshots the pending permission BEFORE the switch (the
+        # runner resolves a covered prompt asynchronously) and resolves the
+        # matching Approval row; `prompt_resolved` in the result is what the
+        # frontend uses to dismiss the stale prompt card.
+        return await _svc().set_mode(_require_session(args, "change the mode for"), args["mode"])
 
     if name == "list_slash_commands":
         cwd: str | None = None
         sid_arg = args.get("session_id")
         if sid_arg:
             try:
-                sid = resolve_session(sid_arg)
-                sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
+                sid = _svc().resolve(sid_arg)
+                sess = next((s for s in _svc().list() if s["handle"] == sid), None)
                 if sess:
                     cwd = sess["cwd"]
             except KeyError:
@@ -402,98 +390,87 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     if name == "run_slash_command":
         sid = _require_session(args, "run that command in")
-        if backend_of(sid) != "cli":
-            return {"ok": False, "error": "slash commands run in the interactive CLI; this session uses the SDK backend."}
         cmd = str(args.get("command", "")).strip().lstrip("/")
         if not cmd:
             raise ValueError("command is required (e.g. 'init' or '/init')")
         extra = (args.get("args") or "").strip()
         text = f"/{cmd}" + (f" {extra}" if extra else "")
-        runner = runner_for(sid)
-        # Route every slash command through the hybrid path: it races the Stop
-        # hook (for skills / commands that drive a real Claude turn) against
-        # screen-settle detection (for UI-only built-ins that never fire Stop).
-        # Whichever fires first wins, so we don't need to maintain a perfect
-        # list of which built-ins fire Stop. start_advance is the fallback only
-        # if the runner doesn't expose the hybrid path (e.g. SDK).
-        if hasattr(runner, "start_builtin_slash"):
-            runner.start_builtin_slash(sid, text)
-        else:
-            runner.start_advance(sid, text)
-        return {"status": "working", "session_id": sid, "sent": text}
+        try:
+            # The provider races the Stop hook (for skills / commands that drive
+            # a real Claude turn) against screen-settle detection (for UI-only
+            # built-ins that never fire Stop), so we don't maintain a list of
+            # which built-ins fire Stop. A backend with no TUI says so instead.
+            return _svc().run_slash(sid, text)
+        except NotImplementedError:
+            return {"ok": False, "error": "slash commands run in the interactive CLI; this session uses the SDK backend."}
 
     if name == "tell_claude":
         # Non-blocking: Claude turns can run for minutes. Kick it off in the
         # background and return immediately so the voice model stays responsive;
         # the frontend polls poll_session and narrates the result when ready.
-        sid = _require_session(args, "send that to")
-        runner_for(sid).start_advance(sid, args["message"])
-        return {"status": "working", "session_id": sid}
+        return _svc().send(_require_session(args, "send that to"), args["message"])
 
     if name == "answer_prompt":
-        sid = _require_session(args, "answer for")
-        runner_for(sid).start_answer(sid, args["choice"])
-        return {"status": "working", "session_id": sid}
+        return _svc().answer(_require_session(args, "answer for"), args["choice"])
 
     if name == "poll_session":
         # App-level poll (not exposed to the voice model — not in TOOL_DEFINITIONS).
-        sid = resolve_session(args["session_id"])
-        return runner_for(sid).poll_status(sid)
+        # An unknown session_id raises KeyError (svc.poll resolves internally),
+        # which /tools/execute maps to a 404 — unchanged from the shim path.
+        return _svc().poll(args["session_id"])
 
     if name == "read_transcript":
         # App-level: full session timeline from the on-disk jsonl (both backends).
         from transcript import read_timeline
-        return read_timeline(resolve_session(args["session_id"]))
+        return read_timeline(_svc().resolve(args["session_id"]))
 
     if name == "interrupt_session":
-        sid = _require_session(args, "interrupt")
-        await runner_for(sid).interrupt(sid)
-        return {"status": "interrupted", "session_id": sid}
+        return await _svc().interrupt(_require_session(args, "interrupt"))
 
     if name == "close_session":
-        sid = _require_session(args, "close")
-        await close_session(sid)
-        return {"status": "closed", "session_id": sid}
+        return await _svc().stop(_require_session(args, "close"))
 
     if name == "peek_screen":
-        return await peek_session(_require_session(args, "peek at"))
+        return await _svc().peek(_require_session(args, "peek at"))
 
     if name == "read_session":
-        sid = _require_session(args, "read")
-        text = await runner_for(sid).read(sid)
-        return {"session_id": sid, "text": text}
+        return await _svc().read(_require_session(args, "read"))
 
     if name == "get_handoff":
-        sid = _require_session(args, "hand off")
-        sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
-        if not sess:
-            raise KeyError(f"unknown session: {sid}")
-        resume_cmd = handoff_command(sess["cwd"], sess["session_id"])
-        pane = cli_pane_for(sid)
-        attach_cmd = f"tmux attach -t {pane}" if pane else None
-        return {
-            "session_id": sid, "name": sess.get("name"), "cwd": sess["cwd"],
-            # Live co-drive: join the SAME running process — keyboard + voice both
-            # drive it at once (CLI/tmux sessions only).
-            "attach_command": attach_cmd,
-            # Solo takeover: resume in a SEPARATE process (use after voice stops).
-            "resume_command": resume_cmd,
-            "command": resume_cmd,  # backward-compat alias
-        }
+        # Two commands, deliberately: attach_command joins the SAME running
+        # process (keyboard + voice at once, CLI/tmux only), resume_command
+        # takes it over solo in a separate process. `command` is a
+        # backward-compat alias for resume_command.
+        return _svc().handoff_info(_require_session(args, "hand off"))
 
     if name == "send_keys":
         sid = _require_session(args, "send keys to")
-        if backend_of(sid) != "cli":
-            return {"ok": False, "error": "send_keys controls the interactive CLI; this session uses the SDK backend."}
         items = args.get("items") or []
         if not isinstance(items, list) or not items:
             raise ValueError("items is required (a non-empty list of {key} or {text} objects)")
-        return await runner_for(sid).send_keys(sid, items)
+        try:
+            return await _svc().send_keys(sid, items)
+        except NotImplementedError:
+            return {"ok": False, "error": "send_keys controls the interactive CLI; this session uses the SDK backend."}
 
     if name == "mute":
         # Muting is a client-side action (it disables the mic track in the
         # browser). The backend just acknowledges; the frontend reacts to the
         # tool_call event and flips the actual mute state.
         return {"muted": True, "message": "Microphone muted. The user can unmute with the on-screen button."}
+
+    if name == "remember":
+        c = container()
+        slug = None
+        project = (args.get("project") or "").strip()
+        if project:
+            slug = c.projects.resolve_or_create(project).slug     # ValueError → soft error
+        path = c.memory.remember(args.get("fact", ""), project_slug=slug)
+        from yuri.domain.event import EventType, YuriEvent
+        c.bus.publish(YuriEvent.make(EventType.MEMORY_REMEMBERED, payload={"fact": args.get("fact", ""),
+                                                                            "project": slug}))
+        c.journal.append(f"remembered{' for ' + slug if slug else ''}: {args.get('fact', '')}")
+        return {"ok": True, "path": path,
+                "message": "Remembered." if not slug else f"Noted under {slug}."}
 
     raise KeyError(f"unknown tool: {name}")

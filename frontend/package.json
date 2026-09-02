@@ -7,7 +7,8 @@
     "dev": "next dev -H 127.0.0.1 -p 3000",
     "dev:network": "node scripts/phone-url.mjs; BACKEND_URL=https://localhost:8000 NODE_TLS_REJECT_UNAUTHORIZED=0 next dev --experimental-https --experimental-https-key ./.certs/dev-key.pem --experimental-https-cert ./.certs/dev-cert.pem -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 -p 3000"
+    "start": "next start -H 127.0.0.1 -p 3000",
+    "test": "node --test lib/*.test.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

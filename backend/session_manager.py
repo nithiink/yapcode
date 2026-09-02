@@ -1,207 +1,70 @@
-"""Process-wide Claude session registry + terminal-handoff helpers.
+"""The project-directory sandbox, plus the process's one ClaudeCodeProvider.
 
-Two execution backends share the same ClaudeRunner interface:
-  "cli" -> TmuxClaudeRunner (interactive CLI; Max subscription + --chrome)  [default]
-  "sdk" -> SDKClaudeRunner  (Claude Agent SDK)
-Each session handle is a uuid owned by one backend; `runner_for(handle)` routes
-later calls to the owning runner.
+What is left here after Phase 3:
+
+* `resolve_project_path` / `list_projects` — the MANDATORY directory sandbox
+  every session start goes through. `ProjectService` calls them, so this is the
+  single place the allowed-roots rule is implemented (spec §5.2).
+* `provider()` / `set_provider()` / `reset()` — the "exactly one
+  ClaudeCodeProvider per process" guard. `yuri.app.build_container` installs
+  the registry's instance here on startup and `yuri.app.shutdown` clears it;
+  two live TmuxClaudeRunners would compete over the same tmux control dirs and
+  both rehydrate the same panes.
+
+Everything else that used to live here is GONE. Session lookup, naming, modes,
+peeking, closing, rehydration and terminal handoff are owned by
+`yuri.services.sessions.SessionService`, which routes per-handle through the
+provider — there is no `_runners` map, no `runner_for()` routing and no
+`_names` dict any more. Reach for `container().sessions`, not this module.
 """
 from __future__ import annotations
 
+import logging
 import os
-import shlex
 
-from claude_runner import ClaudeRunner, SDKClaudeRunner
-from tmux_runner import TmuxClaudeRunner
+import config
+from yuri.providers.claude_code import ClaudeCodeProvider
 
-_runners: dict[str, ClaudeRunner] = {}
-_owner: dict[str, str] = {}  # handle -> backend
-_names: dict[str, str] = {}  # handle -> human-readable display name
+log = logging.getLogger("yapcode.session_manager")
 
-
-def get_runner(backend: str = "cli") -> ClaudeRunner:
-    backend = (backend or "cli").lower()
-    if backend not in ("cli", "sdk"):
-        backend = "cli"
-    r = _runners.get(backend)
-    if r is None:
-        r = TmuxClaudeRunner() if backend == "cli" else SDKClaudeRunner()
-        _runners[backend] = r
-    return r
+_provider: ClaudeCodeProvider | None = None
 
 
-def register_owner(handle: str, backend: str) -> None:
-    _owner[handle] = (backend or "cli").lower()
+def provider() -> ClaudeCodeProvider:
+    """The one ClaudeCodeProvider `build_container` installed.
+
+    There is deliberately NO lazy fallback. Minting one here would give the
+    process a SECOND provider — two TmuxClaudeRunners fighting over the same
+    tmux control dirs, each rehydrating the same panes — which is precisely the
+    hazard this indirection exists to prevent. Production always installs one
+    during app startup, so an empty slot means the caller ran outside the app
+    lifespan: that is a bug in the caller, and it should say so."""
+    if _provider is None:
+        raise RuntimeError(
+            "session_manager has no provider installed: yuri.app.build_container installs one "
+            "during app startup and yuri.app.shutdown clears it, so this call ran outside the "
+            "app lifespan. Use container().sessions (or install a provider explicitly in a test) "
+            "— a second ClaudeCodeProvider would compete over the same tmux panes.")
+    return _provider
 
 
-def backend_of(handle: str) -> str | None:
-    """Which backend owns this handle ('cli' or 'sdk'), or None if unknown."""
-    return _owner.get(handle)
+def set_provider(p: ClaudeCodeProvider | None) -> None:
+    """Install the provider (app startup) or a test double. None resets."""
+    global _provider
+    _provider = p
 
 
-def runner_for(handle: str) -> ClaudeRunner:
-    backend = _owner.get(handle)
-    if backend is not None:
-        return get_runner(backend)
-    # Fallback: locate the handle among already-instantiated backends.
-    for r in _runners.values():
-        if any(s["handle"] == handle for s in r.list()):
-            return r
-    raise KeyError(f"unknown session: {handle}")
-
-
-def _raw_sessions() -> list[dict]:
-    """Backend-tagged session dicts straight from each runner (no name added)."""
-    out: list[dict] = []
-    for backend, r in _runners.items():
-        for s in r.list():
-            out.append({**s, "backend": backend})
-    return out
-
-
-def list_all_sessions() -> list[dict]:
-    return [{**s, "name": _names.get(s["handle"])} for s in _raw_sessions()]
-
-
-# --- human-readable session names -------------------------------------------
-
-def default_name_for(cwd: str) -> str:
-    """A friendly default name for a new session: the folder basename, de-duped
-    against names already in use (e.g. 'Development', 'Development 2')."""
-    base = os.path.basename(os.path.normpath(cwd)) or "session"
-    taken = {n.lower() for n in _names.values()}
-    if base.lower() not in taken:
-        return base
-    i = 2
-    while f"{base} {i}".lower() in taken:
-        i += 1
-    return f"{base} {i}"
-
-
-def set_session_name(handle: str, name: str) -> str:
-    """Assign a display name to a session. Names must be unique (case-insensitive)
-    among live sessions; raises ValueError listing current names on a clash."""
-    handle = resolve_session(handle)
-    name = " ".join((name or "").split())  # collapse whitespace
-    if not name:
-        raise ValueError("name cannot be empty")
-    for h, existing in _names.items():
-        if h != handle and existing.lower() == name.lower():
-            raise ValueError(
-                f"the name '{name}' is already used by another session; pick a different one"
-            )
-    _names[handle] = name
-    # Let the owning backend persist the name (CLI writes it to meta.json so it
-    # survives a restart); SDK has no persistence and simply lacks the method.
-    persist = getattr(runner_for(handle), "persist_name", None)
-    if persist is not None:
-        try:
-            persist(handle, name)
-        except Exception:
-            pass
-    return name
-
-
-def resolve_session(ref: str) -> str:
-    """Resolve a session reference — a display name, a full handle, or an 8-char
-    handle prefix — to the canonical handle. Exact handle wins, then a
-    case-insensitive name match, then a unique handle prefix."""
-    ref = (ref or "").strip()
-    handles = {s["handle"] for s in _raw_sessions()}
-    if ref in handles:
-        return ref
-    low = ref.lower()
-    for h, name in _names.items():
-        if h in handles and name.lower() == low:
-            return h
-    prefix_hits = [h for h in handles if h.startswith(ref)]
-    if len(prefix_hits) == 1:
-        return prefix_hits[0]
-    names = sorted(_names[h] for h in handles if h in _names)
-    raise KeyError(
-        f"no session matches '{ref}'. Active session names: {names or '(none named yet)'}."
-    )
-
-
-def cli_pane_for(handle: str) -> str | None:
-    """tmux pane to attach a live browser terminal to (CLI backend only)."""
-    r = _runners.get("cli")
-    pane_for = getattr(r, "pane_for", None)
-    return pane_for(handle) if pane_for else None
-
-
-async def set_session_mode(handle: str, mode: str) -> str:
-    """Switch a session's permission mode (plan/auto/acceptEdits/default).
-    Returns the mode actually in effect afterward."""
-    return await runner_for(handle).set_mode(handle, mode)
-
-
-async def close_session(handle: str) -> None:
-    """End a single session (kill its CLI/tmux pane or disconnect its SDK client)
-    and forget it. Leaves other sessions running."""
-    r = runner_for(handle)
-    await r.close(handle)
-    _owner.pop(handle, None)
-    _names.pop(handle, None)
-
-
-async def peek_session(handle: str, lines: int = 40) -> dict:
-    """Snapshot the live screen of a session. CLI backend returns the raw tmux
-    pane; SDK has no TUI, so it falls back to the accumulated assistant text."""
-    r = runner_for(handle)
-    peek = getattr(r, "peek", None)
-    if peek is not None:
-        out = {"session_id": handle, "screen": await peek(handle, lines)}
-    else:
-        text = await r.read(handle)
-        out = {"session_id": handle, "screen": text or "(no output yet)",
-               "note": "SDK backend has no live screen; showing accumulated text."}
-    # Attach any waiting prompt in full — long prompt context (e.g. a plan)
-    # scrolls off the pane, so the screen alone can't be trusted.
-    sess = next((s for s in r.list() if s["handle"] == handle), None)
-    if sess and sess.get("prompt"):
-        out["pending_prompt"] = sess["prompt"]
-        out["note_prompt"] = ("This session is waiting on the prompt above — "
-                              "answer it with answer_prompt.")
-    return out
-
-
-async def rehydrate_cli_sessions() -> list[dict]:
-    """On startup, re-adopt interactive CLI sessions that survived a previous
-    backend (their tmux panes keep running independently). Repopulates ownership
-    and names. Best-effort: failures are logged by the caller, never fatal.
-    Only the CLI backend can rehydrate — SDK subprocesses die with the backend."""
-    runner = get_runner("cli")
-    rehydrate = getattr(runner, "rehydrate", None)
-    if rehydrate is None:
-        return []
-    restored = await rehydrate()
-    for s in restored:
-        handle = s["handle"]
-        register_owner(handle, "cli")
-        name = s.get("name")
-        if name:
-            # Defensive de-dupe in case two restored metas carried the same name.
-            taken = {n.lower() for h, n in _names.items() if h != handle}
-            base, candidate, i = name, name, 2
-            while candidate.lower() in taken:
-                candidate = f"{base} {i}"
-                i += 1
-            _names[handle] = candidate
-    return restored
-
-
-async def shutdown_all() -> None:
-    for r in _runners.values():
-        await r.shutdown()
-    _runners.clear()
-    _owner.clear()
-    _names.clear()
+def reset() -> None:
+    """Drop the process-wide provider slot (app shutdown). Kept separate from
+    set_provider so the intent at each call site reads clearly."""
+    set_provider(None)
 
 
 def _allowed_roots() -> list[str]:
-    raw = os.getenv("ALLOWED_PROJECT_ROOTS", "")
-    return [os.path.abspath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+    """Delegate to config.allowed_project_roots() so both sandbox entry points
+    (this module and config.resolve_within_roots) see the same roots — the
+    same env parsing, the same realpath normalization, and Yuri's home."""
+    return config.allowed_project_roots()
 
 
 def list_projects() -> dict:
@@ -290,10 +153,3 @@ def resolve_project_path(name: str) -> str:
         f"Could not resolve '{name}'. Allowed roots: {info['roots']}. "
         f"Available projects: {names}. Ask the user to pick one of these names."
     )
-
-
-def handoff_command(cwd: str, session_id: str | None) -> str | None:
-    """The exact line to paste in a terminal to take over this session."""
-    if not session_id:
-        return None
-    return f"cd {shlex.quote(cwd)} && claude --resume {shlex.quote(session_id)}"

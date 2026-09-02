@@ -19,7 +19,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 from uuid import uuid4
 
 import claude_agent_sdk as sdk
@@ -119,6 +119,20 @@ def normalize_mode(mode: str | None) -> str:
 
 
 class ClaudeRunner(ABC):
+    # Optional observer for runtime signals (Yuri's ClaudeCodeProvider installs
+    # one): called as on_event(handle, native_kind, raw_dict) from the runner's
+    # own sync/async paths. Never awaited; must not raise. None = no observer.
+    on_event: "Callable[[str, str, dict[str, Any]], None] | None" = None
+
+    def _notify(self, handle: str, kind: str, raw: dict[str, Any]) -> None:
+        cb = self.on_event
+        if cb is None:
+            return
+        try:
+            cb(handle, kind, raw)
+        except Exception:  # an observer bug must never break a turn
+            logging.getLogger("yapcode.runner").exception("on_event observer failed")
+
     @abstractmethod
     async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str: ...
     @abstractmethod
@@ -470,6 +484,8 @@ class SDKClaudeRunner(ClaudeRunner):
                             s._transcript.append(b.text)
                         elif isinstance(b, sdk.ToolUseBlock):
                             s.tools_used.append(b.name)
+                            self._notify(s.handle, "tool",
+                                        {"tool_name": b.name, "tool_input": b.input})
                             log_event("claude", "backend", "hook", f"tool: {b.name}",
                                       session=s.session_id or s.handle[:8],
                                       detail={"handle": s.handle, "tool_name": b.name,
@@ -487,14 +503,18 @@ class SDKClaudeRunner(ClaudeRunner):
                             "session %s cumulative cost $%.4f",
                             s.session_id, s.cost_usd,
                         )
+                        self._notify(s.handle, "cost", {"cost_usd": s.cost_usd, "model": s.model})
                     if msg.is_error:
                         s.status = "error"
                         s.error = (msg.errors or ["unknown error"])[0]
+                        self._notify(s.handle, "error", {"message": s.error})
                         log_event("backend", "voice", "error", s.error or "error",
                                   session=s.session_id or s.handle[:8])
                     else:
                         s.status = "completed"
                         txt = "".join(s._delta)
+                        self._notify(s.handle, "turn_complete",
+                                    {"assistant_text": txt, "tools_used": list(s.tools_used)})
                         if txt:
                             log_event("claude", "backend", "assistant", txt,
                                       session=s.session_id or s.handle[:8],
@@ -506,6 +526,7 @@ class SDKClaudeRunner(ClaudeRunner):
         except Exception as e:
             s.status = "error"
             s.error = str(e)
+            self._notify(s.handle, "error", {"message": s.error})
             s._stop.set()
 
     async def _can_use_tool(self, s: _Session, tool_name: str,
@@ -531,6 +552,12 @@ class SDKClaudeRunner(ClaudeRunner):
                           session=s.session_id or s.handle[:8],
                           detail={"handle": s.handle, "tool_name": tool_name})
                 s._stop.set()              # let advance/answer return with the prompt
+                p = s.pending
+                self._notify(s.handle,
+                             "needs_choice" if kind == "question" else "needs_permission",
+                             {"request_id": p.request_id, "tool_name": tool_name,
+                              "tool_input": tool_input, "text": p.text,
+                              "options": list(p.options), "multi_select": p.multi_select})
                 choice = await fut         # parked until answer() resolves
                 # Re-ask an ambiguous binary permission (fail closed); questions
                 # and the plan dialog have their own non-binary handling.

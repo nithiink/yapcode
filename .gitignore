@@ -30,3 +30,6 @@ debug-log.jsonl
 
 # Misc
 .DS_Store
+
+# Superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# yuri — primary launcher. `yuri doctor` runs environment checks; every other
+# subcommand is delegated to the compatibility launcher `yapcode` (up / session /
+# config) so nothing existing changes (plan §29).
+set -euo pipefail
+APP_ROOT="${YAPCODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+case "${1:-up}" in
+  doctor)
+    cd "$APP_ROOT/backend"
+    PY="./.venv/bin/python"; [ -x "$PY" ] || PY="python3"
+    exec "$PY" -m yuri.doctor
+    ;;
+  -h|--help|help)
+    printf '%s\n' "usage: yuri {up|doctor|session [dir]|config}" >&2
+    ;;
+  *)
+    exec "$APP_ROOT/bin/yapcode" "$@"
+    ;;
+esac
