@@ -34,6 +34,7 @@ from yuri.providers.opencode.server import (  # noqa: E402
 _STUB_SOURCE = '''\
 """Not OpenCode. Just something that answers, so acquire() has a live port."""
 import json
+import os
 import socketserver
 import sys
 import time
@@ -41,6 +42,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 READY = sys.argv[1] == "ready"
 PORT = int(sys.argv[2])
+
+# So a test can see exactly which environment the child was handed.
+if os.environ.get("YURI_ENV_DUMP"):
+    with open(os.environ["YURI_ENV_DUMP"], "w") as fh:
+        for k, v in os.environ.items():
+            print(f"{k}={v}", file=fh)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -243,11 +250,59 @@ class Spawn(unittest.IsolatedAsyncioTestCase):
             "http://127.0.0.1:4096/": "4096",
             "http://127.0.0.1:9999": "9999",
             "http://localhost:not-a-port": "4096",
+            "http://[::1]:7000": "7000",        # IPv6 literal
+            "http://localhost:0": "0",          # `port or DEFAULT` would say 4096
         }
         for url, want in cases.items():
             got = OpenCodeServer(url, spawn=False)._port()
             self.assertEqual(got, want, url)
             self.assertIsInstance(got, str, url)   # it goes on a command line
+
+    async def test_an_explicit_env_is_used_verbatim_and_is_the_seam_for_secrets(self):
+        """Design spec section 4 wants the child to inherit no Yuri secrets, but
+        which names are secret is only knowable at the construction site (task
+        7). This is that seam: what the caller passes is what the child gets."""
+        port = _free_port()
+        with tempfile.TemporaryDirectory() as d:
+            binary = _stub_binary(d, port)
+            dump = os.path.join(d, "env.txt")
+            os.environ["YURI_TEST_SECRET"] = "leaked"
+            try:
+                srv = OpenCodeServer(
+                    f"http://127.0.0.1:{port}", spawn=True, binary=binary, cwd=d,
+                    log_path=os.path.join(d, "oc.log"),
+                    env={"PATH": os.environ["PATH"], "YURI_ENV_DUMP": dump})
+                try:
+                    await srv.acquire()
+                    with open(dump) as f:
+                        child = dict(l.rstrip("\n").split("=", 1)
+                                     for l in f if "=" in l)
+                    self.assertNotIn("YURI_TEST_SECRET", child,
+                                     "an explicit env must not be merged with os.environ")
+                    self.assertEqual(child.get("YURI_ENV_DUMP"), dump)
+                finally:
+                    await srv.release()
+            finally:
+                os.environ.pop("YURI_TEST_SECRET", None)
+
+    async def test_a_password_still_reaches_an_explicit_env(self):
+        """The password is set on top of whatever env the caller supplied --
+        filtering the environment must not disarm server auth."""
+        port = _free_port()
+        with tempfile.TemporaryDirectory() as d:
+            binary = _stub_binary(d, port)
+            dump = os.path.join(d, "env.txt")
+            srv = OpenCodeServer(
+                f"http://127.0.0.1:{port}", spawn=True, binary=binary, cwd=d,
+                log_path=os.path.join(d, "oc.log"), password="pw",
+                env={"PATH": os.environ["PATH"], "YURI_ENV_DUMP": dump})
+            try:
+                await srv.acquire()
+                with open(dump) as f:
+                    child = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+                self.assertEqual(child.get("OPENCODE_SERVER_PASSWORD"), "pw")
+            finally:
+                await srv.release()
 
     async def test_a_missing_binary_is_reported_actionably(self):
         port = _free_port()

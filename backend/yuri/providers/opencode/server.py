@@ -37,7 +37,8 @@ class OpenCodeUnavailable(RuntimeError):
 class OpenCodeServer:
     def __init__(self, url: str, *, spawn: bool = True, binary: str = "opencode",
                  password: str | None = None, cwd: str | None = None,
-                 log_path: str | None = None, ready_timeout: float = 20.0) -> None:
+                 log_path: str | None = None, ready_timeout: float = 20.0,
+                 env: dict[str, str] | None = None) -> None:
         self._url = url.rstrip("/")
         self._spawn_allowed = spawn
         self._binary = binary
@@ -45,6 +46,14 @@ class OpenCodeServer:
         self._cwd = cwd
         self._log_path = log_path
         self._ready_timeout = ready_timeout
+        # Design spec section 4 wants the child to inherit no Yuri secrets, but
+        # which names are secret is not knowable here: OPENAI_API_KEY and
+        # GEMINI_API_KEY are both Yuri's voice-model vars AND plausibly
+        # OpenCode's own provider auth, and VC_AUTH_TOKEN lives in config,
+        # which this layer may not import. So the decision belongs to the
+        # caller that knows: pass `env` and it is used verbatim. None keeps the
+        # inherit-everything default. Task 7 builds the filtered one.
+        self._env = env
         self._client: OpenCodeClient | None = None
         self._proc: asyncio.subprocess.Process | None = None
         self._owned = False
@@ -109,7 +118,14 @@ class OpenCodeServer:
             return self._client
 
     async def release(self) -> None:
-        """Drop the client, and stop the process only if we started it."""
+        """Drop the client, and stop the process only if we started it.
+
+        Deliberately not lock-guarded: _spawn() calls it on a failed spawn
+        while already holding the lock. The residual race is a concurrent
+        caller-initiated release() during a spawn, which can only ever
+        double-handle a process this object itself started -- it cannot reach
+        a server Yuri attached to, because _proc is only ever set by _spawn().
+        """
         client, self._client = self._client, None
         if client is not None:
             await client.close()
@@ -169,7 +185,8 @@ class OpenCodeServer:
             port = urlsplit(self._url).port
         except ValueError:          # a non-numeric port in the URL
             port = None
-        return str(port or DEFAULT_PORT)
+        # `port or DEFAULT_PORT` would rewrite an explicit :0 to 4096.
+        return str(DEFAULT_PORT if port is None else port)
 
     async def _spawn(self) -> None:
         binary = self._binary if os.path.sep in self._binary else shutil.which(self._binary)
@@ -182,7 +199,7 @@ class OpenCodeServer:
                 f"the OpenCode binary {self._binary!r} was not found or is not "
                 "executable — install OpenCode, or set OPENCODE_BIN to its full "
                 "path, or set OPENCODE_SPAWN=0 and run `opencode serve` yourself.")
-        env = dict(os.environ)
+        env = dict(os.environ) if self._env is None else dict(self._env)
         if self._password:
             # The name in the server's own startup log (design spec section 2).
             env["OPENCODE_SERVER_PASSWORD"] = self._password
