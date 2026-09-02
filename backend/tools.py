@@ -265,9 +265,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "mute",
         "description": (
             "Mute your own microphone in the user interface so you stop listening to "
-            "the user. Call this when the user says 'mute', 'mute yourself', 'stop "
-            "listening', or 'be quiet'. While muted you can't hear the user, so you "
-            "can't unmute by voice — the user unmutes with the on-screen button. Give a "
+            "the user. Call this ONLY when the user asks you to stop LISTENING — "
+            "'mute', 'mute yourself', 'stop listening'. A request to TALK less or "
+            "narrate less belongs to set_narration, never here: muting cannot be "
+            "undone by voice. While muted you can't hear the user, so you can't "
+            "unmute by voice — the user unmutes with the on-screen button. Give a "
             "brief spoken acknowledgement before or as you mute."
         ),
         "parameters": {"type": "object", "properties": {}},
@@ -288,7 +290,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "set_narration",
-        "description": "Change how much you narrate. 'quiet' = only problems and things needing the user's answer; 'normal' = meaningful progress; 'verbose' = every tool and cost update too. Call this when the user says be quiet, stop narrating, tell me everything, or go back to normal. The setting is remembered.",
+        "description": "Change how much you narrate. 'quiet' = only problems and things needing the user's answer; 'normal' = meaningful progress; 'verbose' = every tool and cost update too. Call this when the user says 'be quiet', 'stop narrating', 'less', 'tell me everything', or 'go back to normal'. 'Be quiet' means talk less, NOT stop listening — never call mute for it. The setting is remembered.",
         "parameters": {
             "type": "object",
             "properties": {"mode": {"type": "string", "enum": ["quiet", "normal", "verbose"]}},

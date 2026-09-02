@@ -155,6 +155,26 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.svc.poll(sid)
         self.assertEqual(self.svc.row_for(sid).status, "running")
 
+    async def test_poll_survives_a_row_whose_agent_is_no_longer_registered(self):
+        """A stored row outlives its provider whenever YURI_AGENTS changes
+        between runs — `_provider_for` guards the lookup for exactly that
+        reason, and the narration lookup must too. A KeyError here is worse
+        than a 500: the frontend's poll catch is "transient; keep polling", so
+        the session would poll forever and never narrate again."""
+        out = await self.svc.start("proj", name="billing")
+        sid = out["session_id"]
+        row = self.svc.row_for(sid)
+        row.agent_id = "retired-agent"          # provider gone from the registry
+        self.store.sessions.update(row)
+        with self.assertRaises(KeyError):       # the lookup really is unguardable
+            self.registry.get("retired-agent")
+        self.fake.script(sid, {"status": "completed", "assistant_text": "two files changed"})
+        res = self.svc.poll(sid)                # must not raise
+        self.assertEqual(res["status"], "completed")
+        self.assertIn("two files changed", res["narration"])
+        # The line still names the agent, taken from the resolved provider.
+        self.assertIn("Fake Agent", res["narration"])
+
     async def test_poll_needs_permission_without_a_prompt_still_parks_the_session(self):
         out = await self.svc.start("proj")
         sid = out["session_id"]

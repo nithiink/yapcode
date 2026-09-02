@@ -11,6 +11,21 @@ test("INSTRUCTIONS is persona + operating rules and keeps the load-bearing tool 
   assert.ok(!INSTRUCTIONS.includes("You are the VOICE for Claude Code"));
 });
 
+test('"be quiet" is claimed by narration only — never by mute', () => {
+  // The MUTE bullet used to list "be quiet" alongside "stop listening". If the
+  // model took that branch it turned the microphone off, which this same
+  // prompt says the user cannot undo by voice. Volume phrasings belong to
+  // set_narration; only listening phrasings belong to mute.
+  const bullets = INSTRUCTIONS.split("\n").filter((l) => /be quiet|stop narrating/i.test(l));
+  assert.equal(bullets.length, 1, `claimed by ${bullets.length} bullets`);
+  assert.ok(bullets[0].includes("set_narration"));
+  assert.ok(!/call the mute tool/i.test(bullets[0]));
+  const mute = INSTRUCTIONS.split("\n").filter((l) => /call the mute tool/i.test(l));
+  assert.equal(mute.length, 1);
+  assert.ok(mute[0].includes('"stop listening"'));
+  assert.ok(mute[0].includes("set_narration"), "mute must redirect the talk-less case");
+});
+
 test("context block is empty when the backend is unreachable", () => {
   assert.equal(yuriContextBlock(null), "");
   assert.equal(yuriContextBlock(undefined), "");

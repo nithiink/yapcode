@@ -431,9 +431,14 @@ class SessionService:
         # The frontend's whole rule is "if it has a narration line, inject it".
         # Poll owns the four session-turn events (yuri/narration/policy.py); the
         # stream must not also narrate them or the user hears each one twice.
-        agent = self.registry.get(row.agent_id).name if row.agent_id else ""
+        # Name the agent from the provider we ALREADY resolved, never from a
+        # fresh `registry.get(row.agent_id)`: a stored row outlives its provider
+        # whenever YURI_AGENTS changes between runs (which is exactly why
+        # `_provider_for` guards the same lookup), and a KeyError here is
+        # swallowed by the frontend's "transient; keep polling" catch — the
+        # session would then poll every 1.5s and never narrate again.
         res = {**res, "narration": self.narration.line_for_poll(
-            res, row.name, agent, self._mode_reader())}
+            res, row.name, p.name, self._mode_reader())}
         return res
 
     async def interrupt(self, ref: str) -> dict:
