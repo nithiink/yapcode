@@ -38,6 +38,7 @@ from yuri.services.journal import Journal
 from yuri.services.memory import Memory
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
+from yuri.services.router import AgentRouter
 from yuri.services.sessions import SessionService
 from yuri.store.base import Store
 from yuri.store.sqlite import SqliteStore
@@ -58,6 +59,7 @@ class Container:
     store: Store
     bus: EventBus
     registry: AgentRegistry
+    router: AgentRouter
     journal: Journal
     memory: Memory
     projects: ProjectService
@@ -125,13 +127,14 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
     try:
         store.migrate()
         bus = EventBus(repo=store.events, bridge=bridge)
+        router = AgentRouter(registry, default_agent)
         journal = Journal(home)
         memory = Memory(home)
         projects = ProjectService(store, home, bus)
         approvals = ApprovalService(store, bus, journal)
         missions = MissionService(store, bus, journal)
         sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
-                                  default_agent=default_agent)
+                                  default_agent=default_agent, router=router)
         missions.stop_sessions = sessions.stop_many
         for p in registry.all():
             # Observer is (handle, ProviderEvent); on_provider_event also wants
@@ -151,7 +154,7 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         # must never be published via set_container().
         store.close()
         raise
-    c = Container(home, store, bus, registry, journal, memory, projects, approvals, missions, sessions)
+    c = Container(home, store, bus, registry, router, journal, memory, projects, approvals, missions, sessions)
     set_container(c)
     return c
 

@@ -48,6 +48,7 @@ from yuri.services.approvals import ApprovalService
 from yuri.services.journal import Journal
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
+from yuri.services.router import AgentRouter
 from yuri.store.base import Store
 
 log = logging.getLogger("yuri.sessions")
@@ -60,7 +61,7 @@ _IN_FLIGHT = ("working", "running")
 class SessionService:
     def __init__(self, store: Store, bus: EventBus, journal: Journal, registry: AgentRegistry,
                  projects: ProjectService, approvals: ApprovalService, missions: MissionService,
-                 default_agent: str = "claude-code"):
+                 default_agent: str = "claude-code", router: AgentRouter | None = None):
         self.store = store
         self.bus = bus
         self.journal = journal
@@ -69,6 +70,7 @@ class SessionService:
         self.approvals = approvals
         self.missions = missions
         self.default_agent = default_agent
+        self.router = router or AgentRouter(registry, default_agent)
 
     # --- lookup ---------------------------------------------------------------
 
@@ -229,7 +231,7 @@ class SessionService:
                     model: str | None = None, name: str | None = None, created_by: str = "voice",
                     agent_id: str | None = None) -> dict:
         project = self.projects.resolve_or_create(project_ref)
-        agent = self.registry.get(agent_id or project.default_agent or self.default_agent)
+        agent = self.router.select(project, agent_id)
         sess_name = self._pick_name(name, project.root_path)
         mission = self.missions.create(project, sess_name, created_by=created_by, agent_id=agent.id)
         mode = normalize_mode(mode)
