@@ -2,6 +2,7 @@
 // tsconfig has allowImportingTsExtensions, so Next accepts them too.
 import { PERSONA } from "./persona.ts";
 import { OPERATING } from "./operating.ts";
+import { isNarrationMode, type NarrationMode } from "./narration.ts";
 
 export const INSTRUCTIONS = PERSONA + "\n\n" + OPERATING;
 
@@ -9,6 +10,12 @@ export type YuriContext = {
   home: string;
   memory_user: string;
   journal_today: string;
+  // Design §6: a fresh voice session must know the remembered mode without
+  // being told. Without it in the prompt, OPERATING's "if it's already quiet
+  // don't apologise for being quiet" is not actionable. Optional and validated
+  // rather than asserted: it crosses the network, and an older backend or an
+  // unreachable /yuri/context must still produce a usable block.
+  narration_mode?: NarrationMode | string | null;
   active_missions: { id: string; title: string; goal: string | null; status: string; project: string | null }[];
   agents: { id: string; name: string; online: boolean; version?: string | null; detail?: string }[];
 };
@@ -20,6 +27,9 @@ const cap = (s: string, n: number) => (s.length > n ? s.slice(s.length - n) : s)
 export function yuriContextBlock(ctx: YuriContext | null | undefined): string {
   if (!ctx) return "";
   const lines: string[] = ["", "", `YOUR HOME: ${ctx.home}`];
+  if (isNarrationMode(ctx.narration_mode)) {
+    lines.push(`YOUR NARRATION MODE: ${ctx.narration_mode} (remembered from last time; set_narration changes it)`);
+  }
   const mem = (ctx.memory_user || "").trim();
   lines.push("WHAT YOU REMEMBER ABOUT THE USER:", mem ? cap(mem, 4000) : "(nothing yet — use remember when you learn something)");
   const journal = (ctx.journal_today || "").trim();

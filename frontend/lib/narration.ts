@@ -51,6 +51,50 @@ export type NarratedEvent = NarratedFrame & { id?: unknown };
  */
 export const NARRATION_REPLAY_LIMIT = 50;
 
+/**
+ * The stream's replay width for ONE connect, given whether the seed succeeded.
+ *
+ * The gate is what makes a replay silent, so a seed that failed leaves nothing
+ * to dedupe against — and the backend clamps with `max(1, …)`, so asking for no
+ * replay is impossible. Open at 1 instead. That was implicitly fine when the
+ * replay was 1 event ("the cost is a few stale lines"); at
+ * NARRATION_REPLAY_LIMIT it is not, because each injected line costs a full
+ * model response (`drainPendingInjections` narrates exactly one queued item per
+ * response), so an unseeded connect would spend a minute reading out history.
+ * One possibly-stale line is the honest floor.
+ */
+export function replayLimitFor(seeded: boolean): number {
+  return seeded ? NARRATION_REPLAY_LIMIT : 1;
+}
+
+/**
+ * Hard bound on the queue of lines waiting for a model response.
+ *
+ * Verbose mode publishes a `tool.started` per tool call while
+ * `drainPendingInjections` fires one `response.create` per queued item — so
+ * during a single long turn the queue grows faster than it drains and Yuri
+ * ends up narrating tool calls from minutes ago. Bound it and drop the OLDEST:
+ * every queued item is already in the model's conversation (its own
+ * `conversation.item.create`), so a dropped item is still context — it just
+ * doesn't get a spoken line of its own. Losing the oldest texture is strictly
+ * better than falling further behind, and the newest line is the one that is
+ * still true.
+ */
+export const MAX_PENDING_INJECTIONS = 8;
+
+/** Queue `text` under the bound, evicting oldest-first. Returns how many were
+ *  dropped, so the caller can say so in the log rather than losing it. */
+export function enqueueInjection(queue: string[], text: string,
+                                 cap = MAX_PENDING_INJECTIONS): number {
+  queue.push(text);
+  let dropped = 0;
+  while (queue.length > Math.max(1, cap)) {
+    queue.shift();
+    dropped += 1;
+  }
+  return dropped;
+}
+
 export type SpokenGate = {
   /** Mark ids as already delivered without speaking them. */
   seed(ids: Iterable<unknown>): void;

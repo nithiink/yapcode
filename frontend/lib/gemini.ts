@@ -283,7 +283,7 @@ export class GeminiSession implements VoiceSession {
     const buffered = this.bufferedInject;
     this.bufferedInject = undefined;
     if (buffered) {
-      // A Claude update landed while the socket was down. Deliver the freshest
+      // A narration update landed while the socket was down. Deliver the freshest
       // one now so the user hears the real current state — not a stale echo.
       this.injectUpdate(
         "[connection] You briefly lost the voice connection and just reconnected. " +

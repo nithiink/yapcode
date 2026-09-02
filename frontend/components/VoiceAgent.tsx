@@ -13,6 +13,7 @@ import {
   createSpokenGate,
   isNarrationMode,
   narrationOf,
+  replayLimitFor,
   type NarrationMode,
   type SpokenGate,
 } from "@/lib/narration";
@@ -1028,21 +1029,27 @@ export default function VoiceAgent() {
       // minimum of 1 server-side, so there is no way to ask for no replay.
       // Seeding the gate with those same ids is what makes the replay silent;
       // without it, connecting would re-speak whatever happened last, possibly
-      // hours ago. BOTH limits are NARRATION_REPLAY_LIMIT and must stay equal
-      // (see its comment). Best-effort: if this read fails the cost is a few
-      // stale lines, not a broken stream.
+      // hours ago. When the seed SUCCEEDS both limits are
+      // NARRATION_REPLAY_LIMIT and must stay equal (see its comment).
+      //
+      // When it fails we narrow the stream to one event instead of trusting an
+      // unseeded 50: each injected line costs a full model response, so an
+      // unseeded wide replay would read out minutes of history at connect.
+      // replayLimitFor() holds that reasoning.
+      let seeded = false;
       try {
         const r = await fetch(`/api/yuri/events?limit=${NARRATION_REPLAY_LIMIT}`, { headers: authHeaders() });
         if (r.ok) {
           const d = await r.json();
           gate.seed((Array.isArray(d?.events) ? d.events : []).map((e: any) => e?.id));
+          seeded = true;
         }
       } catch {
-        /* nothing to seed; the gate still dedupes every later reconnect */
+        /* nothing to seed — fall back to a 1-event replay below */
       }
       if (cancelled) return; // disconnected while we were seeding
       const es = new EventSource(
-        withAuthParam(`${backendBase()}/yuri/events/stream?limit=${NARRATION_REPLAY_LIMIT}`),
+        withAuthParam(`${backendBase()}/yuri/events/stream?limit=${replayLimitFor(seeded)}`),
       );
       narrationEsRef.current = es;
       es.onmessage = (m) => {

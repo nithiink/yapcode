@@ -4,9 +4,12 @@ import assert from "node:assert/strict";
 import {
   NARRATION_MODES,
   NARRATION_REPLAY_LIMIT,
+  MAX_PENDING_INJECTIONS,
   createSpokenGate,
+  enqueueInjection,
   isNarrationMode,
   narrationOf,
+  replayLimitFor,
 } from "./narration.ts";
 
 test("a frame with a narration line yields it", () => {
@@ -131,4 +134,42 @@ test("the seen set is capped, and the newest ids survive eviction", () => {
   for (const id of ["a", "b", "c", "d"]) gate.lineFor({ id, narration: id });
   assert.equal(gate.lineFor({ id: "d", narration: "d" }), null); // newest kept
   assert.equal(gate.lineFor({ id: "a", narration: "a" }), "a");  // oldest evicted
+});
+
+test("a failed seed narrows the replay to one line, not fifty", () => {
+  // The gate is what makes a replay silent. Unseeded, every replayed event is
+  // spoken as news — and each line costs a full model response, so a wide
+  // replay would read out minutes of history at connect. 1 is the floor the
+  // backend allows (_clamp_limit is max(1, ...)), so "no replay" is impossible.
+  assert.equal(replayLimitFor(true), NARRATION_REPLAY_LIMIT);
+  assert.equal(replayLimitFor(false), 1);
+});
+
+test("the injection queue is bounded, dropping the oldest", () => {
+  // Verbose mode publishes a tool.started per tool call while the drain fires
+  // one response.create per item, so an unbounded queue falls behind for the
+  // rest of the turn and narrates tool calls from minutes ago.
+  const q: string[] = [];
+  for (let i = 0; i < MAX_PENDING_INJECTIONS; i++) {
+    assert.equal(enqueueInjection(q, `line ${i}`), 0);
+  }
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+  assert.equal(enqueueInjection(q, "newest"), 1);
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+  assert.equal(q[0], "line 1");                                  // oldest evicted
+  assert.equal(q[q.length - 1], "newest");                       // newest kept
+});
+
+test("the injection bound is a real ceiling under a burst", () => {
+  const q: string[] = [];
+  let dropped = 0;
+  for (let i = 0; i < 500; i++) dropped += enqueueInjection(q, `t${i}`);
+  assert.equal(q.length, MAX_PENDING_INJECTIONS);
+  assert.equal(dropped, 500 - MAX_PENDING_INJECTIONS);
+  assert.equal(q[q.length - 1], "t499");
+  // A nonsense cap must not produce an empty queue that silently swallows the
+  // line the caller just handed us.
+  const one: string[] = [];
+  enqueueInjection(one, "only", 0);
+  assert.deepEqual(one, ["only"]);
 });

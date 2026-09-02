@@ -51,3 +51,18 @@ test("memory is capped to its tail", () => {
   assert.ok(out.includes("END"));
   assert.ok(!out.includes("a".repeat(4500)));
 });
+
+test("the context block carries the remembered narration mode", () => {
+  // Design section 6: a fresh voice session knows the mode without being told,
+  // which is what makes OPERATING's "if it's already quiet don't apologise for
+  // being quiet" actionable.
+  const base = { home: "h", memory_user: "", journal_today: "", active_missions: [], agents: [] };
+  const quiet = yuriContextBlock({ ...base, narration_mode: "quiet" });
+  assert.ok(quiet.includes("YOUR NARRATION MODE: quiet"));
+  assert.ok(yuriContextBlock({ ...base, narration_mode: "verbose" }).includes("verbose"));
+  // Unvalidated input crosses the network: render nothing rather than a lie.
+  for (const bad of [undefined, null, "", "loud", 7 as unknown as string]) {
+    const out = yuriContextBlock({ ...base, narration_mode: bad });
+    assert.ok(!out.includes("NARRATION MODE"), String(bad));
+  }
+});
