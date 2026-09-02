@@ -18,6 +18,7 @@ import {
   recomputeCost,
 } from "./voice";
 import { authHeaders } from "./auth";
+import { enqueueInjection, type PendingInjection } from "./narration";
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
@@ -35,11 +36,13 @@ export class RealtimeSession implements VoiceSession {
   // A response is in flight from response.created until response.done /
   // response.completed. injectUpdate fires response.create which errors with
   // "conversation_already_has_active_response" while one is active — the
-  // [Claude update] system message lands in the conversation but is never
-  // narrated, so the user thinks the voice agent "missed" it. Queue updates
-  // and drain when the current response ends.
+  // narration system message lands in the conversation but is never narrated,
+  // so the user thinks the voice agent "missed" it. Queue updates and drain
+  // when the current response ends. The queue is bounded (see
+  // MAX_PENDING_INJECTIONS): verbose mode can publish faster than one
+  // response.create per item drains.
   private responseActive = false;
-  private pendingInjections: string[] = [];
+  private pendingInjections: PendingInjection[] = [];
   // call_ids we've already dispatched to /api/tools/execute. Realtime can
   // surface the same function_call twice — streamed via response.output_item.done
   // AND again in response.done's output[]. Dedupe so we run each call once.
@@ -187,7 +190,7 @@ export class RealtimeSession implements VoiceSession {
     this.localStream?.getAudioTracks().forEach((t) => (t.enabled = !muted));
   }
 
-  injectUpdate(text: string): void {
+  injectUpdate(text: string, opts?: { blocking?: boolean }): void {
     if (!this.dc || this.dc.readyState !== "open") {
       console.warn("[realtime] injectUpdate dropped — data channel not open:", text.slice(0, 80));
       return;
@@ -200,8 +203,18 @@ export class RealtimeSession implements VoiceSession {
       item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
     });
     if (this.responseActive) {
-      this.pendingInjections.push(text);
+      // A blocking line (permission / question) can never be evicted by the
+      // bound — the frontend half of the backend's ALWAYS_SPEAK guarantee. A
+      // dropped ask is unrecoverable: poll_status hands back each buffered
+      // result once, so it is never re-offered.
+      const dropped = enqueueInjection(this.pendingInjections,
+                                       { text, blocking: opts?.blocking });
       console.log("[realtime] injectUpdate queued (response in flight):", text.slice(0, 80));
+      if (dropped) {
+        // Back-pressure, not a bug: the dropped lines are still in the model's
+        // conversation, they just don't each get a spoken response.
+        console.warn(`[realtime] injection queue full — dropped ${dropped} older texture line(s)`);
+      }
     } else {
       this.responseActive = true;
       this.send({ type: "response.create" });
@@ -454,7 +467,7 @@ export class RealtimeSession implements VoiceSession {
           // A continuation (or tool follow-up) is in flight.
           emit({ type: "state", state: "thinking" });
         } else {
-          // Nothing pending — drain any queued [Claude update] system messages.
+          // Nothing pending — drain any queued narration system messages.
           this.drainPendingInjections();
           emit({ type: "state", state: "listening" });
         }
@@ -495,7 +508,7 @@ export class RealtimeSession implements VoiceSession {
         }
         // Any non-racy error means the response.create we fired won't produce a
         // response.done — so responseActive would stick true and every later
-        // [Claude update] would queue silently and never narrate (the current
+        // narration line would queue silently and never narrate (the current
         // prompt then looks "still processing" forever). Clear the flag, then
         // either fire a pending tool continuation or drain queued updates so the
         // conversation keeps flowing. If a response really was still active, the

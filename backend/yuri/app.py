@@ -6,7 +6,8 @@ WHY the shape:
 
 * One place, one graph. Every wire that cannot be expressed as a constructor
   argument lives here and nowhere else: the provider observers (provider event
-  -> SessionService), `missions.stop_sessions` (injected to break the
+  -> SessionService), `missions.stop_sessions` / `missions.interrupt_sessions`
+  (both injected to break the
   Mission<->Session cycle), and `session_manager.set_provider` (the module's
   provider slot must hold the SAME ClaudeCodeProvider as the services — two
   live TmuxClaudeRunners would fight over the same tmux control dirs and both
@@ -31,6 +32,8 @@ import session_manager
 from yuri.domain.event import YuriEvent
 from yuri.events.bus import EventBus, bridge_to_event_log
 from yuri.home import Home, default_home
+from yuri.narration.policy import MODES, Mode, normalize_mode
+from yuri.narration.service import NarrationService
 from yuri.providers.base import AgentProvider
 from yuri.providers.registry import AgentRegistry, build_registry
 from yuri.services.approvals import ApprovalService
@@ -38,6 +41,7 @@ from yuri.services.journal import Journal
 from yuri.services.memory import Memory
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
+from yuri.services.router import AgentRouter
 from yuri.services.sessions import SessionService
 from yuri.store.base import Store
 from yuri.store.sqlite import SqliteStore
@@ -58,8 +62,10 @@ class Container:
     store: Store
     bus: EventBus
     registry: AgentRegistry
+    router: AgentRouter
     journal: Journal
     memory: Memory
+    narration: NarrationService
     projects: ProjectService
     approvals: ApprovalService
     missions: MissionService
@@ -125,14 +131,18 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
     try:
         store.migrate()
         bus = EventBus(repo=store.events, bridge=bridge)
+        router = AgentRouter(registry, default_agent)
         journal = Journal(home)
         memory = Memory(home)
+        narration = NarrationService()
         projects = ProjectService(store, home, bus)
         approvals = ApprovalService(store, bus, journal)
         missions = MissionService(store, bus, journal)
         sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
-                                  default_agent=default_agent)
+                                  default_agent=default_agent, router=router,
+                                  narration=narration, mode_reader=narration_mode)
         missions.stop_sessions = sessions.stop_many
+        missions.interrupt_sessions = sessions.interrupt_many
         for p in registry.all():
             # Observer is (handle, ProviderEvent); on_provider_event also wants
             # the agent id, which the provider never sends — bind it here.
@@ -151,7 +161,8 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         # must never be published via set_container().
         store.close()
         raise
-    c = Container(home, store, bus, registry, journal, memory, projects, approvals, missions, sessions)
+    c = Container(home, store, bus, registry, router, journal, memory, narration, projects, approvals, missions,
+                 sessions)
     set_container(c)
     return c
 
@@ -203,6 +214,25 @@ async def shutdown() -> None:
         c.store.close()
         set_container(None)
         session_manager.reset()
+
+
+SETTINGS_NARRATION_MODE = "narration_mode"
+
+
+def narration_mode() -> Mode:
+    """The remembered narration mode. Defaults to normal, and never raises on a
+    corrupt stored value — normalize_mode absorbs it."""
+    return normalize_mode(container().store.settings.get(SETTINGS_NARRATION_MODE))
+
+
+def set_narration_mode(mode: object) -> Mode:
+    """Persist the mode. Raises ValueError naming the valid modes on bad input —
+    unlike narration_mode(), a caller setting a mode deserves to be told."""
+    if not isinstance(mode, str) or mode.strip().lower() not in MODES:
+        raise ValueError(f"narration mode must be one of: {', '.join(MODES)}")
+    m = normalize_mode(mode)
+    container().store.settings.set(SETTINGS_NARRATION_MODE, m)
+    return m
 
 
 def test_container(home_path: str, provider: AgentProvider, default_agent: str | None = None) -> Container:

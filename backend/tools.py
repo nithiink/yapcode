@@ -23,6 +23,8 @@ from typing import Any
 
 from slash_commands import list_slash_commands
 from yuri.app import container
+from yuri.domain.mission import InvalidTransition
+from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_speech
 
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
@@ -256,9 +258,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "mute",
         "description": (
             "Mute your own microphone in the user interface so you stop listening to "
-            "the user. Call this when the user says 'mute', 'mute yourself', 'stop "
-            "listening', or 'be quiet'. While muted you can't hear the user, so you "
-            "can't unmute by voice — the user unmutes with the on-screen button. Give a "
+            "the user. Call this ONLY when the user asks you to stop LISTENING — "
+            "'mute', 'mute yourself', 'stop listening'. A request to TALK less or "
+            "narrate less belongs to set_narration, never here: muting cannot be "
+            "undone by voice. While muted you can't hear the user, so you can't "
+            "unmute by voice — the user unmutes with the on-screen button. Give a "
             "brief spoken acknowledgement before or as you mute."
         ),
         "parameters": {"type": "object", "properties": {}},
@@ -274,6 +278,66 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "project": {"type": "string", "description": "Optional project folder name the fact is about."},
             },
             "required": ["fact"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "set_narration",
+        "description": "Change how much you narrate. 'quiet' = only problems and things needing the user's answer; 'normal' = meaningful progress; 'verbose' = every tool and cost update too. Call this when the user says 'be quiet', 'stop narrating', 'less', 'tell me everything', or 'go back to normal'. 'Be quiet' means talk less, NOT stop listening — never call mute for it. The setting is remembered.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mode": {"type": "string", "enum": ["quiet", "normal", "verbose"]}},
+            "required": ["mode"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_missions",
+        "description": "List Yuri's missions — the units of work. Call this when the user asks what's running, what you're working on, or what happened. Omit status for the active ones; pass a status to filter (running, waiting_for_approval, paused, completed, failed, cancelled). Only the most recently updated missions are returned.",
+        "parameters": {
+            "type": "object",
+            "properties": {"status": {"type": "string", "description": "Optional status filter."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "mission_status",
+        "description": "Details of one mission: its goal, status, which agents are on it, its sessions and any pending approval. Omit mission to mean the one active mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "pause_mission",
+        "description": "Pause a mission, interrupting any agent currently working on it. Use this for 'pause that', 'hold on', or 'stop the payment one'. Omit mission to mean the one active mission. Resume it later with resume_mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "resume_mission",
+        "description": "Resume a paused mission. Omit mission to mean the one active mission. Resuming does not itself give the agent new instructions — use tell_claude for that.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "cancel_mission",
+        "description": "Cancel a mission and stop its agents. This ends the work — confirm with the user first, naming the mission you are about to cancel. Omit mission to mean the one active mission.",
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
         },
     },
 ]
@@ -472,5 +536,37 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         c.journal.append(f"remembered{' for ' + slug if slug else ''}: {args.get('fact', '')}")
         return {"ok": True, "path": path,
                 "message": "Remembered." if not slug else f"Noted under {slug}."}
+
+    if name == "set_narration":
+        from yuri.app import set_narration_mode
+        mode = set_narration_mode(args.get("mode"))
+        blurb = {"quiet": "Going quiet — I'll only speak up for problems and anything needing your answer.",
+                 "normal": "Back to normal narration.",
+                 "verbose": "I'll narrate everything, including each tool call."}[mode]
+        return {"mode": mode, "message": blurb}
+
+    if name == "list_missions":
+        # Shaping (and the store access it needs) belongs to MissionService,
+        # next to speech_detail's identical clipping rules.
+        status = (args.get("status") or "").strip() or None
+        return {"missions": container().missions.speech_list(status, limit=MISSION_LIST_MAX)}
+
+    if name == "mission_status":
+        c = container()
+        # resolve() raises ValueError on an unknown or ambiguous reference —
+        # a soft error the model reads back to the user (see main.py).
+        return c.missions.speech_detail(c.missions.resolve(args.get("mission", "")).id)
+
+    if name in ("pause_mission", "resume_mission", "cancel_mission"):
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        verb = name.split("_")[0]
+        try:
+            m = await getattr(c.missions, verb)(m.id, by="voice")
+        except InvalidTransition as exc:
+            raise ValueError(str(exc)) from exc     # soft error the model can recover from
+        title = clip_speech(m.title, TITLE_SPEECH_MAX)
+        return {"mission_id": m.id, "title": title, "status": m.status,
+                "message": f'Mission "{title}" is now {m.status}.'}
 
     raise KeyError(f"unknown tool: {name}")

@@ -57,11 +57,14 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store.close()
         self.tmp.cleanup()
 
-    def _types(self):
+    def _events(self):
         out = []
         while not self.q.empty():
-            out.append(self.q.get_nowait().type)
+            out.append(self.q.get_nowait())
         return out
+
+    def _types(self):
+        return [e.type for e in self._events()]
 
     async def test_start_creates_project_mission_session(self):
         out = await self.svc.start("proj", created_by="voice")
@@ -154,6 +157,26 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.fake.script(sid, {"status": "running", "assistant_text": ""})
         self.svc.poll(sid)
         self.assertEqual(self.svc.row_for(sid).status, "running")
+
+    async def test_poll_survives_a_row_whose_agent_is_no_longer_registered(self):
+        """A stored row outlives its provider whenever YURI_AGENTS changes
+        between runs — `_provider_for` guards the lookup for exactly that
+        reason, and the narration lookup must too. A KeyError here is worse
+        than a 500: the frontend's poll catch is "transient; keep polling", so
+        the session would poll forever and never narrate again."""
+        out = await self.svc.start("proj", name="billing")
+        sid = out["session_id"]
+        row = self.svc.row_for(sid)
+        row.agent_id = "retired-agent"          # provider gone from the registry
+        self.store.sessions.update(row)
+        with self.assertRaises(KeyError):       # the lookup really is unguardable
+            self.registry.get("retired-agent")
+        self.fake.script(sid, {"status": "completed", "assistant_text": "two files changed"})
+        res = self.svc.poll(sid)                # must not raise
+        self.assertEqual(res["status"], "completed")
+        self.assertIn("two files changed", res["narration"])
+        # The line still names the agent, taken from the resolved provider.
+        self.assertIn("Fake Agent", res["narration"])
 
     async def test_poll_needs_permission_without_a_prompt_still_parks_the_session(self):
         out = await self.svc.start("proj")
@@ -316,6 +339,35 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
                                  "cost.updated", "agent.error"])
         self.assertEqual(self.svc.row_for(sid).runtime_metadata.get("cost_usd"), 0.01)
         self.assertIn("turn completed", self.journal.read_today())
+
+    async def test_tool_started_names_the_agent_for_verbose_narration(self):
+        """narration/service.py reads payload["agent_name"] to say
+        "<agent> is using <tool>". Nothing set it, so verbose mode could only
+        ever say "The agent is using Bash" — the spec's texture was
+        unreachable, and the read was dead."""
+        from yuri.narration.service import NarrationService
+        out = await self.svc.start("proj")
+        self._types()
+        self.fake.emit(out["session_id"],
+                       ProviderEvent("tool_started", {"tool_name": "Bash", "tool_input": {}}))
+        ev = next(e for e in self._events() if e.type == "tool.started")
+        self.assertEqual(ev.payload["agent_name"], "Fake Agent")
+        self.assertEqual(NarrationService().line_for(ev, "verbose"),
+                         "Fake Agent is using Bash.")
+
+    async def test_tool_started_falls_back_when_the_agent_is_unregistered(self):
+        row_agent = "retired-agent"
+        out = await self.svc.start("proj")
+        row = self.svc.row_for(out["session_id"])
+        row.agent_id = row_agent
+        self.store.sessions.update(row)
+        self._types()
+        self.fake.emit(out["session_id"],
+                       ProviderEvent("tool_started", {"tool_name": "Bash", "tool_input": {}}))
+        ev = next(e for e in self._events() if e.type == "tool.started")
+        self.assertEqual(ev.payload["agent_name"], "")     # no crash, no fake name
+        from yuri.narration.service import NarrationService
+        self.assertEqual(NarrationService().line_for(ev, "verbose"), "The agent is using Bash.")
 
     async def test_a_later_cost_event_does_not_erase_the_model(self):
         out = await self.svc.start("proj")

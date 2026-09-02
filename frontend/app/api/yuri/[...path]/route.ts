@@ -29,3 +29,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   return proxy(req, (await ctx.params).path);
 }
+
+// PUT /yuri/narration is the only PUT so far; proxy() is already method-agnostic
+// (it forwards req.method and the body), so this is just the missing export —
+// without it Next.js answers the narration toggle with a 405.
+export async function PUT(req: NextRequest, ctx: Ctx) {
+  return proxy(req, (await ctx.params).path);
+}

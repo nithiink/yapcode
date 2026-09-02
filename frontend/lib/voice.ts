@@ -63,8 +63,11 @@ export interface VoiceSession {
   start(audioEl: HTMLAudioElement): Promise<void>;
   stop(): void;
   // Inject an out-of-band update (e.g. a background Claude result) and prompt
-  // the model to speak about it, even mid-conversation.
-  injectUpdate(text: string): void;
+  // the model to speak about it, even mid-conversation. `blocking` marks a line
+  // the agent is waiting on an answer for (a permission request or a question):
+  // a transport that queues updates must never drop one. See
+  // lib/narration.ts's PendingInjection, and the backend's ALWAYS_SPEAK.
+  injectUpdate(text: string, opts?: { blocking?: boolean }): void;
   // Mute/unmute the microphone (the agent stops hearing the user).
   setMuted(muted: boolean): void;
 }

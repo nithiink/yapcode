@@ -61,6 +61,19 @@ but out loud.
 declaration. Two tests enforce it: every `EventType` appears exactly once, and
 no type is owned by both sides.
 
+**Amended during implementation — one owner per FACT, not per event type.** The
+table above is necessary but not sufficient, and the whole-branch review proved
+it: `_fail_if_alone` derives a `mission.status_changed → failed` from an
+`agent.error`, carrying the *same reason string*, so two differently-owned
+types deliver one fact and the user hears it twice. A voice tool's own spoken
+result is a third carrier this section never modelled (`pause_mission` returns
+`Mission "payments" is now paused.` and the stream then said `"payments" is
+paused.`). The implemented rule keeps this table AND adds a fact-level test: a
+mission event is narrated only when it is the first carrier of its fact, which
+the payload's `by` / `created_by` origin decides. The derivation lives in
+`yuri/narration/policy.py`'s module docstring, and `tests/test_narration_wiring.py`
+counts the spoken lines end to end rather than asserting per type.
+
 **Why not stream-only:** reaching parity requires `tmux_runner` to notify on
 every prompt and sub-question — surgery on the repo's most fragile file to
 replace something that works, where a missed notify means the user is silently

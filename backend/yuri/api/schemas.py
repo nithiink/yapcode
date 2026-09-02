@@ -9,3 +9,7 @@ class ProjectCreate(BaseModel):
     path: str
     name: str | None = None
     default_agent: str | None = None
+
+
+class NarrationUpdate(BaseModel):
+    mode: str

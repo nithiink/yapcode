@@ -101,6 +101,70 @@ class MissionServiceTests(unittest.IsolatedAsyncioTestCase):
         with open(journal_path, "rb") as f:
             self.assertEqual(f.read(), before_journal)
 
+    async def test_pause_checks_the_edge_before_interrupting(self):
+        """A `queued` mission is in ACTIVE (so "pause that" resolves to it) but
+        `queued → paused` is not in TRANSITIONS. Interrupting first stopped the
+        agents and THEN raised, leaving the mission running-but-idle."""
+        m = self.svc.create(self.project, "t", created_by="voice")
+        m.status = "queued"
+        self.store.missions.update(m)
+        interrupted = []
+
+        async def interrupt_many(sessions):
+            interrupted.extend(s.id for s in sessions)
+        self.svc.interrupt_sessions = interrupt_many
+        s = AgentSession(project_id=self.project.id, agent_id="a", native_session_id="h",
+                         backend="cli", working_directory="/tmp/p", mission_id=m.id,
+                         status="running")
+        self.store.sessions.insert(s)
+        with self.assertRaises(InvalidTransition):
+            await self.svc.pause(m.id, by="voice")
+        self.assertEqual(interrupted, [], "agents were interrupted for a transition that failed")
+        self.assertEqual(self.svc.get(m.id).status, "queued")
+
+    async def test_pause_still_interrupts_on_a_legal_edge(self):
+        m = self.svc.create(self.project, "t", created_by="voice")   # running
+        interrupted = []
+
+        async def interrupt_many(sessions):
+            interrupted.extend(s.id for s in sessions)
+        self.svc.interrupt_sessions = interrupt_many
+        s = AgentSession(project_id=self.project.id, agent_id="a", native_session_id="h",
+                         backend="cli", working_directory="/tmp/p", mission_id=m.id,
+                         status="running")
+        self.store.sessions.insert(s)
+        await self.svc.pause(m.id, by="voice")
+        self.assertEqual(interrupted, [s.id])
+        self.assertEqual(self.svc.get(m.id).status, "paused")
+
+    async def test_speech_list_shapes_and_bounds_what_is_spoken(self):
+        """The list counterpart of speech_detail. tools.py used to do this
+        shaping itself — the only place it reached into the store."""
+        for i in range(3):
+            m = self.svc.create(self.project, f"m{i}" * 60, created_by="voice",
+                                goal="g" * 600)
+            self.store.sessions.insert(AgentSession(
+                project_id=self.project.id, agent_id="a", native_session_id=f"h{i}",
+                backend="cli", working_directory="/tmp/p", mission_id=m.id,
+                status="running", name="n" * 300))
+        rows = self.svc.speech_list()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(set(rows[0]),
+                         {"id", "title", "goal", "status", "project", "agents", "sessions"})
+        self.assertLessEqual(len(rows[0]["title"]), 80)
+        self.assertLessEqual(len(rows[0]["goal"]), 240)
+        self.assertTrue(all(len(n) <= 60 for n in rows[0]["sessions"]))
+        self.assertEqual(rows[0]["project"], "P")
+        self.assertEqual(rows[0]["agents"], ["a"])
+        self.assertEqual(len(self.svc.speech_list(limit=2)), 2)
+
+    async def test_speech_list_filters_by_status_and_defaults_to_active(self):
+        live = self.svc.create(self.project, "live", created_by="voice")
+        done = self.svc.create(self.project, "done", created_by="voice")
+        self.svc.set_status(done, "completed", by="ui")
+        self.assertEqual([r["id"] for r in self.svc.speech_list()], [live.id])
+        self.assertEqual([r["id"] for r in self.svc.speech_list("completed")], [done.id])
+
     async def test_detail_shape(self):
         m = self.svc.create(self.project, "t", created_by="voice")
         d = self.svc.detail(m.id)
