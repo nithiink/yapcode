@@ -275,6 +275,18 @@ type Sess = {
   cost_usd?: number;
   backend?: string;
   mode?: string;
+  agent_id?: string;
+  agent_name?: string;
+  // What this session's provider actually supports. The panel used to assume
+  // every session was Claude Code: it rendered a permission-mode switcher for
+  // OpenCode (which has no modes, so every click failed) and built its own
+  // `claude --resume` line for a session Claude had never heard of.
+  supports_modes?: boolean;
+  resume_command?: string | null;
+  // Whether a live terminal view can be offered for THIS session. Not the
+  // same as backend === "cli": OpenCode's session lives in a server, and its
+  // view is an `opencode attach` pane created on demand.
+  can_watch?: boolean;
   name?: string | null;
   // Live work-pipeline (from the runner's list()): a turn executing now,
   // turns waiting behind it, and finished turns not yet narrated by poll.
@@ -946,8 +958,8 @@ export default function VoiceAgent() {
       "CURRENT STATE (snapshot from the moment this conversation connected — it goes stale as you work; list_sessions is the live source of truth):",
       `- Connected: ${new Date().toLocaleString()}`,
       lines.length
-        ? `- Open Claude sessions (reuse these for matching work instead of starting new ones):\n${lines.join("\n")}`
-        : "- Open Claude sessions: none — call start_session before any work.",
+        ? `- Open agent sessions (reuse these for matching work instead of starting new ones):\n${lines.join("\n")}`
+        : "- Open agent sessions: none — call start_session before any work.",
     ].join("\n");
   };
 
@@ -1796,13 +1808,14 @@ export default function VoiceAgent() {
 
         <div className="panel">
           <h2>
-            Claude sessions <span className="ct">{sessions.length || "—"} active</span>
+            Agent sessions <span className="ct">{sessions.length || "—"} active</span>
           </h2>
           <div className="rule" />
           <div className="scroll">
             {sessions.length === 0 && <div className="empty">No active sessions.</div>}
             {sessions.map((s) => {
-              const cmd = s.session_id ? `cd ${s.cwd} && claude --resume ${s.session_id}` : null;
+              // From the provider — only it knows how to reopen its own session.
+              const cmd = s.resume_command || null;
               const tmuxCmd = s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
               const open = openSession === s.handle;
               const st = sessionStatus(s);
@@ -1901,6 +1914,7 @@ export default function VoiceAgent() {
 
                   {open && <div className="transcript">{renderTimeline(transcript)}</div>}
 
+                  {s.supports_modes !== false && (
                   <div className="moderow">
                     <span className="modelbl">Mode</span>
                     <div className="modeseg" role="group" aria-label="Permission mode">
@@ -1917,12 +1931,13 @@ export default function VoiceAgent() {
                       ))}
                     </div>
                   </div>
+                  )}
 
                   <div className="actionrow">
-                    {s.backend === "cli" && liveSession !== s.handle && (
+                    {s.can_watch && liveSession !== s.handle && (
                       <button
                         className="txtoggle primary"
-                        title="Watch the live CLI in your browser"
+                        title="Watch this session live in your browser"
                         onClick={() => setLiveSession(s.handle)}
                       >
                         <Icon name="play" size={13} /> Watch live

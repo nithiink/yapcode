@@ -32,35 +32,13 @@ log = logging.getLogger("yapcode.runner")
 
 Status = Literal["running", "needs_permission", "needs_choice", "completed", "error"]
 
-_ALLOW_WORDS = {
-    "allow", "yes", "approve", "approved", "y", "ok", "okay", "sure",
-    "go", "go ahead", "do it", "yep", "yeah", "confirm", "accept",
-    "proceed",  # natural "yes" for the ExitPlanMode plan-approval prompt
-}
+# The allow/deny vocabulary and the gate now live in yuri/providers/consent.py
+# so every provider shares one copy -- see that module for why. Re-exported
+# here because five call sites (and the tests) already import it from here.
+from yuri.providers.consent import (  # noqa: E402
+    _ALLOW_WORDS, _DENY_PHRASES, _DENY_WORDS, decide_permission)
 
-# Bare declines (no feedback attached) for the plan-approval dialog.
-_DENY_WORDS = {"deny", "no", "nope", "decline", "declined", "cancel", "reject", "rejected", "n"}
-
-# Negations that aren't single tokens (caught as substrings, not word matches).
-_DENY_PHRASES = ("don't", "do not", "stop")
-
-
-def decide_permission(choice: str) -> Optional[str]:
-    """Resolve a binary permission answer to "allow", "deny", or None (ambiguous).
-
-    A SECURITY gate that fails CLOSED: matching is word-level (not the old
-    `startswith`, which let "y" match "your"), any negation wins, and anything
-    that isn't a clean allow/deny returns None so the caller re-asks.
-    """
-    c = (choice or "").strip().lower()
-    if not c:
-        return None
-    tokens = set(re.findall(r"[a-z']+", c))
-    if tokens & _DENY_WORDS or any(p in c for p in _DENY_PHRASES):
-        return "deny"
-    if c in _ALLOW_WORDS or (tokens & _ALLOW_WORDS):
-        return "allow"
-    return None
+__all_consent__ = (decide_permission, _ALLOW_WORDS, _DENY_WORDS, _DENY_PHRASES)
 
 
 @dataclass

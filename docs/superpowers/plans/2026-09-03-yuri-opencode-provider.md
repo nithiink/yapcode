@@ -1886,6 +1886,20 @@ cd frontend && npm run dev
   OpenCode delete note.txt"). Confirm she asks, that "deny" reaches OpenCode as
   `reject`, and that "allow" reaches it as `once` — check with
   `curl -s localhost:4096/api/session/<sid>/permission`.
+
+  **Two shapes task 5 could not prove against a fake, both to settle here:**
+  1. *Does replying actually drop the request from the pending list?* Reply,
+     then `curl` that endpoint again. Task 5's staleness pre-check assumes it
+     does. If the request drops EARLIER than expected the failure is benign —
+     a false stale-refusal, heard as one extra re-ask. The other direction is
+     the one to watch: if OpenCode never removes an answered request, the next
+     poll re-surfaces the same `request_id` and the user hears the same
+     question forever instead of the turn moving to `working`. Nothing unsafe
+     is granted either way, but it would look like a hang.
+  2. *The question reply body shape.* Task 5 sends `{"reply": …}` to
+     `…/question/{id}/reply` purely by symmetry with the permission reply —
+     never observed. Answer a real question and check the server accepts it;
+     the guess is isolated to one line in `_question_reply` if it is wrong.
 - [ ] **Restart with a live session.** Stop and restart Yuri mid-session;
   confirm the session is re-adopted and that she does **not** re-narrate
   anything already heard.

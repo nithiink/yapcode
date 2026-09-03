@@ -83,6 +83,23 @@ class SessionService:
 
     # --- lookup ---------------------------------------------------------------
 
+    @staticmethod
+    def _can_watch(p: AgentProvider, handle: str) -> bool:
+        try:
+            return bool(p.can_open_terminal(handle))
+        except Exception:
+            log.exception("can_open_terminal failed for %s", p.id)
+            return False
+
+    @staticmethod
+    def _resume_command(p: AgentProvider, handle: str) -> str | None:
+        """Never let one provider's handoff break the whole session list."""
+        try:
+            return p.resume_command(handle)
+        except Exception:
+            log.exception("resume_command failed for %s", p.id)
+            return None
+
     def _native_map(self) -> tuple[dict[str, tuple[AgentProvider, dict]], set[str]]:
         """(handle -> (provider, runner dict), ids of providers that answered).
 
@@ -190,10 +207,40 @@ class SessionService:
         out: list[dict] = []
         for handle, (p, s) in self._native().items():
             r = rows.get(handle)
-            out.append({**s, "agent_id": p.id, "name": r.name if r else None,
+            caps = p.capabilities()
+            out.append({**s, "agent_id": p.id, "agent_name": p.name,
+                        "name": r.name if r else None,
                         "mission_id": r.mission_id if r else None,
-                        "yuri_session_id": r.id if r else None})
+                        "yuri_session_id": r.id if r else None,
+                        # What the UI may offer for THIS session. Without these
+                        # the panel rendered a permission-mode switcher for
+                        # OpenCode, which has no modes at all, so every click
+                        # was a guaranteed failure; and it built its own
+                        # `claude --resume` line for every provider.
+                        "supports_modes": bool(caps.permission_modes),
+                        # Per-session, not per-provider: Claude Code's CLI
+                        # backend can be watched and its SDK backend cannot,
+                        # and OpenCode's answer depends on tmux being present.
+                        "can_watch": self._can_watch(p, handle),
+                        "permission_modes": list(caps.permission_modes),
+                        "resume_command": self._resume_command(p, handle)})
         return out
+
+    async def transcript(self, ref: str, limit: int = 300) -> dict:
+        """The session's conversation, from whichever provider owns it.
+
+        tools.py used to call Claude Code's on-disk transcript reader directly
+        for every session, so an OpenCode session's transcript panel was always
+        empty -- the same "every session is Claude Code" assumption as the
+        resume command.
+        """
+        handle = self.resolve(ref)
+        p = self._provider_for(handle)
+        try:
+            return await p.transcript(handle, limit=limit)
+        except Exception:
+            log.exception("transcript failed for %s", p.id)
+            return {"found": False, "events": []}
 
     def native_pane(self, ref: str) -> str | None:
         try:
@@ -415,6 +462,21 @@ class SessionService:
             return {**res, "narration": None}
         status = res.get("status")
         emits = not p.capabilities().supports_events   # otherwise the observer already did
+        # The provider's durable state. `poll` is the only place OpenCode's read
+        # cursors move, so it is the one hook that can write them down — and
+        # rehydrate would otherwise restore marks nobody ever saved, silently
+        # falling back to "from now" on every restart. MERGE, never replace:
+        # this same column carries cost_usd/model/token counts from
+        # on_provider_event's cost_updated branch. Every other provider answers
+        # {} and its rows are untouched.
+        marks = p.runtime_metadata_for(handle)
+        unsaved = bool(marks) and any(row.runtime_metadata.get(k) != v
+                                      for k, v in marks.items())
+        if unsaved:
+            row.runtime_metadata = {**row.runtime_metadata, **marks}
+        # Which branches below persist the row themselves, via _touch.
+        persisted = (status in ("needs_permission", "needs_choice",
+                                "completed", "error") or status in _IN_FLIGHT)
         if status == "needs_permission":
             prompt = res.get("prompt")
             if prompt:
@@ -439,6 +501,15 @@ class SessionService:
             self._fail_if_alone(row, res.get("error") or "agent error")
         elif status in _IN_FLIGHT:
             self._touch(row, "running")
+        # Each branch above persists the row through _touch, which writes the
+        # merged marks with it. Only a poll that took no branch at all — an idle
+        # session whose cursor still advanced past events Yuri did not start —
+        # needs its own write, so this costs one UPDATE per poll, never two.
+        # Keyed off which branch ran, not off whether last_activity_at changed:
+        # two _touch calls inside the same millisecond would compare equal and
+        # buy a redundant UPDATE.
+        if unsaved and not persisted:
+            self._touch(row)
         # The frontend's whole rule is "if it has a narration line, inject it".
         # Poll owns the four session-turn events (yuri/narration/policy.py); the
         # stream must not also narrate them or the user hears each one twice.
@@ -706,7 +777,19 @@ class SessionService:
         restored: list[dict] = []
         for p in self.registry.all():
             try:
-                restored.extend(await p.rehydrate())
+                # What Yuri already has a row for, so a provider whose sessions
+                # are durable server-side (OpenCode) can tell hers from the
+                # user's own — it must adopt only the former — and bring each
+                # one's read cursors back with it. A `stopped` row is
+                # deliberately not offered: the user told her to let that
+                # session go, and the server still holding it is not a reason
+                # to pick it back up. A `lost` row IS offered, because a handle
+                # that comes back revives its row a few lines below.
+                known = {r.native_session_id: dict(r.runtime_metadata or {},
+                                                   cwd=r.working_directory)
+                         for r in self.store.sessions.list()
+                         if r.agent_id == p.id and r.status != "stopped"}
+                restored.extend(await p.rehydrate(known=known))
             except Exception:
                 log.exception("rehydrate failed for %s", p.id)
         native, answered = self._native_map()

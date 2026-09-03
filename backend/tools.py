@@ -70,6 +70,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "description": "Execution backend (set by the app, not the user): 'cli' (interactive CLI) or 'sdk'.",
                     "enum": ["cli", "sdk"],
                 },
+                "agent": {
+                    "type": "string",
+                    "description": "Which coding agent runs this session. Omit for the default ('claude-code'). Pass 'opencode' only when the user asks for OpenCode ('use OpenCode', 'have OpenCode do it'). The AGENTS list in your context says which are configured; asking for one that is not returns an error naming the ones that are.",
+                },
                 "mode": {
                     "type": "string",
                     "description": "Initial permission mode. 'default' (asks before risky actions — recommended), 'plan' (only plans, makes no changes), 'acceptEdits' (auto-applies file edits), or 'auto' (runs everything without asking).",
@@ -419,10 +423,24 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         # Record before the (slow) start so a concurrent duplicate call also trips
         # the guard rather than racing past it.
         _last_start = {"ts": now, "handle": "", "name": "(starting…)"}
+        # Which agent runs it. Omitted -> AgentRouter's default (claude-code),
+        # which is what every unqualified request has always got.
+        requested_agent = (args.get("agent") or "").strip() or None
         try:
             out = await _svc().start(args.get("project_path", ""), backend=backend, mode=mode,
                                      model=args.get("model"), name=args.get("name"),
-                                     created_by="voice")
+                                     created_by="voice", agent_id=requested_agent)
+        except KeyError as exc:
+            # An agent id that is not registered. Soft (like _require_session
+            # above), not the bare KeyError the endpoint would turn into a
+            # confusing 404: the message names the agents that ARE up, which is
+            # exactly what the voice model needs to offer one instead of
+            # silently switching. Narrowed to the case where an agent was
+            # actually requested, so no other KeyError changes shape.
+            _last_start = recent
+            if requested_agent:
+                raise ValueError(str(exc)) from exc
+            raise
         except BaseException:
             _last_start = recent  # failed start shouldn't block a retry
             raise
@@ -484,9 +502,10 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return _svc().poll(args["session_id"])
 
     if name == "read_transcript":
-        # App-level: full session timeline from the on-disk jsonl (both backends).
-        from transcript import read_timeline
-        return read_timeline(_svc().resolve(args["session_id"]))
+        # Provider-owned: Claude Code reads its on-disk jsonl, OpenCode reads
+        # its server. Calling read_timeline here meant every OpenCode
+        # transcript came back empty.
+        return await _svc().transcript(args["session_id"])
 
     if name == "interrupt_session":
         return await _svc().interrupt(_require_session(args, "interrupt"))

@@ -169,6 +169,20 @@ class ClaudeCodeProvider(AgentProvider):
                 out.append({**s, "backend": backend})
         return out
 
+    async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
+        """The on-disk JSONL both Claude backends write. Unchanged behaviour --
+        this used to be called directly from tools.py, which meant OpenCode
+        sessions were handed Claude's transcript reader and always came back
+        empty."""
+        from transcript import read_timeline
+        return read_timeline(handle, limit=limit)
+
+    def resume_command(self, handle: str) -> str | None:
+        row = {s["handle"]: s for s in self.list_native()}.get(handle)
+        if not row or not row.get("session_id"):
+            return None
+        return f"cd {row['cwd']} && claude --resume {row['session_id']}"
+
     def native_pane(self, handle: str) -> str | None:
         if self.backend_of(handle) != "cli":
             return None
@@ -186,7 +200,10 @@ class ClaudeCodeProvider(AgentProvider):
     def set_observer(self, cb: Observer | None) -> None:
         self._observer = cb
 
-    async def rehydrate(self) -> list[dict[str, Any]]:
+    async def rehydrate(self, **_ignored) -> list[dict[str, Any]]:
+        # `known` is deliberately unused: the tmux runner enumerates the panes
+        # that actually survived and reads each one's meta file, which is a
+        # stronger claim than anything Yuri's own rows could assert.
         r = self.runner("cli")
         rehydrate = getattr(r, "rehydrate", None)
         if rehydrate is None:

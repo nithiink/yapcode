@@ -177,3 +177,81 @@ voice commands — have not been exercised in a live voice round-trip.
 - Task 17 startup()'s INFO banner adds a line to suite output; the validation-before-dispatch reorder in tools.py send_keys/run_slash_command is untested (an SDK session with an empty command now gets the "required" ValueError instead of the SDK soft error); start_session's `message` now names the provider ("Started Claude Code session") and `mode` comes back normalized (value-level, keys unchanged).
 - Task 18 _decide() maps ValueError->409 rather than the general ->400 (correct here — the only reachable ValueError is "already resolved", a genuine conflict — but worth a comment so nobody "fixes" it); /yuri/context's active_missions[].project name lookup is untested for a mission whose project row is gone.
 - Task 20 none outstanding.
+
+## Phase 5 (OpenCode provider)
+
+- **`NotImplementedError` is not soft at `/tools/execute`.** `main.py`'s exception
+  chain maps `YuriUnavailable` and `ValueError` to soft errors and `KeyError` to
+  404, but everything else — including `NotImplementedError` — becomes a generic
+  "the tool failed unexpectedly". So `set_mode` on an OpenCode session (which has
+  no permission modes) surfaces without its explanation, and the voice prompt's
+  AGENTS bullet is the only thing carrying it.
+  **Predates OpenCode**: `base.py`, `claude_code.py` and `fake.py` already raise
+  `NotImplementedError` for unsupported surfaces (send_keys, slash commands, and
+  resume on the SDK backend), so the same generic error already happens there.
+  Fixing it means adding one branch in `main.py`, out of scope for a provider task.
+  Symptom is mild — the model has been pre-briefed, so it degrades to correct
+  behaviour with worse wording.
+
+- **`list_native()`'s empty-handles early return breaks the `answered` contract.**
+  `_native_map` treats "the provider's `list_native()` did not raise" as *the
+  provider answered*, and uses that to distinguish "its sessions are gone" from
+  "it could not be enumerated" — the distinction spec §38 exists to protect.
+  `OpenCodeProvider.list_native` returns `[]` without touching the network when
+  it holds no handles, which is exactly the state after `rehydrate` skipped an
+  unreachable server. So Yuri claims OpenCode answered with nothing, and:
+  - a restart with the server down marks every OpenCode row `lost` and narrates
+    it, while those sessions are alive and durable server-side. `lost` is only
+    cleared by another `rehydrate`, which only runs at startup, so they stay
+    detached for the rest of the run even after the server comes up.
+  - `stop_many` with the server down records `status: stopped` — the unverified
+    claim the sibling branch was written to avoid. It should be `lost`.
+
+  Reachable whenever `OPENCODE_SPAWN=0` (supported) and the user's server is not
+  up, or the binary is missing.
+
+  **Not fixed here because the obvious fixes are both wrong.** Making
+  `list_native` do the GET when it holds no handles puts an HTTP round trip on
+  `resolve`/`list`/`poll`, and it would *acquire* — reintroducing the startup
+  spawn just closed. The real fix is one explicit "could I reach a server
+  without starting one" notion on the provider, used by both `rehydrate` and
+  `list_native`, with `list_native` raising when the answer is no so the
+  `answered` set stays honest. That is a deliberate design change to a
+  cross-service contract, not an end-of-branch patch.
+
+- **Smaller, from the same review:** `interrupt()` and `send_message()` move a
+  mark without persisting it (the poll timer catches up within ~1.5s in the
+  voice flow, but `/yuri/sessions/{id}/interrupt` and `interrupt_many` do not) —
+  the fix is one `runtime_metadata_for` merge in a shared helper rather than in
+  `poll` alone. A session row's `backend` reads `"cli"` for OpenCode (the UI is
+  right because `list_native` says `opencode`, but the row, `start_session`'s
+  result and the `revived` payload are wrong). `send_keys`/`run_slash_command`
+  tell an OpenCode user "this session uses the SDK backend", which is false
+  (predates OpenCode). `peek_screen` never reports a pending prompt for
+  OpenCode. `read_transcript` returns `{found: false}` for an OpenCode handle,
+  so OpenCode has no "show me the whole conversation" surface.
+  `config.summary()` was never taught the OpenCode keys.
+
+- **No "Watch live" for OpenCode, and the reason is message persistence.**
+  The terminal handoff works (`opencode -s <id> --mini`), but a live view would
+  be a *separate* process reading OpenCode's shared store, and a session Yuri is
+  actively driving persists **0 rows** in that store's `message` table —
+  measured three times, in two directories, with the server both running and
+  gracefully stopped, after turns that Yuri itself read the reply from over
+  HTTP. So a pane would be blank precisely when someone wanted to watch.
+
+  Two consequences worth chasing:
+  1. **It weakens the durability story.** Phase 5 was built on "OpenCode
+     sessions outlive Yuri and can be re-adopted". Rehydration restores the
+     cursors correctly, but if the conversation itself is not in the store, what
+     comes back may be thinner than assumed. Worth establishing what actually
+     triggers a commit — one early session DID persist 2 messages and got an
+     auto-generated title ("Ping pong test"), while later identical-looking runs
+     persisted none, so it may be tied to the auto-title/summarise step, which
+     fails on a flaky free model.
+  2. **Then "Watch live" becomes possible**, by running the handoff command in a
+     tmux pane and streaming it through the existing terminal websocket. The
+     session stays in the server, so the pane is only a view and nothing
+     fragments. The reverted attempt is in git history: lazily created,
+     idempotent, killed on `stop()`, password passed by environment rather than
+     argv (a tmux command line is world-readable via `ps`).

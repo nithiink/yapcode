@@ -44,8 +44,6 @@ class AgentProviderContract(unittest.IsolatedAsyncioTestCase):
         self.assertIn(res["status"], {"working", "idle", "completed"})
         self.assertEqual(res["session_id"], h)
         await self.p.interrupt(h)
-        mode = await self.p.set_mode(h, "plan")
-        self.assertEqual(mode, "plan")
         self.assertIsInstance(await self.p.read(h), str)
         await self.p.stop(h)
         self.assertNotIn(h, {s["handle"] for s in self.p.list_native()})
@@ -54,15 +52,44 @@ class AgentProviderContract(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(KeyError):
             self.p.poll("does-not-exist")
 
-    async def test_observer_receives_events(self):
+    async def test_set_mode_matches_declared_permission_modes(self):
+        """A provider must honour what its own capabilities() claims: modes work
+        if it declares any, and are refused if it declares none. Claude has four;
+        OpenCode has no equivalent concept."""
+        modes = self.p.capabilities().permission_modes
+        h = await self.p.create_session(self.ctx, self.opts())
+        try:
+            if modes:
+                target = modes[0]
+                self.assertEqual(await self.p.set_mode(h, target), target)
+            else:
+                with self.assertRaises(NotImplementedError):
+                    await self.p.set_mode(h, "plan")
+        finally:
+            await self.p.stop(h)
+
+    async def test_observer_matches_declared_event_support(self):
+        """supports_events is a promise. A provider that makes it must deliver a
+        ProviderEvent to the observer; one that does not must still accept an
+        observer without raising, because build_container installs one on every
+        provider uniformly."""
         got = []
         self.p.set_observer(lambda h, ev: got.append((h, ev)))
         h = await self.p.create_session(self.ctx, self.opts())
-        self._fire_event(h)
-        self.assertTrue(got, "observer never called")
-        self.assertIsInstance(got[0][1], ProviderEvent)
-        await self.p.stop(h)
+        try:
+            if self.p.capabilities().supports_events:
+                self._fire_event(h)
+                self.assertTrue(got, "declares supports_events but the observer never fired")
+                self.assertIsInstance(got[0][1], ProviderEvent)
+            else:
+                # Nothing to fire; the point is that installing one is harmless.
+                self.assertEqual(got, [])
+        finally:
+            await self.p.stop(h)
 
     def _fire_event(self, handle):
-        """Subclasses trigger a provider event for `handle` here."""
-        raise NotImplementedError
+        """Trigger a provider event for `handle`. Subclasses that declare
+        supports_events must override this; others never have it called."""
+        raise NotImplementedError(
+            "this provider declares supports_events=True, so the contract test "
+            "needs _fire_event to trigger one")

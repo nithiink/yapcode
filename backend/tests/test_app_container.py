@@ -40,6 +40,20 @@ from yuri.providers.fake import FakeAgentProvider  # noqa: E402
 from yuri.store.sqlite import SqliteStore  # noqa: E402
 
 
+def _project():
+    from yuri.domain.project import Project
+    return Project(name="p", slug="p", root_path="/tmp")
+
+
+class _NamedProvider(FakeAgentProvider):
+    """A FakeAgentProvider that answers to an arbitrary id, so a registry can
+    be built for an agent set this machine does not actually have."""
+
+    def __init__(self, agent_id: str):
+        super().__init__()
+        self.id = agent_id
+
+
 class ContainerTests(unittest.IsolatedAsyncioTestCase):
     async def test_test_container_wires_everything(self):
         with tempfile.TemporaryDirectory() as d, \
@@ -212,6 +226,31 @@ class ContainerTests(unittest.IsolatedAsyncioTestCase):
                 yapp.set_container(None)
                 second.store.close()
                 sm.reset()
+
+    async def test_startup_defaults_to_a_registered_agent_not_a_hardcoded_one(self):
+        """build_container's own default is the literal "claude-code", so a
+        deployment that set YURI_AGENTS=opencode got an AgentRouter whose
+        fallback named an agent the registry did not contain -- every
+        unqualified start_session raising KeyError. "OpenCode is optional" has
+        to mean OpenCode-only WORKS, not merely OpenCode-alongside.
+
+        Drives the real startup(), not a re-implementation of its choice: a
+        test that recomputed the same expression would pass against the bug.
+        """
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.dict(os.environ, {"ALLOWED_PROJECT_ROOTS": d}), \
+             mock.patch.object(config, "YURI_HOME", os.path.join(d, "Yuri")), \
+             mock.patch.object(config, "YURI_AGENTS", "opencode"):
+            c = await yapp.startup()
+            try:
+                self.assertEqual(c.registry.ids(), ["opencode"])
+                # The router's fallback must name something that exists, or
+                # every unqualified start_session dies on KeyError.
+                self.assertEqual(c.sessions.router.default_agent, "opencode")
+                self.assertEqual(
+                    c.sessions.router.select(_project(), None).id, "opencode")
+            finally:
+                await yapp.shutdown()
 
     async def test_shutdown_without_a_container_is_a_no_op(self):
         yapp.set_container(None)
