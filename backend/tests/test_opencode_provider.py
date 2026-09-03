@@ -539,5 +539,46 @@ del AgentProviderContract
 del _Base
 
 
+class TerminalHandoff(unittest.IsolatedAsyncioTestCase):
+    """`opencode -s <id> --mini` is the command that opens ONE session.
+
+    Worth pinning because two neighbouring forms do NOT work, both measured
+    against 1.18.25: `opencode attach <url> --session <id>` lands in a new
+    session, and the root TUI without --mini does too. --mini is the interface
+    that replays history. Anyone "simplifying" this line should read that
+    matrix in the verification doc first.
+    """
+
+    async def asyncSetUp(self):
+        self.fake = FakeOpenCode()
+        self.fake.__enter__()
+        self.addCleanup(lambda: self.fake.__exit__(None, None, None))
+        self.p = OpenCodeProvider(OpenCodeServer(self.fake.url, spawn=False))
+        self.addAsyncCleanup(self.p.shutdown)
+
+    async def test_it_names_the_session_and_the_mini_interface(self):
+        h = await self.p.create_session(
+            ProjectContext("p", "/tmp/proj"), SessionOptions())
+        cmd = self.p.resume_command(h)
+        self.assertIn(f"-s {h}", cmd)
+        self.assertIn("--mini", cmd)
+        self.assertIn("/tmp/proj", cmd)
+        # Not `attach`: that form ignores --session.
+        self.assertNotIn("attach", cmd)
+
+    async def test_an_unknown_handle_offers_no_command(self):
+        self.assertIsNone(self.p.resume_command("ses_nope"))
+
+    async def test_no_live_terminal_view_is_claimed(self):
+        """The TUI is a separate process reading the shared store, and a live
+        session's messages are not reliably persisted while it runs, so a
+        "Watch live" pane would show an empty view exactly when the user
+        wanted to watch. can_open_terminal stays False."""
+        h = await self.p.create_session(
+            ProjectContext("p", "/tmp/proj"), SessionOptions())
+        self.assertFalse(self.p.can_open_terminal(h))
+        self.assertIsNone(self.p.native_pane(h))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -832,19 +832,27 @@ class OpenCodeProvider(AgentProvider):
         return await self._messages(client, handle)
 
     def resume_command(self, handle: str) -> str | None:
-        """None -- OpenCode 1.18.25 offers no way to reopen ONE session.
+        """`opencode -s <id> --mini` -- the root TUI, not `attach`.
 
-        This looked solved: `opencode attach <url> --session <id>` is
-        documented, and the frontend used to render `claude --resume <id>` for
-        every provider, which handed an OpenCode user a Claude command. But
-        measured against 1.18.25, `--session` does not open that session's
-        conversation -- not via `attach`, not via the root TUI, not with
-        --mini, --continue, --dir, or a longer wait. Every route lands in a NEW
-        session (its own rename dialog says so). A command that claims to
-        reopen this session and quietly opens a different one is worse than no
-        command, so the panel offers none. See the verification doc.
+        Found by the user, and it is the combination that works. My own matrix
+        missed it: I tested `attach --session --mini` and the root TUI WITHOUT
+        --mini, never the root TUI WITH it. `attach --session` really does land
+        in a new session; `opencode -s <id> --mini` really does open the named
+        one, because --mini is the interface that replays history.
+
+        Sessions are global in OpenCode's store, not scoped to a directory
+        (verified: `opencode session list` returns the same list from any cwd),
+        so the `cd` here is only so the TUI opens on the right project.
+
+        What this shows depends on OpenCode having PERSISTED the session's
+        messages, which is its business and not always true -- see
+        docs/yuri/follow-ups.md. The command is still the correct one; an empty
+        session is OpenCode's state showing through, not a wrong command.
         """
-        return None
+        row = self._handles.get(handle)
+        if row is None:
+            return None
+        return f"cd {row.cwd} && opencode -s {handle} --mini"
 
     async def peek(self, handle: str, lines: int = 40) -> str | None:
         """None: there is no TUI to snapshot, exactly as the SDK backend does."""

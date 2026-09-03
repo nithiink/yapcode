@@ -69,41 +69,42 @@ an agreeable fake is worse than no fake. Fixed in `_headers()`, the one
 function Task 2 isolated it into, and the fake now enforces the real thing.
 `opencode attach --username` documents the same `opencode` default.
 
-### `opencode attach --session` does NOT open that session ❌
-I recorded the opposite here first, from reading `opencode attach --help`, and
-then measured it. **`--session` does not open that session's conversation** in
-1.18.25. Tested against a live server with a marker prompt already in the
-session:
+### Opening one session in a terminal: `opencode -s <id> --mini` ✅
+**The user found this after I concluded it was impossible, and they were
+right.** My matrix had a hole: I tested `attach --session --mini` and the root
+TUI *without* `--mini`, but never the root TUI *with* it — which is the one
+combination that works.
 
-| invocation | marker visible |
+| invocation | opens the named session |
 |---|---|
-| `attach <url> --session <id>` | no |
-| `attach … --session <id> --mini` (has replay) | no |
-| `attach … --session <id> --mini --replay-limit 20` | no |
-| `attach … --continue` | no |
-| `attach … --dir <cwd> --session <id>` | no |
-| `opencode --session <id>` (root TUI, same cwd) | no |
-| + 14s wait, + Escape, + ctrl-r | no |
+| `attach <url> --session <id>` | no — lands in a new session |
+| `attach … --session <id> --mini` | no |
+| `attach … --continue` / `--dir <cwd> --session <id>` | no |
+| `opencode -s <id>` (root TUI, no --mini) | no |
+| **`opencode -s <id> --mini`** | **yes** |
 
-Every route lands in a **new** session — the TUI's own rename dialog confirms
-it ("New session - <timestamp>"). The TUI renders fine, so this is not a
-rendering artefact; the conversation simply is not there.
+`--mini` is the interface that replays history. Sessions are **global** in
+OpenCode's store, not directory-scoped (`opencode session list` returns the
+same list from any cwd), so the cwd only decides which project the TUI opens
+on. This is now what `resume_command` returns.
 
-**Consequences, both acted on:**
-- **No "Watch live" for OpenCode.** The plan was a tmux pane running
-  `opencode attach`, streamed through the existing terminal websocket. The
-  plumbing worked — lazily created, idempotent, killed on `stop()` — but it
-  showed *a different conversation*, so it was reverted rather than shipped. A
-  button labelled "Watch live" that shows the wrong session is worse than no
-  button.
-- **`OpenCodeProvider.resume_command` returns None.** It briefly returned
-  `opencode attach <url> --session <id>` with a comment claiming it reached
-  the same session. That claim was wrong; a command that promises to reopen
-  this session and quietly opens another is worse than none.
+### But there is still no "Watch live" ❌
+Not because the view is wrong — because it is a **separate process reading the
+shared store**, and a live session's messages are not reliably persisted while
+Yuri drives it. Measured, with the server still running and a turn just
+completed:
 
-What *does* work is `opencode attach <url>` as a way to get a terminal on the
-server Yuri is using — but it is not session-scoped, so it does not belong on
-a session card. Revisit if a later OpenCode makes `--session` effective.
+| session | rows in `message` | TUI shows it |
+|---|---|---|
+| live, provider-driven, turn completed | **0** | no |
+| an older session with committed messages | 2 | yes (fully) |
+
+Three separate live runs persisted 0 messages, in `/tmp` and in a fresh
+project directory, before and after a graceful server stop. So a pane would be
+empty exactly when someone wanted to watch. The reverted implementation is in
+the history if this changes: lazily created, idempotent, killed on `stop()`,
+password passed by environment rather than argv (a tmux command line is
+world-readable via `ps`).
 
 ## Not settled
 
