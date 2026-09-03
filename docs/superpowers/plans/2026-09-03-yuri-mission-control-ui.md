@@ -612,8 +612,12 @@ export type Mission = {
 // UNREGISTERED discovered directories and use `path`, not `root_path`.
 // GET /projects/{id} and POST /projects return the dataclass.
 export type ProjectRow = {
-  id: string; name: string; path: string; registered: boolean;
-  slug: string; kind: "user" | "home"; default_agent: string | null;
+  name: string; path: string; registered: boolean;
+  // ProjectService.list() (services/projects.py:108) builds only
+  // {name, path, registered:false} for UNREGISTERED discovered rows -- these
+  // four are genuinely absent there, not empty. Optional, or a Projects view
+  // reads undefined where the type promised a string.
+  id?: string; slug?: string; kind?: "user" | "home"; default_agent?: string | null;
 };
 export type Project = {          // the dataclass, from detail and create
   id: string; slug: string; name: string; root_path: string;
@@ -630,9 +634,17 @@ export type MissionStep = {
   status: "pending" | "running" | "done" | "failed" | "skipped";
   session_id: string | null; result: Record<string, unknown>;
 };
-export type YuriEvent = { id: string; type: string; severity: string;
-                          mission_id: string | null; session_id: string | null;
-                          payload: Record<string, unknown>; created_at: string };
+// Verified against backend/yuri/domain/event.py:60-70. An earlier draft wrote
+// `created_at` from memory -- the field is `ts` -- and omitted agent_id,
+// project_id and speakable. GET /yuri/events serializes with asdict(), so
+// these are the wire names.
+export type YuriEvent = {
+  id: string; type: string; ts: string;
+  mission_id: string | null; session_id: string | null;
+  agent_id: string | null; project_id: string | null;
+  severity: string; speakable: boolean;
+  payload: Record<string, unknown>;
+};
 
 // lib/api.ts — REST only. SSE connects straight to backendBase(); see Global Constraints.
 export class ApiError extends Error { status: number; }
