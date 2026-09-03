@@ -1,6 +1,6 @@
 "use client";
 
-// The conversation half of the old single-screen VoiceAgent: the orb and its
+// The conversation half of the old single-screen voice UI: the orb and its
 // caption, connect/mute, the provider/route/backend and model pickers, the
 // narration-mode toggle, the live transcript, and the pending prompt card.
 // Session cards, the activity log and the live terminal are NOT here — those

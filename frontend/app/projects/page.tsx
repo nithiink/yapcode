@@ -18,14 +18,15 @@
 // error + retry, never an empty list.
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useYuri } from "@/components/VoiceProvider";
-import { yget, ypost, ApiError } from "@/lib/api";
+import { ViewError } from "@/components/ViewError";
+import { yget, ypost } from "@/lib/api";
 import { abbrevHome } from "@/lib/format";
 import type { ProjectRow } from "@/lib/yuriTypes";
 
 export default function Page() {
   const { onYuriEvent } = useYuri();
   const [rows, setRows] = useState<ProjectRow[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyPath, setBusyPath] = useState<string | null>(null);
 
@@ -40,7 +41,7 @@ export default function Page() {
       setRows(Array.isArray(r?.projects) ? r.projects : []);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Could not reach Yuri's backend.");
+      setLoadError(e);
     }
   }, []);
 
@@ -118,12 +119,7 @@ export default function Page() {
       {createError && <div className="apr-error">{createError}</div>}
 
       {loadError ? (
-        <div className="apr-error dash-loaderror">
-          <span>{loadError}</span>
-          <button className="txtoggle" onClick={() => void load()}>
-            Retry
-          </button>
-        </div>
+        <ViewError error={loadError} onRetry={() => void load()} />
       ) : (
         <>
           {actionError && <div className="apr-error">{actionError}</div>}

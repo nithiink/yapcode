@@ -132,9 +132,10 @@ export type YuriContext = {
   refresh: (what: "sessions" | "approvals" | "missions" | "agents") => Promise<void>;
 
   // --- everything below is beyond the minimal contract above, kept so
-  // VoiceAgent's existing UI (which this task must not visibly change) still
-  // has somewhere to read the connection's finer-grained state from. A future
-  // view can ignore all of it and use only the fields above. ---
+  // ConversationRail's UI (carried over from the old single-screen voice UI
+  // this shell replaced) still has somewhere to read the connection's
+  // finer-grained state from. A future view can ignore all of it and use
+  // only the fields above. ---
   backend: ClaudeBackend;
   setBackend: (b: ClaudeBackend) => void;
   azureModels: { value: string; label: string }[];
@@ -209,8 +210,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const sessionRef = useRef<VoiceSession | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // The orb's DOM nodes live in whichever view renders the hero section
-  // (VoiceAgent today); the refs themselves live here because the analyser
-  // loop that drives them is part of the connection, not the view.
+  // (ConversationRail today); the refs themselves live here because the
+  // analyser loop that drives them is part of the connection, not the view.
   const orbRef = useRef<HTMLDivElement | null>(null);
   const glowRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);

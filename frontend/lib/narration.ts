@@ -3,7 +3,7 @@
 // which attaches a `narration` field to both the poll result and each SSE
 // frame. The frontend's entire rule is: if it has a line, inject it.
 //
-// Keeping that rule here — rather than inline in VoiceAgent — makes it
+// Keeping that rule here — rather than inline in a component — makes it
 // testable and keeps the "who phrases it" boundary obvious.
 
 export type NarrationMode = "quiet" | "normal" | "verbose";

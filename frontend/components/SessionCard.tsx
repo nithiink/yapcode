@@ -3,7 +3,7 @@
 import { Icon } from "./ui/Icon";
 import { CopyBtn } from "./ui/CopyBtn";
 import LiveTerminal from "./LiveTerminal";
-import { sessionStatus, MODES, type Sess } from "@/lib/sessions";
+import { sessionStatus, tmuxAttachCommand, MODES, type Sess } from "@/lib/sessions";
 import { abbrevHome } from "@/lib/format";
 
 // One event in a Claude session's own transcript (distinct from the voice
@@ -14,8 +14,8 @@ export type TxEvent =
   | { kind: "tool"; name: string; summary: string; risky: boolean }
   | { kind: "tool_result"; ok: boolean; text: string };
 
-// Also used by VoiceAgent for the fullscreen transcript overlay, which is not
-// part of this card.
+// Also used by the sessions view's fullscreen transcript overlay, which is
+// not part of this card.
 export function renderTimeline(events: TxEvent[]) {
   if (events.length === 0) return <div className="empty">No transcript yet.</div>;
   return events.map((e, i) => {
@@ -89,7 +89,7 @@ export function SessionCard({
 }) {
   // From the provider — only it knows how to reopen its own session.
   const cmd = s.resume_command || null;
-  const tmuxCmd = s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
+  const tmuxCmd = tmuxAttachCommand(s);
   const st = sessionStatus(s);
   const queuedTurns = (s.queue || []).filter((q) => q.state === "queued");
 

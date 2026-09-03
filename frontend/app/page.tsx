@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
+import { ViewError } from "@/components/ViewError";
 import { bands } from "@/lib/dashboard";
 import { canCancel, canPause, canResume } from "@/lib/missions";
 import { sessionStatus } from "@/lib/sessions";
@@ -22,7 +23,7 @@ import type { Approval, Mission } from "@/lib/yuriTypes";
 
 export default function Page() {
   const { approvals, missions, sessions, refresh, onYuriEvent } = useYuri();
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyApproval, setBusyApproval] = useState<string | null>(null);
   const [busyMission, setBusyMission] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export default function Page() {
       setLoadError(null);
       await Promise.all([refresh("approvals"), refresh("missions")]);
     } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Could not reach Yuri's backend.");
+      setLoadError(e);
     }
   }, [refresh]);
 
@@ -99,12 +100,7 @@ export default function Page() {
       <h2 className="viewtitle">Dashboard</h2>
 
       {loadError ? (
-        <div className="apr-error dash-loaderror">
-          <span>{loadError}</span>
-          <button className="txtoggle" onClick={() => void load()}>
-            Retry
-          </button>
-        </div>
+        <ViewError error={loadError} onRetry={() => void load()} />
       ) : (
         <>
           {actionError && <div className="apr-error">{actionError}</div>}

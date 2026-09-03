@@ -1,7 +1,7 @@
 // Run: npm test (node --test)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MODES, MODE_LABEL, sessionStatus, type Sess } from "./sessions.ts";
+import { MODES, MODE_LABEL, sessionStatus, tmuxAttachCommand, type Sess } from "./sessions.ts";
 
 const base: Sess = {
   handle: "h1", session_id: "s1", cwd: "/tmp/proj", model: "opus",
@@ -30,4 +30,17 @@ test("a running turn's text becomes the task line", () => {
 test("needs_permission is surfaced as its own lead", () => {
   const st = sessionStatus({ ...base, status: "needs_permission" });
   assert.notEqual(st.lead, sessionStatus(base).lead);
+});
+
+test("a CLI-backend session gets a tmux attach command", () => {
+  const cmd = tmuxAttachCommand({ ...base, backend: "cli" });
+  assert.equal(cmd, `tmux attach -t vc_${base.handle.slice(0, 8)}`);
+});
+
+test("an SDK-backend session has no tmux pane to attach to", () => {
+  assert.equal(tmuxAttachCommand({ ...base, backend: "sdk" }), null);
+});
+
+test("a session with no backend field has no tmux command either", () => {
+  assert.equal(tmuxAttachCommand(base), null);
 });

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useYuri } from "@/components/VoiceProvider";
+import { ViewError } from "@/components/ViewError";
 import { MISSION_CLASS, canCancel, canPause, canResume } from "@/lib/missions";
 import { yget, ypost, ApiError } from "@/lib/api";
 import type { Mission, ProjectRow } from "@/lib/yuriTypes";
@@ -21,7 +22,7 @@ export default function Page() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   // Projects aren't part of useYuri()'s shared state (nothing else needs them
   // continuously), so this view fetches its own copy purely to resolve
@@ -50,7 +51,7 @@ export default function Page() {
       setLoadError(null);
       await refresh("missions");
     } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Could not reach Yuri's backend.");
+      setLoadError(e);
     }
   }, [refresh]);
 
@@ -96,12 +97,7 @@ export default function Page() {
       <h2 className="viewtitle">Missions</h2>
 
       {loadError ? (
-        <div className="apr-error dash-loaderror">
-          <span>{loadError}</span>
-          <button className="txtoggle" onClick={() => void load()}>
-            Retry
-          </button>
-        </div>
+        <ViewError error={loadError} onRetry={() => void load()} />
       ) : (
         <>
           {error && <div className="apr-error">{error}</div>}

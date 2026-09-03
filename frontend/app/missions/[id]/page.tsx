@@ -9,6 +9,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
+import { ViewError } from "@/components/ViewError";
 import { MISSION_CLASS, canCancel, canPause, canResume } from "@/lib/missions";
 import { yget, ypost, ApiError } from "@/lib/api";
 import { fmtLogTime, fmtLogTimeTitle, clip } from "@/lib/format";
@@ -117,9 +118,7 @@ export default function MissionDetailPage() {
     return (
       <div className="miss-view">
         <h2 className="viewtitle">Mission</h2>
-        <div className="apr-error">
-          Could not load that mission: {err instanceof Error ? err.message : String(err)}
-        </div>
+        <ViewError error={err} onRetry={() => void load()} />
       </div>
     );
   }

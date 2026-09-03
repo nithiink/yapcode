@@ -14,7 +14,8 @@
 // renders an error instead of an empty list.
 import { useCallback, useEffect, useState } from "react";
 import { useYuri, type Agent } from "@/components/VoiceProvider";
-import { yget, ApiError } from "@/lib/api";
+import { ViewError } from "@/components/ViewError";
+import { yget } from "@/lib/api";
 
 const CAP_LABEL: Record<string, string> = {
   interactive_terminal: "Interactive terminal",
@@ -40,7 +41,7 @@ function capDisplay(value: unknown): string {
 
 export default function Page() {
   const { agents, refresh } = useYuri();
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
@@ -48,7 +49,7 @@ export default function Page() {
       setLoadError(null);
       await refresh("agents");
     } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Could not reach Yuri's backend.");
+      setLoadError(e);
     }
   }, [refresh]);
 
@@ -61,12 +62,7 @@ export default function Page() {
       <h2 className="viewtitle">Agents</h2>
 
       {loadError ? (
-        <div className="apr-error dash-loaderror">
-          <span>{loadError}</span>
-          <button className="txtoggle" onClick={() => void load()}>
-            Retry
-          </button>
-        </div>
+        <ViewError error={loadError} onRetry={() => void load()} />
       ) : agents.length === 0 ? (
         <div className="empty">No agents registered.</div>
       ) : (

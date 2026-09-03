@@ -19,7 +19,8 @@ export default function Page() {
   const atBottomRef = useRef(true);
 
   // Auto-scroll to the newest line only when the user is already at the
-  // bottom and isn't paused, mirroring VoiceAgent's own log panel.
+  // bottom and isn't paused, mirroring the old single-screen log panel this
+  // view was decomposed from.
   useEffect(() => {
     if (paused) return;
     if (!atBottomRef.current) return;

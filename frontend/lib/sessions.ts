@@ -63,3 +63,16 @@ export const BACKEND_LABEL: Record<ClaudeBackend, string> = {
   cli: "CLI",
   sdk: "SDK",
 };
+
+// The tmux attach command for a live co-drive of this session's own pane, or
+// null when this session has none. Only Claude Code's CLI backend runs
+// inside a tmux pane (named vc_<handle prefix> — see backend/tmux_runner.py);
+// its SDK backend and OpenCode don't. Phase 5's actual bug was the frontend
+// constructing a PROVIDER's command itself (that's why resume_command now
+// comes from the backend instead of being guessed here) — this one is still
+// computed client-side, so it stays in exactly one place rather than the
+// three that used to each hardcode `backend === "cli"` next to it, which
+// would otherwise drift the moment the pane-naming convention changes.
+export function tmuxAttachCommand(s: Sess): string | null {
+  return s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
+}

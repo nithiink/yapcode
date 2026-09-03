@@ -17,8 +17,8 @@ export type DebugEvent = {
 
 // Pipeline activity log (voice<->backend<->Claude). The filter text, the
 // errors-only/paused/copied toggles, and the scroll position all live in the
-// parent (VoiceAgent) — this stays presentational, deriving the filtered rows
-// from the raw `events` it's given.
+// parent (app/activity/page.tsx) — this stays presentational, deriving the
+// filtered rows from the raw `events` it's given.
 export function ActivityFeed({
   events,
   filter,

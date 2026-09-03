@@ -8,22 +8,44 @@
 // is what the UI already does for read_transcript (see lib/api.ts's own
 // comment on why REST is the default and callTool the exception): close and
 // send. Interrupt DOES have a real route, so it uses ypost directly.
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useYuri } from "@/components/VoiceProvider";
 import { SessionCard, renderTimeline, type TxEvent } from "@/components/SessionCard";
+import { ViewError } from "@/components/ViewError";
 import LiveTerminal from "@/components/LiveTerminal";
 import { Icon } from "@/components/ui/Icon";
 import { CopyBtn } from "@/components/ui/CopyBtn";
-import { ypost, ApiError } from "@/lib/api";
+import { tmuxAttachCommand, type Sess } from "@/lib/sessions";
+import { yget, ypost, ApiError } from "@/lib/api";
 
 export default function Page() {
-  // sessions is kept fresh by the provider's own 2.5s poll — this view never
-  // fetches it itself, and a poll failure leaves the last-known list on
-  // screen rather than the view ever rendering an empty one.
+  // sessions is kept fresh by the provider's own 2.5s poll, which runs
+  // regardless of which view is mounted (see VoiceProvider.tsx) — a *later*
+  // poll failure just leaves the last-known list on screen. But that poll
+  // (like refreshApprovals/refreshMissions) swallows its own fetch failures,
+  // so an empty `sessions` on first mount can't be told apart from "the
+  // backend is unreachable." This view can't accept that: it probes the same
+  // endpoint itself once, purely to observe success/failure, before trusting
+  // an empty list — the same fetch-then-adopt shape app/page.tsx uses.
   const { sessions, callTool, refresh, modeBusy, switchMode, commitRename, pollSession } = useYuri();
 
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null); // handle with an action in flight
+
+  const load = useCallback(async () => {
+    try {
+      await yget<{ sessions: Sess[] }>("sessions");
+      setLoadError(null);
+      await refresh("sessions");
+    } catch (e) {
+      setLoadError(e);
+    }
+  }, [refresh]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // Per-card message drafts, so switching cards (or the poll refreshing
   // `sessions`) never clobbers what's half-typed in another card.
@@ -162,9 +184,10 @@ export default function Page() {
     <div className="sessions-view">
       <h2 className="viewtitle">Sessions</h2>
 
-      {error && <div className="apr-error">{error}</div>}
+      {loadError ? <ViewError error={loadError} onRetry={() => void load()} /> : null}
+      {!loadError && error ? <div className="apr-error">{error}</div> : null}
 
-      {sessions.length === 0 ? (
+      {loadError ? null : sessions.length === 0 ? (
         <div className="empty">No active sessions.</div>
       ) : (
         <div className="sessions-list">
@@ -260,7 +283,7 @@ export default function Page() {
         liveSession &&
         (() => {
           const liveSess = sessions.find((x) => x.handle === liveSession);
-          const liveTmuxCmd = liveSess?.backend === "cli" ? `tmux attach -t vc_${liveSess.handle.slice(0, 8)}` : null;
+          const liveTmuxCmd = liveSess ? tmuxAttachCommand(liveSess) : null;
           const liveName =
             liveSess?.name || liveSess?.cwd.split("/").pop() || liveSess?.handle.slice(0, 8) || "Live Claude CLI";
           return (
