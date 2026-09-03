@@ -4,14 +4,19 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from yuri.domain.approval import Approval  # noqa: E402
+from yuri.domain.artifact import Artifact  # noqa: E402
 from yuri.domain.event import EventType, YuriEvent  # noqa: E402
 from yuri.domain.mission import Mission, MissionStep  # noqa: E402
 from yuri.domain.project import Project  # noqa: E402
 from yuri.domain.session import AgentSession  # noqa: E402
+from yuri.domain.specialist import Specialist  # noqa: E402
+from yuri.domain.task import Task  # noqa: E402
+from yuri.domain.workflow import Workflow  # noqa: E402
 from yuri.store.base import PendingApprovalExists  # noqa: E402
 from yuri.store.sqlite import SCHEMA_VERSION, SqliteStore  # noqa: E402
 
@@ -222,3 +227,237 @@ class StoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Phase7StoreTests(StoreTests):
+    """The roster and workflow tables. Inherits StoreTests' fixtures."""
+
+    _n = 0
+
+    def _mission(self):
+        # A fresh project each time: projects.root_path is unique, so reusing
+        # the default slug makes the second call an IntegrityError.
+        Phase7StoreTests._n += 1
+        m = Mission(title="t", project_id=self._project(f"p{self._n}").id)
+        self.store.missions.insert(m)
+        return m
+
+    def _wf(self, mission_id, status="running"):
+        w = Workflow(mission_id=mission_id, status=status)
+        self.store.workflows.insert(w)
+        return w
+
+    # --- serialisation -----------------------------------------------------
+
+    def test_task_json_and_bool_columns_round_trip(self):
+        # The whole point of extending _JSON_COLS/_BOOL_COLS. Without it a
+        # list is stored as a Python repr with no exception raised anywhere.
+        w = self._wf(self._mission().id)
+        t = Task(workflow_id=w.id, ordinal=0, title="t", role="reviewer",
+                 requires=("code_review", "git"), verification=("tests_pass",),
+                 read_only=True)
+        self.store.tasks.insert(t)
+        back = self.store.tasks.get(t.id)
+        self.assertEqual(back.requires, ("code_review", "git"))
+        self.assertEqual(back.verification, ("tests_pass",))
+        self.assertIs(back.read_only, True, "read_only came back as an int, not a bool")
+
+    def test_specialist_json_and_bool_columns_round_trip(self):
+        s = Specialist(name="Reviewer", role="reviewer", provider_id="claude-code",
+                       tools=("Read", "Grep"), capabilities=("code_review",), builtin=True)
+        self.store.specialists.insert(s)
+        back = self.store.specialists.get(s.id)
+        self.assertEqual(back.tools, ("Read", "Grep"))
+        self.assertEqual(back.capabilities, ("code_review",))
+        self.assertIs(back.builtin, True)
+        self.assertIs(back.archived, False)
+
+    # --- invariants the store enforces -------------------------------------
+
+    def test_one_live_workflow_per_mission(self):
+        m = self._mission()
+        self._wf(m.id)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._wf(m.id)
+
+    def test_a_superseded_workflow_does_not_block_a_new_one(self):
+        m = self._mission()
+        old = self._wf(m.id)
+        old.status = "cancelled"
+        self.store.workflows.update(old)
+        self._wf(m.id)          # must not raise
+        self.assertEqual(len(self.store.workflows.for_mission(m.id)), 2)
+        self.assertEqual([w.status for w in self.store.workflows.for_mission(m.id, live_only=True)],
+                         ["running"])
+
+    def test_an_archived_specialist_frees_its_name_and_slug(self):
+        a = Specialist(name="Reviewer", role="reviewer", provider_id="claude-code")
+        self.store.specialists.insert(a)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.specialists.insert(
+                Specialist(name="Reviewer", role="reviewer", provider_id="opencode"))
+        a.archived = True
+        self.store.specialists.update(a)
+        self.store.specialists.insert(
+            Specialist(name="Reviewer", role="reviewer", provider_id="opencode"))
+
+    def test_list_hides_archived_unless_asked(self):
+        s = Specialist(name="Gone", role="tester", provider_id="claude-code", archived=True)
+        self.store.specialists.insert(s)
+        self.assertEqual(self.store.specialists.list(), [])
+        self.assertEqual([x.id for x in self.store.specialists.list(include_archived=True)],
+                         [s.id])
+
+    def test_get_by_name_and_slug_ignore_archived_rows(self):
+        s = Specialist(name="Gone", role="tester", provider_id="claude-code", archived=True)
+        self.store.specialists.insert(s)
+        self.assertIsNone(self.store.specialists.get_by_name("Gone"))
+        self.assertIsNone(self.store.specialists.get_by_slug("gone"))
+        self.assertIsNotNone(self.store.specialists.get(s.id),
+                             "get() by id must still find it — a task points at it")
+
+    # --- dependencies ------------------------------------------------------
+
+    def test_deps_come_back_as_a_map_and_absent_means_no_dependencies(self):
+        w = self._wf(self._mission().id)
+        a = Task(workflow_id=w.id, ordinal=0, title="a", role="researcher")
+        b = Task(workflow_id=w.id, ordinal=1, title="b", role="developer")
+        for t in (a, b):
+            self.store.tasks.insert(t)
+        self.store.tasks.add_dep(b.id, a.id)
+        deps = self.store.tasks.deps_for(w.id)
+        self.assertEqual(deps[b.id], {a.id})
+        self.assertNotIn(a.id, deps, "a dependency-free task must be ABSENT, not empty")
+
+    def test_adding_the_same_edge_twice_is_a_no_op(self):
+        # The engine re-derives edges on retry and must not have to check first.
+        w = self._wf(self._mission().id)
+        a = Task(workflow_id=w.id, ordinal=0, title="a", role="researcher")
+        b = Task(workflow_id=w.id, ordinal=1, title="b", role="developer")
+        for t in (a, b):
+            self.store.tasks.insert(t)
+        self.store.tasks.add_dep(b.id, a.id)
+        self.store.tasks.add_dep(b.id, a.id)
+        self.assertEqual(self.store.tasks.deps_for(w.id)[b.id], {a.id})
+
+    def test_a_task_cannot_depend_on_itself(self):
+        w = self._wf(self._mission().id)
+        a = Task(workflow_id=w.id, ordinal=0, title="a", role="researcher")
+        self.store.tasks.insert(a)
+        with self.assertRaises(ValueError):
+            self.store.tasks.add_dep(a.id, a.id)
+
+    def test_deps_are_scoped_to_one_workflow(self):
+        m1, m2 = self._mission(), self._mission()
+        w1, w2 = self._wf(m1.id), self._wf(m2.id)
+        for w in (w1, w2):
+            a = Task(workflow_id=w.id, ordinal=0, title="a", role="researcher")
+            b = Task(workflow_id=w.id, ordinal=1, title="b", role="developer")
+            self.store.tasks.insert(a)
+            self.store.tasks.insert(b)
+            self.store.tasks.add_dep(b.id, a.id)
+        self.assertEqual(len(self.store.tasks.deps_for(w1.id)), 1)
+
+    # --- holders_of, which is what makes archiving refusable ---------------
+
+    def test_holders_of_sees_only_live_tasks_by_default(self):
+        w = self._wf(self._mission().id)
+        s = Specialist(name="R", role="reviewer", provider_id="claude-code")
+        self.store.specialists.insert(s)
+        live = Task(workflow_id=w.id, ordinal=0, title="live", specialist_id=s.id,
+                    status="running")
+        done = Task(workflow_id=w.id, ordinal=1, title="done", specialist_id=s.id,
+                    status="completed")
+        for t in (live, done):
+            self.store.tasks.insert(t)
+        self.assertEqual([t.id for t in self.store.tasks.holders_of(s.id)], [live.id])
+        self.assertEqual(len(self.store.tasks.holders_of(s.id, live_only=False)), 2)
+
+    # --- artifacts ---------------------------------------------------------
+
+    def test_artifacts_are_readable_per_mission_and_per_task(self):
+        m = self._mission()
+        w = self._wf(m.id)
+        t = Task(workflow_id=w.id, ordinal=0, title="t", role="researcher")
+        self.store.tasks.insert(t)
+        self.store.artifacts.insert(Artifact(mission_id=m.id, task_id=t.id,
+                                             kind="finding", title="f", body="b"))
+        self.store.artifacts.insert(Artifact(mission_id=m.id, kind="summary",
+                                             title="s", body="b"))
+        self.assertEqual(len(self.store.artifacts.for_mission(m.id)), 2)
+        self.assertEqual(len(self.store.artifacts.for_task(t.id)), 1)
+
+
+class MigrationConversionTests(unittest.TestCase):
+    """0003 converts pre-Phase-7 mission_steps into one-task workflows.
+
+    Built by migrating to 0002 only, inserting the old shape, then running the
+    rest — otherwise the conversion has nothing to convert and the test
+    passes vacuously.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "yuri.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _migrate_to(self, version):
+        import yuri.store.sqlite as mod
+        store = SqliteStore(self.path)
+        real = os.listdir(mod._MIGRATIONS_DIR)
+        keep = [f for f in real if f.endswith(".sql") and int(f.split("_", 1)[0]) <= version]
+        with mock.patch.object(mod.os, "listdir", return_value=keep):
+            store.migrate()
+        return store
+
+    def test_an_old_mission_becomes_a_one_task_workflow(self):
+        store = self._migrate_to(2)
+        p = Project(slug="x", name="X", root_path="/tmp/x")
+        store.projects.insert(p)
+        m = Mission(title="old work", project_id=p.id, status="completed")
+        store.missions.insert(m)
+        step = MissionStep(mission_id=m.id, ordinal=1, title="work", status="done")
+        store.missions.insert_step(step)
+        m.current_step = step.id
+        store.missions.update(m)
+        store.close()
+
+        store = SqliteStore(self.path)
+        store.migrate()                     # now runs 0003
+        try:
+            flows = store.workflows.for_mission(m.id)
+            self.assertEqual(len(flows), 1)
+            self.assertEqual((flows[0].template, flows[0].status), ("single", "completed"))
+            tasks = store.tasks.for_workflow(flows[0].id)
+            self.assertEqual([(t.title, t.status) for t in tasks], [("work", "completed")])
+            self.assertEqual(tasks[0].id, step.id,
+                             "the task must reuse the step's id — missions.current_step "
+                             "still points at it")
+            con = sqlite3.connect(self.path)
+            try:
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM mission_steps").fetchone()[0], 0,
+                                 "0003 should have drained mission_steps")
+            finally:
+                con.close()
+        finally:
+            store.close()
+
+    def test_a_live_old_mission_gets_a_running_workflow(self):
+        store = self._migrate_to(2)
+        p = Project(slug="x", name="X", root_path="/tmp/x")
+        store.projects.insert(p)
+        m = Mission(title="live", project_id=p.id, status="running")
+        store.missions.insert(m)
+        store.missions.insert_step(MissionStep(mission_id=m.id, ordinal=1, title="work",
+                                              status="running"))
+        store.close()
+        store = SqliteStore(self.path)
+        store.migrate()
+        try:
+            flow = store.workflows.for_mission(m.id, live_only=True)[0]
+            self.assertEqual(flow.status, "running")
+            self.assertEqual(store.tasks.for_workflow(flow.id)[0].status, "running")
+        finally:
+            store.close()

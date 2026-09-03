@@ -20,10 +20,14 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from yuri.domain.approval import Approval
+from yuri.domain.artifact import Artifact
 from yuri.domain.event import YuriEvent
 from yuri.domain.mission import Mission, MissionStep
 from yuri.domain.project import Project
 from yuri.domain.session import AgentSession
+from yuri.domain.specialist import Specialist
+from yuri.domain.task import Task
+from yuri.domain.workflow import Workflow
 
 
 class PendingApprovalExists(ValueError):
@@ -116,6 +120,80 @@ class ApprovalRepo(ABC):
     def update(self, a: Approval) -> None: ...
 
 
+class SpecialistRepo(ABC):
+    @abstractmethod
+    def insert(self, s: Specialist) -> None: ...
+    @abstractmethod
+    def get(self, id: str) -> Specialist | None: ...
+    @abstractmethod
+    def update(self, s: Specialist) -> None: ...
+    @abstractmethod
+    def get_by_slug(self, slug: str) -> Specialist | None: ...
+    @abstractmethod
+    def get_by_name(self, name: str) -> Specialist | None: ...
+    @abstractmethod
+    def list(self, include_archived: bool = False) -> list[Specialist]:
+        """Live specialists by default, ordered by role then name.
+
+        There is no delete. Archived rows stay forever because a finished task
+        records which specialist ran it, and hard-deleting rewrites that
+        history — the same reasoning that made MissionService.delete detach
+        sessions rather than delete them.
+        """
+
+
+class WorkflowRepo(ABC):
+    @abstractmethod
+    def insert(self, w: Workflow) -> None: ...
+    @abstractmethod
+    def get(self, id: str) -> Workflow | None: ...
+    @abstractmethod
+    def update(self, w: Workflow) -> None: ...
+    @abstractmethod
+    def for_mission(self, mission_id: str, live_only: bool = False) -> list[Workflow]:
+        """Newest version first. A mission can hold at most one LIVE workflow
+        (enforced by 0003's workflows_one_live), but superseded ones stay."""
+    @abstractmethod
+    def live(self) -> list[Workflow]:
+        """Every workflow the engine should still be driving. Rehydrate reads
+        this to decide what to reconcile and advance."""
+
+
+class TaskRepo(ABC):
+    @abstractmethod
+    def insert(self, t: Task) -> None: ...
+    @abstractmethod
+    def get(self, id: str) -> Task | None: ...
+    @abstractmethod
+    def update(self, t: Task) -> None: ...
+    @abstractmethod
+    def for_workflow(self, workflow_id: str) -> list[Task]:
+        """Ordered by `ordinal` — authoring order, NOT execution order.
+        Execution order comes from the dependency map."""
+    @abstractmethod
+    def add_dep(self, task_id: str, depends_on: str) -> None: ...
+    @abstractmethod
+    def deps_for(self, workflow_id: str) -> dict[str, set[str]]:
+        """task_id -> the set of task ids it depends on. A task with no
+        dependencies is ABSENT from the map, not present with an empty set —
+        callers use `.get(id, set())`."""
+    @abstractmethod
+    def holders_of(self, specialist_id: str, live_only: bool = True) -> list[Task]:
+        """Tasks pinned to this specialist. `live_only` restricts to
+        non-terminal ones, which is what makes archiving refusable."""
+
+
+class ArtifactRepo(ABC):
+    @abstractmethod
+    def insert(self, a: Artifact) -> None: ...
+    @abstractmethod
+    def get(self, id: str) -> Artifact | None: ...
+    @abstractmethod
+    def for_mission(self, mission_id: str) -> list[Artifact]: ...
+    @abstractmethod
+    def for_task(self, task_id: str) -> list[Artifact]: ...
+
+
 class EventRepo(ABC):
     @abstractmethod
     def insert(self, e: YuriEvent) -> None: ...
@@ -138,6 +216,11 @@ class Store(ABC):
     approvals: ApprovalRepo
     events: EventRepo
     settings: SettingsRepo
+    # Phase 7
+    specialists: SpecialistRepo
+    workflows: WorkflowRepo
+    tasks: TaskRepo
+    artifacts: ArtifactRepo
 
     @abstractmethod
     def migrate(self) -> None: ...

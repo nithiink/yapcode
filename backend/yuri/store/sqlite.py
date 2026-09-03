@@ -14,19 +14,30 @@ from typing import Any, Iterable
 from yuri.domain.approval import Approval
 from yuri.domain.event import YuriEvent
 from yuri.domain.mission import Mission, MissionStep
+from yuri.domain.artifact import Artifact
 from yuri.domain.project import Project
 from yuri.domain.session import LIVE_STATUSES, AgentSession
-from .base import (ApprovalRepo, EventRepo, LiveSessionExists, MissionRepo,
-                   PendingApprovalExists, ProjectRepo,
-                   SessionRepo, SettingsRepo, Store)
+from yuri.domain.specialist import Specialist
+from yuri.domain.task import Task
+from yuri.domain.workflow import LIVE_WORKFLOW, Workflow
+from .base import (ApprovalRepo, ArtifactRepo, EventRepo, LiveSessionExists, MissionRepo,
+                   PendingApprovalExists, ProjectRepo, SessionRepo, SettingsRepo,
+                   SpecialistRepo, Store, TaskRepo, WorkflowRepo)
 
 log = logging.getLogger("yuri.store.sqlite")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
-_JSON_COLS = {"metadata", "result", "runtime_metadata", "tool_input", "payload"}
-_BOOL_COLS = {"auto_approve_edits", "speakable"}
+# Columns serialised as JSON in both directions by _to_row/_from_row. Register
+# EVERY list/tuple column: an unregistered one is passed to sqlite3 raw, and
+# while a tuple raises there, _to_row's `json.dumps(v, default=str)` fallback
+# means a registered-but-wrong type is stored as a Python repr with no error.
+_JSON_COLS = {"metadata", "result", "runtime_metadata", "tool_input", "payload",
+              "tools", "capabilities", "requires", "verification"}
+# Columns stored as 0/1 and read back as real bools. Miss one and
+# `if row.read_only:` works while `row.read_only is True` does not.
+_BOOL_COLS = {"auto_approve_edits", "speakable", "builtin", "archived", "read_only"}
 
 
 class _Conn:
@@ -257,6 +268,89 @@ class SqliteApprovals(_Base, ApprovalRepo):
         return self._many(sql, args + [limit])
 
 
+class SqliteSpecialists(_Base, SpecialistRepo):
+    table, cls = "specialists", Specialist
+
+    # get_by_* deliberately exclude archived rows: their whole purpose is
+    # "can this name/slug be used", and an archived row frees both.
+    def get_by_slug(self, slug):
+        return self._one("SELECT * FROM specialists WHERE slug = ? AND archived = 0", (slug,))
+
+    def get_by_name(self, name):
+        return self._one("SELECT * FROM specialists WHERE name = ? AND archived = 0", (name,))
+
+    def list(self, include_archived=False):
+        if include_archived:
+            return self._many("SELECT * FROM specialists ORDER BY role, name")
+        return self._many(
+            "SELECT * FROM specialists WHERE archived = 0 ORDER BY role, name")
+
+
+class SqliteWorkflows(_Base, WorkflowRepo):
+    table, cls = "workflows", Workflow
+
+    def for_mission(self, mission_id, live_only=False):
+        if live_only:
+            marks = ",".join("?" * len(LIVE_WORKFLOW))
+            return self._many(
+                f"SELECT * FROM workflows WHERE mission_id = ? AND status IN ({marks}) "
+                "ORDER BY version DESC", (mission_id, *LIVE_WORKFLOW))
+        return self._many(
+            "SELECT * FROM workflows WHERE mission_id = ? ORDER BY version DESC",
+            (mission_id,))
+
+    def live(self):
+        marks = ",".join("?" * len(LIVE_WORKFLOW))
+        return self._many(
+            f"SELECT * FROM workflows WHERE status IN ({marks}) ORDER BY created_at",
+            LIVE_WORKFLOW)
+
+
+class SqliteTasks(_Base, TaskRepo):
+    table, cls = "tasks", Task
+
+    def for_workflow(self, workflow_id):
+        return self._many(
+            "SELECT * FROM tasks WHERE workflow_id = ? ORDER BY ordinal", (workflow_id,))
+
+    def add_dep(self, task_id, depends_on):
+        if task_id == depends_on:
+            raise ValueError(f"task {task_id[:8]} cannot depend on itself")
+        # OR IGNORE: adding the same edge twice is a no-op, not an error. The
+        # engine re-derives edges on retry and must not have to check first.
+        self._c.get().execute(
+            "INSERT OR IGNORE INTO task_deps (task_id, depends_on) VALUES (?, ?)",
+            (task_id, depends_on))
+
+    def deps_for(self, workflow_id):
+        rows = self._c.get().execute(
+            "SELECT d.task_id, d.depends_on FROM task_deps d "
+            "JOIN tasks t ON t.id = d.task_id WHERE t.workflow_id = ?", (workflow_id,))
+        out: dict[str, set[str]] = {}
+        for task_id, depends_on in rows:
+            out.setdefault(task_id, set()).add(depends_on)
+        return out
+
+    def holders_of(self, specialist_id, live_only=True):
+        if live_only:
+            return self._many(
+                "SELECT * FROM tasks WHERE specialist_id = ? "
+                "AND status NOT IN ('completed','skipped','cancelled')", (specialist_id,))
+        return self._many("SELECT * FROM tasks WHERE specialist_id = ?", (specialist_id,))
+
+
+class SqliteArtifacts(_Base, ArtifactRepo):
+    table, cls = "artifacts", Artifact
+
+    def for_mission(self, mission_id):
+        return self._many(
+            "SELECT * FROM artifacts WHERE mission_id = ? ORDER BY created_at", (mission_id,))
+
+    def for_task(self, task_id):
+        return self._many(
+            "SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at", (task_id,))
+
+
 class SqliteEvents(_Base, EventRepo):
     table, cls = "events", YuriEvent
 
@@ -307,6 +401,10 @@ class SqliteStore(Store):
         self.approvals = SqliteApprovals(self._conn)
         self.events = SqliteEvents(self._conn)
         self.settings = SqliteSettings(self._conn)
+        self.specialists = SqliteSpecialists(self._conn)
+        self.workflows = SqliteWorkflows(self._conn)
+        self.tasks = SqliteTasks(self._conn)
+        self.artifacts = SqliteArtifacts(self._conn)
 
     def migrate(self) -> None:
         # 0002's partial unique index hardcodes the live statuses -- sqlite
@@ -319,6 +417,15 @@ class SqliteStore(Store):
                 "LIVE_STATUSES changed but migrations/0002_one_live_session_per_handle.sql "
                 f"still indexes {sorted(expected)}; add a migration that rebuilds "
                 "sessions_one_live for the new set")
+        # Same guard for 0003's workflows_one_live: the statuses are hardcoded
+        # in SQL because sqlite cannot import a Python constant, so adding one
+        # to LIVE_WORKFLOW must not silently leave it outside the index.
+        expected_wf = {"draft", "running", "paused", "waiting_for_human"}
+        if set(LIVE_WORKFLOW) != expected_wf:
+            raise RuntimeError(
+                "LIVE_WORKFLOW changed but migrations/0003_workflows_and_roster.sql "
+                f"still indexes {sorted(expected_wf)}; add a migration that rebuilds "
+                "workflows_one_live for the new set")
         con = self._conn.get()
         con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         current = self.settings.get("schema_version", 0)
