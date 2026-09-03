@@ -39,11 +39,23 @@ export function ConversationRail() {
     setBackend,
     modelOptions,
     status,
+    modelLabel,
+    voiceUsage,
+    sessions,
     narrationBusy,
     orbRef,
     glowRef,
     answerPrompt,
   } = useYuri();
+
+  // The aggregate cost readout, carried over from the old single-screen
+  // header (VoiceAgent.tsx's .topmeta) — the per-session cost still lives on
+  // each SessionCard, but the total across every open Claude session plus
+  // the live voice connection had nowhere to show once that header was
+  // removed, even though voiceUsage keeps getting tracked and snapshotted to
+  // the backend's cost log every 30s regardless.
+  const claudeTotalUsd = sessions.reduce((sum, s) => sum + (s.cost_usd || 0), 0);
+  const voiceTotalUsd = voiceUsage?.costUsd || 0;
 
   // The OpenAI-family route (native vs Azure) last used, so toggling away to
   // Gemini and back lands on the same route instead of resetting.
@@ -151,6 +163,12 @@ export function ConversationRail() {
         )}
       </div>
       <div className="state-row">{status}</div>
+      <div className="topmeta">
+        {modelLabel && <>{modelLabel} · </>}
+        Claude <b className="cost">${claudeTotalUsd.toFixed(4)}</b>
+        {" · "}Voice <b className="cost">${voiceTotalUsd.toFixed(4)}</b>
+        {" · "}Total <b className="cost">${(claudeTotalUsd + voiceTotalUsd).toFixed(4)}</b>
+      </div>
 
       <div className="controls-row">
         <div className="grp">

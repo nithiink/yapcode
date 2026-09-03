@@ -30,33 +30,11 @@ body {
 
 .app { max-width: 1080px; margin: 0 auto; padding: 30px 28px 80px; }
 
-/* ---- top status bar ---- */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid var(--line); gap: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; }
-.logo { font-family: var(--disp); font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
-.logo .sep { color: var(--acc); }
-/* Speaking dot: a small equalizer that's always animating, so the brand always
-   shows the voice signal. Always in the accent color; going live just adds the
-   soft glow. */
-.brand .speakdot { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 22px; height: 20px; flex: none; }
-.brand .speakdot i { width: 3px; border-radius: 2px; background: var(--acc); transition: box-shadow 0.3s ease; animation: speak 1.05s ease-in-out infinite; transform-origin: center; }
-.brand .speakdot i:nth-child(1) { height: 9px; animation-delay: 0s; }
-.brand .speakdot i:nth-child(2) { height: 18px; animation-delay: 0.16s; }
-.brand .speakdot i:nth-child(3) { height: 11px; animation-delay: 0.32s; }
-.brand.live .speakdot i { box-shadow: 0 0 8px rgba(221,138,106,0.5); }
-@keyframes speak { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
-@media (prefers-reduced-motion: reduce) { .brand .speakdot i { animation: none; } }
+/* ---- rail meta: connection status + the aggregate cost readout ---- */
 .topmeta { font-size: 12.5px; color: var(--mut); text-align: right; letter-spacing: 0.01em; }
 .topmeta b { color: var(--ink); font-weight: 600; }
 .cost { font-variant-numeric: tabular-nums; }
 
-/* ---- hero ---- */
-.hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 48px; align-items: center; padding: 60px 0; border-bottom: 1px solid var(--line); }
-@media (max-width: 840px) { .hero { grid-template-columns: 1fr; gap: 34px; } }
-.kick { font-size: 11px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--acc); margin-bottom: 18px; }
-.hero h1 { font-family: var(--disp); text-transform: uppercase; font-size: clamp(50px, 8vw, 104px); line-height: 0.86; margin: 0 0 22px; letter-spacing: -0.01em; }
-.hero h1 .c { color: var(--acc); }
-.lede-p { font-size: 17px; color: var(--mut); max-width: 42ch; margin: 0 0 30px; }
 .actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .state-row { margin-top: 22px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mut); min-height: 16px; }
 
