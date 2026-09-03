@@ -35,7 +35,15 @@ async def _version(cmd: list[str], timeout: float = 5.0) -> str | None:
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            # wait_for cancels the await, not the process. `claude --version`
+            # hanging would otherwise leave a child behind on every health
+            # probe, and health runs on a 30s cache from a UI poll.
+            proc.kill()
+            await proc.wait()
+            return None
         if proc.returncode != 0:
             return None
         return out.decode(errors="replace").strip().splitlines()[0][:80] if out else ""
@@ -74,7 +82,7 @@ class ClaudeCodeProvider(AgentProvider):
         b = self._owner.get(handle)
         if b is not None:
             return b
-        for backend, r in self._runners.items():
+        for backend, r in list(self._runners.items()):
             if any(s["handle"] == handle for s in r.list()):
                 self._owner[handle] = backend
                 return backend
@@ -164,7 +172,9 @@ class ClaudeCodeProvider(AgentProvider):
 
     def list_native(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
-        for backend, r in self._runners.items():
+        # A snapshot: runner() inserts into _runners lazily, so a list() that
+        # triggers one would mutate the dict mid-iteration.
+        for backend, r in list(self._runners.items()):
             for s in r.list():
                 out.append({**s, "backend": backend})
         return out
@@ -214,8 +224,18 @@ class ClaudeCodeProvider(AgentProvider):
         return restored
 
     async def shutdown(self) -> None:
-        for r in self._runners.values():
-            await r.shutdown()
+        # list(), and each runner guarded: shutdown is the last chance to
+        # release tmux panes and SDK clients, so one runner raising must not
+        # skip the others -- and clearing the maps must happen either way, or
+        # a failed teardown leaves handles pointing at torn-down runners.
+        for r in list(self._runners.values()):
+            try:
+                await r.shutdown()
+            except Exception:
+                log.exception("runner shutdown failed")
+            # A runner that is going away must not keep calling back into a
+            # provider whose observer has been cleared.
+            r.on_event = None
         self._runners.clear()
         self._owner.clear()
 

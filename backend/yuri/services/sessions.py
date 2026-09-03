@@ -41,7 +41,7 @@ from claude_runner import normalize_mode
 from permissions import mode_covers
 from yuri.domain.event import EventType, YuriEvent
 from yuri.domain.mission import InvalidTransition
-from yuri.domain.session import AgentSession
+from yuri.domain.session import LIVE_STATUSES, AgentSession
 from yuri.events.bus import EventBus
 from yuri.narration.policy import DEFAULT_MODE, Mode
 from yuri.narration.service import NarrationService
@@ -414,9 +414,50 @@ class SessionService:
             except Exception:
                 log.debug("persist_name failed", exc_info=True)
 
+    def _merge_marks(self, p: AgentProvider, handle: str,
+                     row: AgentSession | None) -> bool:
+        """Fold the provider's durable read position into the row. True when it
+        changed, so a caller knows whether it still owes a write.
+
+        Every path that moves a mark must call this before the row is
+        persisted. `poll` is the main one, but `send_message` rewinds the
+        cursor to admittedSeq-1 and `interrupt` bumps msg_seen -- so an
+        interrupt through /yuri/sessions/{id}/interrupt or interrupt_many,
+        with no poll behind it, used to move a mark and never write it down.
+
+        MERGE, never replace: this column also carries cost_usd/model/token
+        counts from on_provider_event's cost_updated branch. Providers with no
+        marks answer {} and their rows are untouched.
+        """
+        if row is None:
+            return False
+        try:
+            marks = p.runtime_metadata_for(handle)
+        except Exception:
+            log.exception("runtime_metadata_for failed for %s", p.id)
+            return False
+        if not marks or all(row.runtime_metadata.get(k) == v for k, v in marks.items()):
+            return False
+        row.runtime_metadata = {**row.runtime_metadata, **marks}
+        return True
+
     def _touch(self, row: AgentSession | None, status: str | None = None) -> None:
         if row is None:
             return
+        # Re-admitting a row to the live set must re-check its name, exactly as
+        # rehydrate()'s revive branch does. Reachable from send/poll/answer: a
+        # handle can come back between being marked `lost` and the next
+        # restart, and while it was lost _pick_name could have handed its name
+        # to a NEW session. Two live rows with one name make resolve(name)
+        # ambiguous, and ambiguity there means a message reaching the wrong
+        # agent. It fails closed today (resolve refuses rather than guessing),
+        # but the de-dupe belongs on every path into the live set, not just one.
+        if status and status in LIVE_STATUSES and row.status not in LIVE_STATUSES:
+            was = row.name
+            row.name = self._dedupe_name(row.name, exclude=row.id)
+            if row.name != was:
+                log.info("session %s re-admitted as '%s' -> '%s' (name taken while %s)",
+                         row.native_session_id[:8], was, row.name, row.status)
         if status:
             row.status = status
         row.touch()
@@ -427,7 +468,11 @@ class SessionService:
         row = self.row_for(handle)
         if row is not None and row.mission_id:
             self.missions.set_goal_if_empty(self.missions.get(row.mission_id), message)
-        self._provider_for(handle).send_message(handle, message)
+        p = self._provider_for(handle)
+        p.send_message(handle, message)
+        # send_message can rewind the read cursor (OpenCode sets it to
+        # admittedSeq-1); _touch below is what writes it down.
+        self._merge_marks(p, handle, row)
         self._touch(row, "running")
         self.bus.publish(self._ev(EventType.SESSION_MESSAGE_SENT, row, handle, {"message": message[:500]}))
         return {"status": "working", "session_id": handle}
@@ -488,11 +533,7 @@ class SessionService:
         # this same column carries cost_usd/model/token counts from
         # on_provider_event's cost_updated branch. Every other provider answers
         # {} and its rows are untouched.
-        marks = p.runtime_metadata_for(handle)
-        unsaved = bool(marks) and any(row.runtime_metadata.get(k) != v
-                                      for k, v in marks.items())
-        if unsaved:
-            row.runtime_metadata = {**row.runtime_metadata, **marks}
+        unsaved = self._merge_marks(p, handle, row)
         # Which branches below persist the row themselves, via _touch.
         persisted = (status in ("needs_permission", "needs_choice",
                                 "completed", "error") or status in _IN_FLIGHT)
@@ -544,8 +585,11 @@ class SessionService:
 
     async def interrupt(self, ref: str) -> dict:
         handle = self.resolve(ref)
-        await self._provider_for(handle).interrupt(handle)
+        p = self._provider_for(handle)
+        await p.interrupt(handle)
         row = self.row_for(handle)
+        # interrupt consumes the abandoned turn's messages, so the mark moved.
+        self._merge_marks(p, handle, row)
         self._touch(row, "idle")
         self.bus.publish(self._ev(EventType.SESSION_INTERRUPTED, row, handle, {}))
         return {"status": "interrupted", "session_id": handle}
