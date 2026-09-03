@@ -739,6 +739,13 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       es.onmessage = (m) => {
         try {
           const frame = JSON.parse(m.data);
+          // Capture newness BEFORE lineFor runs: lineFor remembers the id as a
+          // side effect, so calling hasSeen after would always report "seen".
+          // This is the real replay signal — narration:null (unspeakable in
+          // this mode, or an event type with no line at all, e.g.
+          // mission.status_changed) is NOT the same thing as "already
+          // delivered", so `line !== null` cannot stand in for it.
+          const isNew = !gate.hasSeen(frame);
           const line = gate.lineFor(frame);
           if (line) {
             // Always false today (the blocking types are poll-owned, so they
@@ -747,18 +754,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
             sessionRef.current?.injectUpdate(line, { blocking: isBlockingNarration(frame) });
             logDebug("inject", line, undefined, "backend", "voice");
           }
-          // Fan the accepted event out to every view listener, AFTER the id
-          // gate above has processed it — same event, whether or not it had a
-          // line to speak. Each call is wrapped: mirrors ClaudeRunner._notify
-          // on the backend — a bug in one view's handler must not kill the
-          // stream for the others.
-          listeners.current.forEach((fn) => {
-            try {
-              fn(frame as YuriEvent);
-            } catch {
-              /* a view bug must not break the stream */
-            }
-          });
+          // Fan the event out to every view listener, but ONLY if the gate
+          // above had never seen its id before — a reconnect's replay must
+          // not repeat an event to subscribers, even one with no narration
+          // line. Each call is wrapped: mirrors ClaudeRunner._notify on the
+          // backend — a bug in one view's handler must not kill the stream
+          // for the others.
+          if (isNew) {
+            listeners.current.forEach((fn) => {
+              try {
+                fn(frame as YuriEvent);
+              } catch {
+                /* a view bug must not break the stream */
+              }
+            });
+          }
         } catch {
           /* malformed frame; ignore */
         }

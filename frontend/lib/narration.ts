@@ -138,6 +138,20 @@ export type SpokenGate = {
   seed(ids: Iterable<unknown>): void;
   /** The line to speak for this frame, or null if blank or already delivered. */
   lineFor(frame: unknown): string | null;
+  /**
+   * Whether this frame's id has already been delivered (seeded, or already
+   * passed through lineFor) — WITHOUT marking it delivered. For a caller that
+   * needs to know "is this a replay?" before deciding anything else, e.g. a
+   * fan-out that must not repeat a replayed event to its own subscribers even
+   * when that event carries no narration line.
+   *
+   * Must be called BEFORE lineFor for the same frame: lineFor remembers the
+   * id as a side effect, so calling hasSeen after would always see it as seen.
+   *
+   * A frame with no usable id is always "unseen", mirroring lineFor's fail-
+   * open policy (better a rare repeat than a wrongly-suppressed event).
+   */
+  hasSeen(frame: unknown): boolean;
 };
 
 /**
@@ -190,6 +204,10 @@ export function createSpokenGate(cap = 500): SpokenGate {
         remember(id);
       }
       return narrationOf(frame);
+    },
+    hasSeen(frame) {
+      const id = idOf(frame);
+      return id !== null && seen.has(id);
     },
   };
 }

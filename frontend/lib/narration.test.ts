@@ -104,6 +104,40 @@ test("a blank frame is dropped and never reaches injectUpdate", () => {
   assert.equal(gate.lineFor("not an object"), null);
 });
 
+// --- hasSeen ---------------------------------------------------------------
+// A separate read of the same seen-set lineFor uses, for a caller (the
+// onYuriEvent fan-out) that needs to know "is this a replay?" independent of
+// whether the frame has anything to say.
+
+test("hasSeen is false for an unseen id, and true once lineFor has consumed it", () => {
+  const gate = createSpokenGate();
+  assert.equal(gate.hasSeen({ id: "e1", narration: "Starting." }), false);
+  gate.lineFor({ id: "e1", narration: "Starting." });
+  assert.equal(gate.hasSeen({ id: "e1", narration: "Starting." }), true);
+});
+
+test("hasSeen does not itself mark an id seen", () => {
+  const gate = createSpokenGate();
+  assert.equal(gate.hasSeen({ id: "e1", narration: "Starting." }), false);
+  assert.equal(gate.hasSeen({ id: "e1", narration: "Starting." }), false); // called twice
+  // lineFor still delivers it — hasSeen alone must not have consumed it.
+  assert.equal(gate.lineFor({ id: "e1", narration: "Starting." }), "Starting.");
+});
+
+test("hasSeen treats a frame with no usable id as unseen", () => {
+  const gate = createSpokenGate();
+  assert.equal(gate.hasSeen({ narration: "No id." }), false);
+  assert.equal(gate.hasSeen({ id: 7, narration: "Bad id." }), false);
+  assert.equal(gate.hasSeen(null), false);
+});
+
+test("a seeded id reads as seen", () => {
+  const gate = createSpokenGate();
+  gate.seed(["e1"]);
+  assert.equal(gate.hasSeen({ id: "e1", narration: "Old news." }), true);
+  assert.equal(gate.hasSeen({ id: "e2", narration: "Fresh news." }), false);
+});
+
 test("the replay limit is inside the backend's clamp and wide enough to be worth it", () => {
   // _clamp_limit is max(1, min(limit, 1000)): outside that the backend silently
   // substitutes its own number and the seed would no longer cover the replay.
