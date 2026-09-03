@@ -608,3 +608,25 @@ details.handoff:hover > summary { color: var(--mut); }
 .apr-hist-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); min-width: 0; }
 .apr-hist-title { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .apr-hist-status { flex: none; font-size: 11.5px; color: var(--dim); text-transform: capitalize; }
+
+/* ---- Dashboard: the three "what needs you" bands ---- */
+.dash-view { min-width: 0; }
+/* The error banner replaces the whole view rather than sitting above an
+   empty-looking dashboard — see the header comment in app/page.tsx. */
+.dash-loaderror { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.dash-band { min-width: 0; }
+.dash-band + .dash-band { margin-top: 28px; }
+.dash-band-title { font-family: var(--disp); text-transform: uppercase; font-size: 14px; font-weight: 400; color: var(--mut); margin: 0 0 10px; }
+.dash-list { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash-row { display: flex; flex-direction: column; gap: 5px; padding: 10px 4px; border-bottom: 1px solid var(--line); min-width: 0; }
+.dash-row:last-child { border-bottom: 0; }
+.dash-row-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dash-row-title { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-row-meta { flex: none; font-size: 11.5px; color: var(--dim); text-transform: capitalize; }
+.dash-row-task { font-size: 12.5px; color: var(--mut); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-row-actions { display: flex; gap: 6px; }
+.dash-btn { border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; font-size: 12px; font-weight: 600; padding: 5px 14px; border-radius: 999px; cursor: pointer; transition: filter 0.15s ease, border-color 0.15s ease; }
+.dash-btn:hover:not(:disabled) { border-color: var(--line2); }
+.dash-btn:disabled { opacity: 0.5; cursor: default; }
+.dash-btn.danger { color: var(--danger); border-color: var(--danger); }
+.dash-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 14%, transparent); }
