@@ -538,3 +538,30 @@ details.handoff:hover > summary { color: var(--mut); }
 .cmdfield code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); background: transparent; border: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdfield .copybtn { background: transparent; border: 0; padding: 6px; border-radius: 6px; }
 .cmdfield .copybtn:hover { background: rgba(255,255,255,0.06); }
+
+/* ---- Mission Control shell: nav | routed view | voice rail ---- */
+.shell { display: grid; grid-template-columns: 200px 1fr 380px; gap: 0; min-height: 100vh; }
+/* min-width: 0 on every track — see the note at the .panel rule above. Without
+   it a long path or queued prompt blows out a track and resizes the layout. */
+.shell > * { min-width: 0; }
+.shell-main { padding: 28px 32px; overflow-y: auto; }
+.shell-nav { border-right: 1px solid var(--line); padding: 24px 14px; }
+.shell-rail { border-left: 1px solid var(--line); padding: 24px 18px; display: flex;
+              flex-direction: column; min-height: 0; }
+
+/* One breakpoint. Below it the rail is the whole app: mic, transcript and the
+   pending prompt card — the away-from-desk case. Desktop-first by decision. */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .shell-nav, .shell-main { display: none; }
+  .shell-rail { border-left: 0; }
+}
+
+.viewtitle { font-family: var(--disp); text-transform: uppercase; font-size: 19px; letter-spacing: .02em; font-weight: 400; margin: 0 0 18px; }
+
+/* ---- shell nav ---- */
+.navlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.navitem { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-radius: 8px; color: var(--mut); text-decoration: none; font-size: 13.5px; font-weight: 500; }
+.navitem:hover { color: var(--ink); background: var(--panel2); }
+.navitem.active { color: var(--ink); background: var(--panel2); box-shadow: inset 0 0 0 1px var(--line2); }
+.navbadge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }

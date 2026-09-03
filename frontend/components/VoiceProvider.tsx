@@ -44,6 +44,8 @@ import {
   type YuriContext as YuriConnectSnapshot,
 } from "@/lib/instructions";
 import { authHeaders, withAuthParam } from "@/lib/auth";
+import { yget, yput } from "@/lib/api";
+import type { Approval, Mission } from "@/lib/yuriTypes";
 import { scopedClearPending } from "@/lib/promptState";
 import {
   NARRATION_REPLAY_LIMIT,
@@ -63,40 +65,11 @@ import type { DebugEvent } from "./ActivityFeed";
 export type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
 
 // --- shared-list shapes -----------------------------------------------------
-// Minimal mirrors of the backend's dict shapes (yuri/domain/approval.py,
-// yuri/domain/mission.py, GET /yuri/agents) — just enough for nav badges and
-// list rendering. A view that needs one record's full detail fetches it.
-
-export type Approval = {
-  id: string;
-  session_id: string;
-  agent_id: string;
-  action: string;
-  tool_name: string;
-  request_id: string;
-  mission_id?: string | null;
-  tool_input?: Record<string, unknown>;
-  risk: string; // safe | confirm | dangerous
-  description: string;
-  status: string; // pending | allowed | denied | expired | superseded
-  requested_at: string;
-  resolved_at?: string | null;
-  resolved_by?: string | null;
-};
-
-export type Mission = {
-  id: string;
-  title: string;
-  project_id: string;
-  goal?: string | null;
-  status: string;
-  priority: number;
-  current_step?: string | null;
-  created_by: string;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
+// Approval and Mission are the real backend dataclass shapes, from
+// lib/yuriTypes.ts (re-exported here so existing call sites that imported
+// them from this module keep working) — just enough for nav badges and list
+// rendering. A view that needs one record's full detail fetches it.
+export type { Approval, Mission };
 
 export type Agent = {
   id: string;
@@ -549,9 +522,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // and the buttons still work, because a PUT sets the mode outright.
   const refreshNarrationMode = useCallback(async () => {
     try {
-      const r = await fetch("/api/yuri/narration", { headers: authHeaders() });
-      if (!r.ok) return;
-      const d = await r.json();
+      const d = await yget<{ mode?: string }>("narration");
       if (isNarrationMode(d?.mode)) setNarrationModeState(d.mode);
     } catch {
       /* keep the last known mode */
@@ -571,13 +542,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setNarrationModeState(mode); // optimistic, like switchMode; reconciled below
     setNarrationBusy(true);
     try {
-      const r = await fetch("/api/yuri/narration", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ mode }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
+      const d = await yput<{ mode?: string }>("narration", { mode });
       if (isNarrationMode(d?.mode)) setNarrationModeState(d.mode);
     } catch (err: any) {
       setNarrationModeState(prev); // never show a mode the backend didn't accept
