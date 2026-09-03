@@ -580,5 +580,66 @@ class TerminalHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.p.native_pane(h))
 
 
+class Transcript(unittest.IsolatedAsyncioTestCase):
+    """How an OpenCode session is actually watched.
+
+    There is no browser terminal view for OpenCode, and there does not need to
+    be: /message is the same source poll reads, so the transcript panel shows
+    the turn as it lands. Deliberately the API rather than OpenCode's SQLite
+    store -- a live session's messages are not reliably written there while it
+    runs, so the store would render an empty conversation exactly when someone
+    wanted to watch.
+    """
+
+    async def asyncSetUp(self):
+        self.fake = FakeOpenCode()
+        self.fake.__enter__()
+        self.addCleanup(lambda: self.fake.__exit__(None, None, None))
+        self.p = OpenCodeProvider(OpenCodeServer(self.fake.url, spawn=False))
+        self.addAsyncCleanup(self.p.shutdown)
+        self.h = await self.p.create_session(
+            ProjectContext("p", "/tmp"), SessionOptions())
+
+    async def test_an_empty_session_is_not_found(self):
+        self.assertEqual(await self.p.transcript(self.h),
+                         {"found": False, "events": []})
+
+    async def test_it_reads_oldest_first_though_the_api_is_newest_first(self):
+        """The API returns newest first; a transcript reads down the page."""
+        self.fake.state.push_user(self.h, "first question")
+        self.fake.state.push_assistant(self.h, "first answer")
+        self.fake.state.push_user(self.h, "second question")
+        tx = await self.p.transcript(self.h)
+        self.assertTrue(tx["found"])
+        self.assertEqual([e["text"] for e in tx["events"]],
+                         ["first question", "first answer", "second question"])
+        self.assertEqual([e["kind"] for e in tx["events"]],
+                         ["user", "assistant", "user"])
+
+    async def test_assistant_text_comes_from_content_not_the_top_level(self):
+        """Observed live: an assistant message's top-level `text` is absent and
+        the words are in content[].text. Reading `text` gives empty rows."""
+        self.fake.state.push_assistant(self.h, "the answer")
+        tx = await self.p.transcript(self.h)
+        self.assertEqual(tx["events"], [{"kind": "assistant", "text": "the answer"}])
+
+    async def test_an_unknown_message_type_is_skipped_not_fatal(self):
+        self.fake.state.push_message(self.h, {"id": "msg_x", "type": "mystery",
+                                              "time": {"created": 1}})
+        self.fake.state.push_user(self.h, "still here")
+        tx = await self.p.transcript(self.h)
+        self.assertEqual([e["text"] for e in tx["events"]], ["still here"])
+
+    async def test_an_unknown_handle_has_no_transcript(self):
+        self.assertEqual(await self.p.transcript("ses_nope"),
+                         {"found": False, "events": []})
+
+    async def test_a_server_that_goes_away_is_empty_not_an_error(self):
+        """A transcript is a convenience; losing the server must not raise
+        into the UI's 2.5s poll."""
+        self.fake.__exit__(None, None, None)
+        self.assertEqual(await self.p.transcript(self.h),
+                         {"found": False, "events": []})
+
 if __name__ == "__main__":
     unittest.main()

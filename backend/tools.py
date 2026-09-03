@@ -502,9 +502,10 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return _svc().poll(args["session_id"])
 
     if name == "read_transcript":
-        # App-level: full session timeline from the on-disk jsonl (both backends).
-        from transcript import read_timeline
-        return read_timeline(_svc().resolve(args["session_id"]))
+        # Provider-owned: Claude Code reads its on-disk jsonl, OpenCode reads
+        # its server. Calling read_timeline here meant every OpenCode
+        # transcript came back empty.
+        return await _svc().transcript(args["session_id"])
 
     if name == "interrupt_session":
         return await _svc().interrupt(_require_session(args, "interrupt"))

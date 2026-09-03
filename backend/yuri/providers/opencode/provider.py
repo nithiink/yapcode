@@ -151,6 +151,69 @@ class _Handle:
     pending: _Pending | None = None   # the ask poll surfaced; answer replies to it
 
 
+def _ordered(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Oldest first, whatever order the server sent.
+
+    `/api/session/{id}/message` returns NEWEST first -- measured, and the
+    opposite of what the msg_seen high-water mark assumes. Slicing
+    `messages[msg_seen:]` off a newest-first list takes the OLDEST entries, so
+    a second turn was reported `completed` carrying the previous turn's
+    leftovers and an empty assistant text. The fake appended oldest-first and
+    hid it, the same way it once agreed with the wrong auth header.
+
+    Sorted rather than reversed, and by (created, id) so equal timestamps stay
+    stable: order is the server's business, and a future build changing it
+    must not resurrect that bug.
+    """
+    def key(m: dict[str, Any]) -> tuple[int, str]:
+        t = m.get("time")
+        created = (t or {}).get("created") if isinstance(t, dict) else None
+        return (int(created or 0), str(m.get("id") or ""))
+    return sorted((m for m in messages if isinstance(m, dict)), key=key)
+
+
+def _transcript_events(m: dict[str, Any]) -> list[dict[str, Any]]:
+    """One OpenCode message -> the transcript events the UI renders.
+
+    Shapes observed live (1.18.25): a user message is
+    `{type:"user", text, time:{created}}`; an assistant message is
+    `{type:"assistant", content:[{type:"text", text}], finish, ...}` with its
+    top-level `text` absent, which is why the text comes out of `content`.
+
+    Tool-call part shapes were never observed, so they are mapped
+    best-effort and never invented: a non-text part becomes a tool event only
+    when it actually carries a name, and is otherwise skipped rather than
+    rendered as an empty row.
+    """
+    kind = m.get("type")
+    if kind == "user":
+        text = str(m.get("text") or "").strip()
+        return [{"kind": "user", "text": text}] if text else []
+    if kind != "assistant":
+        return []                      # unknown message type: ignored, not fatal
+    out: list[dict[str, Any]] = []
+    content = m.get("content")
+    parts = content if isinstance(content, list) else []
+    text = "".join(str(p.get("text") or "") for p in parts
+                   if isinstance(p, dict) and p.get("type") == "text")
+    for p in parts:
+        if not isinstance(p, dict) or p.get("type") == "text":
+            continue
+        tool = p.get("tool")
+        name = p.get("name") or (tool if isinstance(tool, str) else None)
+        if not name:
+            continue
+        out.append({"kind": "tool", "name": str(name),
+                    "summary": str(p.get("title") or p.get("summary") or "")[:200],
+                    # OpenCode asks for permission through its own flow, which
+                    # Yuri surfaces separately; nothing here is classified, so
+                    # claiming a risk level would be a guess.
+                    "risky": False})
+    if text.strip():
+        out.append({"kind": "assistant", "text": text.strip()})
+    return out
+
+
 def _surface(h: _Handle, kind: str, status: str,
              prompt: dict[str, Any]) -> dict[str, Any]:
     """Report an ask, with the prompt only the FIRST time it is surfaced.
@@ -506,8 +569,11 @@ class OpenCodeProvider(AgentProvider):
 
     async def _messages(self, client: OpenCodeClient,
                         handle: str) -> list[dict[str, Any]]:
+        """Oldest first -- see _ordered. Normalising here rather than at each
+        call site means msg_seen's slicing and the transcript agree, and a
+        third caller cannot get it wrong."""
         data = await client.get(f"/api/session/{handle}/message")
-        return [m for m in (data or []) if isinstance(m, dict)]
+        return _ordered(data or [])
 
     async def _asks(self, client: OpenCodeClient, handle: str,
                     kind: str) -> list[dict[str, Any]]:
@@ -830,6 +896,35 @@ class OpenCodeProvider(AgentProvider):
     async def _read(self, handle: str) -> list[dict[str, Any]]:
         client = await self._client()
         return await self._messages(client, handle)
+
+    async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
+        """The live conversation, straight from the server.
+
+        This is how an OpenCode session is watched. There is no browser
+        terminal view (see resume_command and the verification doc) but there
+        does not need to be: `/message` is the same source `poll` reads, so the
+        transcript panel shows the turn as it lands, and Yuri's own polling
+        keeps it current.
+
+        Deliberately the API and not OpenCode's SQLite store: a live session's
+        messages are not reliably written there while it runs (measured -- see
+        docs/yuri/follow-ups.md), so the store would show an empty
+        conversation exactly when someone wanted to watch it.
+        """
+        if handle not in self._handles:
+            return {"found": False, "events": []}
+        try:
+            messages = await self._arun(self._transcript_messages(handle))
+        except OpenCodeError as exc:
+            log.warning("could not read the transcript for %s: %s", handle[:12], exc)
+            return {"found": False, "events": []}
+        events: list[dict[str, Any]] = []
+        for m in messages:              # _messages already ordered them
+            events.extend(_transcript_events(m))
+        return {"found": bool(events), "events": events[-limit:] if limit > 0 else events}
+
+    async def _transcript_messages(self, handle: str) -> list[dict[str, Any]]:
+        return await self._messages(await self._client(), handle)
 
     def resume_command(self, handle: str) -> str | None:
         """`opencode -s <id> --mini` -- the root TUI, not `attach`.

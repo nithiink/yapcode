@@ -156,6 +156,20 @@ class AgentProvider(ABC):
                      opts: SessionOptions) -> str:
         raise NotImplementedError(f"{self.id} does not support resume")
 
+    async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
+        """The session's conversation, for the UI's transcript panel.
+
+        `{found: bool, events: [...]}` where each event is one of
+        `{kind:'user', text}`, `{kind:'assistant', text}`,
+        `{kind:'tool', name, summary, risky}`, `{kind:'tool_result', ok, text}`
+        -- oldest first.
+
+        Provider-owned because the source differs: Claude Code has an on-disk
+        JSONL, and a server-backed provider has an API. The default says "no
+        transcript" rather than guessing at someone else's storage.
+        """
+        return {"found": False, "events": []}
+
     def can_open_terminal(self, handle: str) -> bool:
         """Could a live terminal view be offered for this session?
 

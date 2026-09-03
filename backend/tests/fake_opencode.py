@@ -62,13 +62,33 @@ class FakeOpenCodeState:
         })
         return seq
 
+    def push_user(self, sid: str, text: str) -> None:
+        """A user message, in the shape the real server returns: top-level
+        `text`, and no `content` (unlike an assistant message)."""
+        self.push_message(sid, {
+            "id": f"msg_u{len(self.messages.get(sid, [])) + 1}",
+            "type": "user", "text": text,
+            "time": {"created": self._next_time()},
+        })
+
+    def push_message(self, sid: str, message: dict) -> None:
+        """Append a message verbatim -- for shapes the helpers do not cover
+        (an unknown `type`, a malformed entry) without inventing an API."""
+        self.messages.setdefault(sid, []).append(message)
+
+    def _next_time(self) -> int:
+        """Monotonic created-times, so ordering is well defined. The provider
+        sorts by (created, id) because the real API is newest-first."""
+        self._msg_clock = getattr(self, "_msg_clock", 0) + 1
+        return self._msg_clock
+
     def push_assistant(self, sid: str, text: str, finish: str = "stop") -> None:
         self.messages.setdefault(sid, []).append({
             "id": f"msg_a{len(self.messages[sid]) + 1}", "type": "assistant",
             "finish": finish, "agent": "build",
             "model": {"id": "fake-model", "providerID": "fake"},
             "content": [{"type": "text", "text": text}],
-            "time": {"created": 1, "completed": 2},
+            "time": {"created": self._next_time(), "completed": self._next_time()},
         })
 
     def add_permission(self, sid: str, request_id: str, title: str,
@@ -190,7 +210,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._data([e for e in s.events.get(sid, [])
                                    if e["durable"]["seq"] > after])
             if tail == ["message"]:
-                return self._data(s.messages.get(sid, []))
+                # NEWEST FIRST, as the real server does. It used to return
+                # append order, which hid a real bug: msg_seen's slicing
+                # assumes oldest-first, so against the real API a second turn
+                # reported the previous turn's leftovers with empty text.
+                return self._data(list(reversed(s.messages.get(sid, []))))
             if tail == ["permission"]:
                 return self._data(s.permissions.get(sid, []))
             if tail == ["question"]:

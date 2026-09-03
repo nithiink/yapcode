@@ -88,7 +88,40 @@ OpenCode's store, not directory-scoped (`opencode session list` returns the
 same list from any cwd), so the cwd only decides which project the TUI opens
 on. This is now what `resume_command` returns.
 
-### But there is still no "Watch live" ❌
+### Seeing a live OpenCode session: the transcript panel ✅
+Chasing "can I watch it?" produced the right answer, which was never the
+terminal. `read_transcript` called Claude Code's on-disk JSONL reader directly
+for every session, so an OpenCode session's transcript panel was always empty
+— the same "every session is Claude Code" assumption as the resume command.
+`transcript()` is now a provider method: Claude Code reads its JSONL, OpenCode
+reads `/api/session/{id}/message`, which is the same source `poll` reads. The
+panel polls every 2.5s, so the turn appears as it lands.
+
+Deliberately the API and not OpenCode's SQLite store, because a live session's
+messages are not reliably written there while it runs (below).
+
+### A REAL BUG this uncovered: the message API is newest-first ✅ fixed
+`/api/session/{id}/message` returns **newest first** — measured. `poll`'s
+`msg_seen` high-water mark slices `messages[msg_seen:]`, which assumes
+oldest-first, so it took the OLDEST entries as "fresh". Observed live before
+the fix:
+
+    TURN1: completed  text='AAA1'
+    TURN2: completed  text=''        <- previous turn's leftovers, empty text
+
+**The fake had been appending oldest-first and hid it** — the same
+agreeable-fake failure as the auth header. The fake now returns newest-first
+like the server, and reverting the ordering fix fails **six** tests, including
+every exactly-once guarantee. Those guarantees were previously passing while
+production was broken. After the fix, against the real server:
+
+    TURN1: completed  text='AAA1'
+    TURN2: completed  text='BBB2'
+
+Also observed: a third message type, `system` (carrying "Skills"), which is
+ignored rather than rendered.
+
+### Still no "Watch live" in the browser ❌
 Not because the view is wrong — because it is a **separate process reading the
 shared store**, and a live session's messages are not reliably persisted while
 Yuri drives it. Measured, with the server still running and a turn just

@@ -226,6 +226,22 @@ class SessionService:
                         "resume_command": self._resume_command(p, handle)})
         return out
 
+    async def transcript(self, ref: str, limit: int = 300) -> dict:
+        """The session's conversation, from whichever provider owns it.
+
+        tools.py used to call Claude Code's on-disk transcript reader directly
+        for every session, so an OpenCode session's transcript panel was always
+        empty -- the same "every session is Claude Code" assumption as the
+        resume command.
+        """
+        handle = self.resolve(ref)
+        p = self._provider_for(handle)
+        try:
+            return await p.transcript(handle, limit=limit)
+        except Exception:
+            log.exception("transcript failed for %s", p.id)
+            return {"found": False, "events": []}
+
     def native_pane(self, ref: str) -> str | None:
         try:
             handle = self.resolve(ref)

@@ -169,6 +169,14 @@ class ClaudeCodeProvider(AgentProvider):
                 out.append({**s, "backend": backend})
         return out
 
+    async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
+        """The on-disk JSONL both Claude backends write. Unchanged behaviour --
+        this used to be called directly from tools.py, which meant OpenCode
+        sessions were handed Claude's transcript reader and always came back
+        empty."""
+        from transcript import read_timeline
+        return read_timeline(handle, limit=limit)
+
     def resume_command(self, handle: str) -> str | None:
         row = {s["handle"]: s for s in self.list_native()}.get(handle)
         if not row or not row.get("session_id"):
