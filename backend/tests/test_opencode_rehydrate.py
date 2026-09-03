@@ -391,5 +391,48 @@ class MarksThroughTheStore(_ServiceBase):
         self.assertEqual(self._row(h).status, "stopped")
 
 
+class EveryProviderAcceptsTheWidenedCall(unittest.IsolatedAsyncioTestCase):
+    """SessionService.rehydrate now calls `p.rehydrate(known=...)` on EVERY
+    registered provider, and its own `except Exception` swallows whatever
+    comes back. So a provider that never widened its signature raises
+    TypeError, gets logged, and simply stops rehydrating -- its sessions
+    quietly never return after a restart, with a green test suite.
+
+    That is the failure this pins, and it is deliberately not about OpenCode:
+    it is about every provider that exists now or is added later.
+    """
+
+    async def test_no_provider_rejects_the_known_keyword(self):
+        import inspect
+
+        from yuri.providers.base import AgentProvider
+        from yuri.providers.claude_code import ClaudeCodeProvider
+        from yuri.providers.fake import FakeAgentProvider
+        from yuri.providers.opencode.provider import OpenCodeProvider
+
+        for cls in (AgentProvider, ClaudeCodeProvider, FakeAgentProvider,
+                    OpenCodeProvider):
+            sig = inspect.signature(cls.rehydrate)
+            accepts = ("known" in sig.parameters
+                       or any(prm.kind is inspect.Parameter.VAR_KEYWORD
+                              for prm in sig.parameters.values()))
+            self.assertTrue(accepts,
+                            f"{cls.__name__}.rehydrate{sig} would raise TypeError "
+                            "on SessionService's known= call, and the caller's "
+                            "except Exception would hide it")
+
+    async def test_a_real_rehydrate_call_reaches_every_provider(self):
+        """The check above is static. This one actually makes the call
+        SessionService makes, so a provider that accepts the keyword but
+        chokes on it still fails here."""
+        from yuri.providers.fake import FakeAgentProvider
+
+        p = FakeAgentProvider()
+        try:
+            self.assertEqual(await p.rehydrate(known={"ses_x": {"cwd": "/tmp"}}), [])
+        finally:
+            await p.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()
