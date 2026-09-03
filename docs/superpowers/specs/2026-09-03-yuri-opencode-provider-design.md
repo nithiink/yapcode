@@ -56,6 +56,28 @@ Observed on a failing turn: `session.next.prompt.admitted` → `session.next.pro
 **A successful turn's events (tool calls, step completion) were never captured** —
 every model reachable during the probe either returned 401 or produced nothing.
 
+**RESOLVED 2026-09-03** against `opencode serve` 1.18.25 with
+`opencode/nemotron-3-ultra-free`, via the shipped provider. A successful turn
+emits, in order:
+
+    session.next.prompt.admitted
+    session.next.prompted
+    session.next.step.started
+    session.next.text.started
+    session.next.text.ended
+    session.next.step.ended
+
+The decision below is **vindicated, not merely unharmed**: a successful turn
+ends with `session.next.step.ended`, a type nobody had guessed — the plan and
+every draft of the mapping had assumed `session.next.step.completed`. Had
+completion been read from an event type, it would never have fired and every
+turn would have hung at `working`. Reading it from the message's `finish`
+instead is what makes the live turn work on the first try.
+
+Also observed: the assistant message carries `finish: "stop"` with its
+top-level `text` field **null** — the text lives in the message's parts — so
+`_assistant_text`'s structure-walking is load-bearing, not defensive padding.
+
 This is a stated limitation, not a gap to guess past. Consequence for the
 design: the event mapping is **defensive by construction** — known types map,
 **unknown types are ignored**, and a turn's completion is decided from
