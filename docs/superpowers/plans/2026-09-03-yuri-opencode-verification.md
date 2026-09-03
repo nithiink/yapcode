@@ -52,6 +52,30 @@ voice keys and still does not pass `VC_AUTH_TOKEN`. Note it does **not** fix a
 model 401 — OpenCode authenticates from its own `opencode auth login` store,
 not from these variables, so the default (strip) costs nothing here.
 
+### The auth mechanism — RESOLVED, and the guess was wrong ✅
+`opencode serve` with `OPENCODE_SERVER_PASSWORD` set:
+
+| sent | result |
+|---|---|
+| no header | 401 |
+| `x-opencode-password: <pw>` — **what the client sent** | 401 |
+| Basic with an empty username | 401 |
+| `Basic opencode:<pw>` | **200** |
+
+It is HTTP Basic, and the username is load-bearing. Every password-protected
+setup would have failed with a hard error. The guess was wrong in production
+and *right in the tests*, because the fake had been written to agree with it —
+an agreeable fake is worse than no fake. Fixed in `_headers()`, the one
+function Task 2 isolated it into, and the fake now enforces the real thing.
+`opencode attach --username` documents the same `opencode` default.
+
+### `opencode attach` — the terminal handoff, better than tmux ✅
+`opencode attach <url> --session <id>` attaches OpenCode's own TUI to the
+**same server and same session** Yuri is driving. Unlike `claude --resume`,
+which opens a *copy* of the conversation in a separate process, this is the
+live session: the user takes the keyboard and Yuri keeps reading it, because
+both are talking to one server. This is now what the session panel offers.
+
 ## Not settled
 
 - **A model that authenticates but never starts.** `google/gemini-2.5-flash`
@@ -65,7 +89,8 @@ not from these variables, so the default (strip) costs nothing here.
   wire format and whether OpenCode drops an answered request from its pending
   list are still unproven (see `docs/yuri/follow-ups.md`).
 - **The question reply body shape** — still a guess by symmetry.
-- **The client-side auth header** — untested; no password-protected server run.
+- **A password-protected end-to-end turn.** Auth itself is now measured and
+  fixed, but no full turn has run against a secured server.
 
 ## Configuration that works
 
