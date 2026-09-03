@@ -415,6 +415,19 @@ class SessionService:
             return {**res, "narration": None}
         status = res.get("status")
         emits = not p.capabilities().supports_events   # otherwise the observer already did
+        # The provider's durable state. `poll` is the only place OpenCode's read
+        # cursors move, so it is the one hook that can write them down — and
+        # rehydrate would otherwise restore marks nobody ever saved, silently
+        # falling back to "from now" on every restart. MERGE, never replace:
+        # this same column carries cost_usd/model/token counts from
+        # on_provider_event's cost_updated branch. Every other provider answers
+        # {} and its rows are untouched.
+        marks = p.runtime_metadata_for(handle)
+        unsaved = bool(marks) and any(row.runtime_metadata.get(k) != v
+                                      for k, v in marks.items())
+        if unsaved:
+            row.runtime_metadata = {**row.runtime_metadata, **marks}
+        activity = row.last_activity_at
         if status == "needs_permission":
             prompt = res.get("prompt")
             if prompt:
@@ -439,6 +452,12 @@ class SessionService:
             self._fail_if_alone(row, res.get("error") or "agent error")
         elif status in _IN_FLIGHT:
             self._touch(row, "running")
+        # Each branch above persists the row through _touch, which writes the
+        # merged marks with it. Only a poll that took no branch at all — an idle
+        # session whose cursor still advanced past events Yuri did not start —
+        # needs its own write, so this costs one UPDATE per poll, never two.
+        if unsaved and row.last_activity_at == activity:
+            self._touch(row)
         # The frontend's whole rule is "if it has a narration line, inject it".
         # Poll owns the four session-turn events (yuri/narration/policy.py); the
         # stream must not also narrate them or the user hears each one twice.
@@ -706,7 +725,19 @@ class SessionService:
         restored: list[dict] = []
         for p in self.registry.all():
             try:
-                restored.extend(await p.rehydrate())
+                # What Yuri already has a row for, so a provider whose sessions
+                # are durable server-side (OpenCode) can tell hers from the
+                # user's own — it must adopt only the former — and bring each
+                # one's read cursors back with it. A `stopped` row is
+                # deliberately not offered: the user told her to let that
+                # session go, and the server still holding it is not a reason
+                # to pick it back up. A `lost` row IS offered, because a handle
+                # that comes back revives its row a few lines below.
+                known = {r.native_session_id: dict(r.runtime_metadata or {},
+                                                   cwd=r.working_directory)
+                         for r in self.store.sessions.list()
+                         if r.agent_id == p.id and r.status != "stopped"}
+                restored.extend(await p.rehydrate(known=known))
             except Exception:
                 log.exception("rehydrate failed for %s", p.id)
         native, answered = self._native_map()

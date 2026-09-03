@@ -186,7 +186,10 @@ class ClaudeCodeProvider(AgentProvider):
     def set_observer(self, cb: Observer | None) -> None:
         self._observer = cb
 
-    async def rehydrate(self) -> list[dict[str, Any]]:
+    async def rehydrate(self, **_ignored) -> list[dict[str, Any]]:
+        # `known` is deliberately unused: the tmux runner enumerates the panes
+        # that actually survived and reads each one's meta file, which is a
+        # stronger claim than anything Yuri's own rows could assert.
         r = self.runner("cli")
         rehydrate = getattr(r, "rehydrate", None)
         if rehydrate is None:

@@ -148,5 +148,25 @@ class AgentProvider(ABC):
     def backend_of(self, handle: str) -> str | None:
         return None
 
-    async def rehydrate(self) -> list[dict[str, Any]]:
+    async def rehydrate(self, known: dict[str, dict] | None = None) -> list[dict[str, Any]]:
+        """Re-adopt what survived a restart.
+
+        `known` is what Yuri already has a row for, per native session id:
+        `{native_session_id: {**runtime_metadata, "cwd": working_directory}}`.
+        A provider whose sessions die with the process ignores it and
+        enumerates its own survivors; a provider whose sessions are durable
+        server-side needs it to tell *hers* from sessions the user started
+        themselves, which are never adopted.
+        """
         return []
+
+    def runtime_metadata_for(self, handle: str) -> dict[str, Any]:
+        """Provider state that must survive a restart, merged onto the session
+        row on every poll.
+
+        `{}` for every provider whose state dies with the process — which is
+        all of them but OpenCode, whose read cursors are the only thing
+        standing between a restart and re-narrating history. Sync, because
+        `poll` is: this is read on the same tick.
+        """
+        return {}

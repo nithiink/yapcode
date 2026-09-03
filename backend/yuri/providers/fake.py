@@ -135,7 +135,9 @@ class FakeAgentProvider(AgentProvider):
     def set_observer(self, cb: Observer | None) -> None:
         self._observer = cb
 
-    async def rehydrate(self) -> list[dict[str, Any]]:
+    async def rehydrate(self, **_ignored) -> list[dict[str, Any]]:
+        # `known` is meaningless here: the fake's sessions live in this
+        # process, so anything it could re-adopt is already in self.sessions.
         return []
 
     async def shutdown(self) -> None:

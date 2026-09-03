@@ -184,6 +184,32 @@ def _model_ref(model: str | None) -> dict[str, str] | None:
     return {"id": provider}
 
 
+def _restored_mark(stored: Any, now: int) -> int:
+    """One high-water mark, restored across a restart.
+
+    **No stored value means start from NOW, never from zero.** A row that was
+    never polled — or one written before these marks existed — has nothing to
+    restore, and zero would re-read a whole session and re-narrate everything
+    the user already heard.
+
+    **A stored mark above what the server still holds is clamped to it.** That
+    can only mean the session was truncated or replaced and its numbering
+    restarted; honouring the higher mark would make Yuri permanently deaf to
+    the renumbered stream, because nothing would ever exceed it again.
+    Clamping is the same "start from now" rule: she skips nothing that exists
+    and re-reads nothing that was already consumed.
+
+    Anything unreadable is treated as no mark at all rather than raising — a
+    corrupt number in `runtime_metadata` must not cost the session its
+    re-adoption.
+    """
+    try:
+        mark = int(stored)
+    except (TypeError, ValueError):
+        return now
+    return now if mark < 0 else min(mark, now)
+
+
 def _seq_of(event: dict[str, Any]) -> int:
     durable = event.get("durable")
     if not isinstance(durable, dict):
@@ -800,6 +826,113 @@ class OpenCodeProvider(AgentProvider):
         client = await self._client()
         data = await client.get("/api/session")
         return list(data or [])
+
+    # --- restart ----------------------------------------------------------
+
+    async def rehydrate(self, known: dict[str, dict] | None = None) -> list[dict[str, Any]]:
+        """Re-adopt the durable sessions Yuri was actually running.
+
+        OpenCode sessions outlive her — they are the server's, not the
+        process's — so unlike an SDK session they can be picked back up. Two
+        rules govern that, and both are the point of this method:
+
+        **1. A session the server has and Yuri has no row for is left alone.**
+        `known` is what she has rows for; anything else on that server may be
+        the user's own OpenCode work, and adopting it would put her in charge
+        of something she was never asked to run — the same instinct as never
+        stopping a server she did not start. So this iterates the server's
+        list and keeps only the intersection, and a caller with nothing known
+        does not even reach the network.
+
+        **2. Both marks come back with the session, or she re-narrates.**
+        `cursor` makes events exactly-once and `msg_seen` makes completions
+        exactly-once; a handle restored with `msg_seen = 0` reports the reply
+        the user already heard as the *next* turn's completion. See
+        `_restored_mark` for what a missing or impossible mark restores to.
+
+        `pending` is deliberately not restored. OpenCode owns the pending
+        list, so the first poll re-derives any unanswered ask from the server;
+        a remembered request id could outlive the request it names.
+
+        An unreachable server logs and returns nothing rather than raising: a
+        dead OpenCode must not break Yuri's startup (design spec section 41).
+        """
+        if not known:
+            return []
+        try:
+            sessions = await self._arun(self._sessions())
+        except Exception as exc:
+            log.warning("OpenCode could not be enumerated for rehydrate: %s", exc)
+            return []
+        restored: list[dict[str, Any]] = []
+        for session in sessions:
+            if not isinstance(session, dict):
+                continue
+            handle = str(session.get("id") or "")
+            if not handle or handle not in known:
+                continue                      # RULE 1: not hers; leave it alone.
+            try:
+                restored.append(await self._arun(
+                    self._readopt(handle, known[handle] or {}, session)))
+            except OpenCodeError as exc:
+                # One unreadable session must not cost the others their marks.
+                # Narrow on purpose: OpenCodeError is what a failed read raises,
+                # and swallowing anything wider here would turn a bug in this
+                # method into a session that is quietly never re-adopted.
+                log.warning("OpenCode session %s could not be re-adopted: %s",
+                            handle[:12], exc)
+        return restored
+
+    async def _readopt(self, handle: str, meta: dict,
+                       session: dict[str, Any]) -> dict[str, Any]:
+        """Register one restored handle, and work out where to resume reading.
+
+        Both reads are full ones — `after=0` and the whole message list — and
+        both are needed even when a mark was stored, because the ceiling a
+        stored mark is clamped against is exactly what the server still holds.
+        The cost is one round trip per session Yuri owns, once, at startup.
+        """
+        client = await self._client()
+        events, messages = await _gather(self._history(client, handle, 0),
+                                         self._messages(client, handle))
+        location = session.get("location") or {}
+        # The row's cwd first: it is the path Yuri already validated against her
+        # allowed roots. The server's own answer is the fallback.
+        cwd = str(meta.get("cwd") or location.get("directory") or "")
+        model = _model_name(session.get("model")) or None
+        self._handles[handle] = _Handle(
+            cwd=cwd, model=model,
+            cursor=_restored_mark(meta.get("opencode_cursor"),
+                                  max((_seq_of(e) for e in events), default=0)),
+            msg_seen=_restored_mark(meta.get("opencode_msg_seen"), len(messages)))
+        # Runner-shaped, like list_native: SessionService reads cwd/backend off
+        # this for any handle it turns out to have no row for.
+        return {"handle": handle, "session_id": handle, "cwd": cwd,
+                "model": model or "", "mode": "", "status": "idle",
+                "cost_usd": round(float(session.get("cost") or 0.0), 4),
+                "queued": 0, "backend": self.id}
+
+    def cursor_for(self, handle: str) -> int:
+        """The highest `durable.seq` consumed for this session. KeyError for a
+        handle this provider does not hold, exactly as `poll` does."""
+        return self._get(handle).cursor
+
+    def runtime_metadata_for(self, handle: str) -> dict[str, Any]:
+        """Both marks, for `SessionService.poll` to merge onto the session row.
+
+        This is the write half of rehydration: without it the marks would live
+        only in memory, every restart would fall back to "from now", and the
+        exactly-once properties the cursor exists for would survive a poll but
+        not a reboot.
+
+        An unknown handle answers `{}` rather than raising: this is read on
+        every poll tick, and a session the provider no longer holds must not
+        turn a poll into an exception.
+        """
+        h = self._handles.get(handle)
+        if h is None:
+            return {}
+        return {"opencode_cursor": h.cursor, "opencode_msg_seen": h.msg_seen}
 
     def set_observer(self, cb: Observer | None) -> None:
         """Stored and never invoked: `supports_events=False`, because we poll
