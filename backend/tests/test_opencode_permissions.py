@@ -203,7 +203,9 @@ class Questions(_Base):
         self.p.answer(self.h, "web")
         kind, _, rid, body = self.fake.state.replies[-1]
         self.assertEqual((kind, rid), ("question", "q1"))
-        self.assertIn("web", str(body))
+        # The exact value, not `in str(body)`: that would pass for a body that
+        # merely mentions the option somewhere.
+        self.assertEqual(body["reply"], "web")
 
     async def test_a_question_answer_is_not_gated_by_the_permission_words(self):
         """"no" is a legitimate answer to "Ship it?" — running it through
