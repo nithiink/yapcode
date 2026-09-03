@@ -177,3 +177,18 @@ voice commands — have not been exercised in a live voice round-trip.
 - Task 17 startup()'s INFO banner adds a line to suite output; the validation-before-dispatch reorder in tools.py send_keys/run_slash_command is untested (an SDK session with an empty command now gets the "required" ValueError instead of the SDK soft error); start_session's `message` now names the provider ("Started Claude Code session") and `mode` comes back normalized (value-level, keys unchanged).
 - Task 18 _decide() maps ValueError->409 rather than the general ->400 (correct here — the only reachable ValueError is "already resolved", a genuine conflict — but worth a comment so nobody "fixes" it); /yuri/context's active_missions[].project name lookup is untested for a mission whose project row is gone.
 - Task 20 none outstanding.
+
+## Phase 5 (OpenCode provider)
+
+- **`NotImplementedError` is not soft at `/tools/execute`.** `main.py`'s exception
+  chain maps `YuriUnavailable` and `ValueError` to soft errors and `KeyError` to
+  404, but everything else — including `NotImplementedError` — becomes a generic
+  "the tool failed unexpectedly". So `set_mode` on an OpenCode session (which has
+  no permission modes) surfaces without its explanation, and the voice prompt's
+  AGENTS bullet is the only thing carrying it.
+  **Predates OpenCode**: `base.py`, `claude_code.py` and `fake.py` already raise
+  `NotImplementedError` for unsupported surfaces (send_keys, slash commands, and
+  resume on the SDK backend), so the same generic error already happens there.
+  Fixing it means adding one branch in `main.py`, out of scope for a provider task.
+  Symptom is mild — the model has been pre-briefed, so it degrades to correct
+  behaviour with worse wording.
