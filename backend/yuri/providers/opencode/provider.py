@@ -27,6 +27,23 @@ high-water mark (`msg_seen`): the number of message entries already reported.
 Without it the *previous* turn's finished assistant message would be found the
 instant the next turn's first event arrived and reported as that turn's reply.
 
+## Asks outrank history, and must not consume it
+
+A pending permission or question is read on every `poll` and reported ahead of
+anything in history: a blocked turn has to surface the ask, because the user
+is the only thing that can unblock it. The early return therefore leaves
+**both** marks exactly where they were, so a completion or a failure sitting
+behind the ask is *deferred*, not swallowed — the next poll after the ask
+clears reports it, exactly once, from the same unmoved marks.
+
+`answer` maps a decision onto OpenCode's reply endpoints under one rule that
+is not negotiable: **allow → `once`, deny → `reject`, and `always` is never
+sent for any phrasing.** `decide_permission` answers a single question;
+`always` would turn one spoken "yes" into a standing grant the user never
+agreed to, and granting standing permission is a mode change OpenCode does not
+even expose. Anything `decide_permission` cannot read cleanly raises a
+`ValueError` and reaches OpenCode not at all.
+
 ## The sync/async bridge — the one real design choice
 
 `send_message`, `answer`, `poll`, `list_native`, `run_slash` and `backend_of`
@@ -80,6 +97,7 @@ from typing import Any, Coroutine
 
 from ..base import (AgentCapabilities, AgentHealth, AgentProvider, Observer,
                     ProjectContext, SessionOptions)
+from ..consent import decide_permission
 from .client import OpenCodeClient, OpenCodeError
 from .server import OpenCodeServer
 
@@ -89,10 +107,32 @@ HEALTH_TTL_S = 30.0          # same shape as ClaudeCodeProvider.health()
 CALL_TIMEOUT_S = 60.0        # a bridged call is one HTTP round trip; this is the backstop
 TEARDOWN_TIMEOUT_S = 5.0
 MAX_ASSISTANT_TEXT = 2000    # matches the Claude path's cap (sessions.py, claude_code.py)
+MAX_PROMPT_TEXT = 2000       # an ask is spoken and stored as Approval.description
+
+# OpenCode's two ask endpoints. The values are the URL segment AND the kind
+# recorded in the reply, so one word does both jobs.
+PERMISSION, QUESTION = "permission", "question"
+
+# PermissionV2Reply is `once | always | reject` (design spec section 2). Only
+# two of the three are reachable from here, and that is the point: see
+# `_permission_reply` and design spec section 7.
+REPLY_ONCE, REPLY_REJECT = "once", "reject"
 
 # The one event type the live probe actually observed for a failure. Everything
 # else is deliberately unmapped: see the module docstring and design spec 2.1.
 FAILED_STEP = "session.next.step.failed"
+
+
+@dataclass(frozen=True)
+class _Pending:
+    """The ask `poll` last surfaced, so `answer` knows where to reply.
+
+    Deliberately NOT durable: OpenCode owns the pending list, so after a
+    restart the first `poll` re-derives this from the server. Persisting it
+    would let a remembered id outlive the request it names.
+    """
+    kind: str                   # PERMISSION | QUESTION
+    request_id: str
 
 
 @dataclass
@@ -108,6 +148,7 @@ class _Handle:
     cursor: int = 0             # highest durable.seq consumed from /history
     in_flight: bool = False     # a turn we started and have not reported
     msg_seen: int = 0           # /message entries already reported
+    pending: _Pending | None = None   # the ask poll surfaced; answer replies to it
 
 
 def _server_url(server: OpenCodeServer) -> str:
@@ -182,6 +223,105 @@ def _text_of(message: dict[str, Any]) -> str:
 
 def _assistant_text(messages: list[dict[str, Any]]) -> str:
     return "".join(_text_of(m) for m in messages if m.get("type") == "assistant")
+
+
+def _first_request(requests: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The oldest pending request that actually has an id.
+
+    An entry without an id could not be replied to, and surfacing it would ask
+    the user to approve something Yuri can never forward an answer for.
+    """
+    for request in requests:
+        if isinstance(request, dict) and str(request.get("id") or ""):
+            return request
+    return None
+
+
+def _permission_prompt(request: dict[str, Any]) -> dict[str, Any]:
+    """OpenCode's pending permission → the `Prompt` shape the domain speaks.
+
+    `tool_name`/`tool_input` are not decoration: `ApprovalService.record_request`
+    feeds them to `risk_for`, which is what makes an OpenCode approval carry
+    the same "that's a destructive action" labelling as a Claude one.
+    """
+    tool = str(request.get("tool") or "")
+    metadata = request.get("metadata")
+    title = str(request.get("title") or "").strip()
+    return {
+        "kind": PERMISSION,
+        # Narration renders "needs permission to {text}" and drops the line
+        # entirely when the text is empty, so a titleless request still has to
+        # say something speakable — the same fallback the Claude path's
+        # _summarize_tool ends on.
+        "text": (title or f"use the {tool or 'agent'} tool")[:MAX_PROMPT_TEXT],
+        "tool_name": tool,
+        # Only a mapping: risk_for indexes it, and json.dumps stores it.
+        "tool_input": metadata if isinstance(metadata, dict) else {},
+        "options": ["allow", "deny"],
+        "request_id": str(request.get("id")),
+        "multi_select": False,
+    }
+
+
+def _question_prompt(request: dict[str, Any]) -> dict[str, Any]:
+    """OpenCode's pending question → `needs_choice`.
+
+    No tool and no multi-select: OpenCode's question carries `{id, text,
+    options}` and nothing that says "pick several" (design spec section 2), so
+    claiming multi_select would be inventing a capability.
+    """
+    text = str(request.get("text") or "").strip()
+    return {
+        "kind": "choice",
+        "text": (text or "OpenCode has a question")[:MAX_PROMPT_TEXT],
+        "tool_name": "",
+        "tool_input": {},
+        "options": [str(o) for o in (request.get("options") or [])],
+        "request_id": str(request.get("id")),
+        "multi_select": False,
+    }
+
+
+def _permission_reply(choice: str) -> str:
+    """allow → "once", deny → "reject". **Never "always".**
+
+    OpenCode's PermissionV2Reply also accepts `always`, and nothing here may
+    reach for it: `decide_permission` resolves the answer to ONE question, so
+    upgrading an enthusiastic "yes always" into a standing grant would hand
+    out a permission the user was never asked for — a mode change made on
+    their behalf, and one OpenCode gives no way to revoke by voice.
+
+    Ambiguity raises rather than guessing, so nothing is sent at all and
+    tools.py's ValueError path re-asks the user.
+    """
+    decision = decide_permission(choice)
+    if decision == "allow":
+        return REPLY_ONCE
+    if decision == "deny":
+        return REPLY_REJECT
+    raise ValueError(
+        "I couldn't tell if that means allow or deny — please say allow or deny.")
+
+
+def _question_reply(choice: str, options: list[str]) -> str:
+    """The offered option the user picked, or their own words.
+
+    Matched case-insensitively so a spoken "mobile" becomes the "Mobile"
+    OpenCode offered. `decide_permission` must never gate this: "no" is a
+    legitimate answer to "Ship it?", and running an answer through a
+    permission gate would turn it into a refusal to answer. Free text falls
+    through unchanged, exactly as the Claude path lets the user answer a
+    question in their own words.
+    """
+    text = (choice or "").strip()
+    if not text:
+        # Nothing to forward. A ValueError so the model re-asks, rather than
+        # sending an empty answer OpenCode would have to interpret.
+        raise ValueError("That answer was empty — please say which option you want.")
+    for option in options:
+        if str(option).strip().lower() == text.lower():
+            return str(option)
+    return text
 
 
 async def _gather(*coros: Coroutine) -> list[Any]:
@@ -323,6 +463,12 @@ class OpenCodeProvider(AgentProvider):
         data = await client.get(f"/api/session/{handle}/message")
         return [m for m in (data or []) if isinstance(m, dict)]
 
+    async def _asks(self, client: OpenCodeClient, handle: str,
+                    kind: str) -> list[dict[str, Any]]:
+        """The session's pending permissions or questions, oldest first."""
+        data = await client.get(f"/api/session/{handle}/{kind}")
+        return [r for r in (data or []) if isinstance(r, dict)]
+
     # --- contract ---------------------------------------------------------
 
     def capabilities(self) -> AgentCapabilities:
@@ -412,19 +558,59 @@ class OpenCodeProvider(AgentProvider):
         return data if isinstance(data, dict) else {}
 
     def answer(self, handle: str, choice: str) -> None:
-        """Reply to a pending permission or question.
+        """Reply to the ask `poll` last surfaced.
 
-        `poll` surfaces no pending requests yet — it returns only
-        working/idle/completed/error — so by construction there is nothing to
-        answer. A ValueError, not a NotImplementedError: OpenCode does have
-        the reply endpoints, and tools.py already turns a ValueError into a
-        soft error the voice model recovers from by re-asking. Task 5 (design
-        spec section 7) adds the pending tracking and the allow→"once",
-        deny→"reject" mapping above this.
+        Every refusal here is a `ValueError`, which tools.py already turns
+        into a soft error the voice model recovers from by re-asking — the
+        right shape for "I could not tell what you meant" and for "that
+        request is gone", neither of which is a crash.
         """
-        self._get(handle)
-        raise ValueError(
-            "OpenCode has no pending question or permission for this session to answer.")
+        h = self._get(handle)
+        pending = h.pending
+        if pending is None:
+            # Fails closed on purpose. There may well be a request pending on
+            # the server that this provider has not surfaced yet (a poll away,
+            # or lost to a restart); answering it anyway would apply a spoken
+            # "yes" to something the user was never actually asked about.
+            raise ValueError(
+                "OpenCode has no pending question or permission for this session to answer.")
+        self._run(self._answer(handle, h, pending, choice))
+
+    async def _answer(self, handle: str, h: _Handle, pending: _Pending,
+                      choice: str) -> None:
+        client = await self._client()
+        # Re-read the pending list first: the remembered id can die between
+        # poll and answer (answered in OpenCode's own UI, expired, or the
+        # session moved on). OpenCode's behaviour for a reply to a dead id is
+        # not something the live probe pinned down, and the two plausible ones
+        # are both bad — a 404 that surfaces as a hard OpenCodeError, or a
+        # cheerful 200 that reports success for an approval nobody applied.
+        # One extra round trip, once per approval, buys a soft re-ask instead.
+        live = await self._asks(client, handle, pending.kind)
+        request = next((r for r in live
+                        if str(r.get("id") or "") == pending.request_id), None)
+        if request is None:
+            h.pending = None
+            raise ValueError(
+                f"That {pending.kind} is no longer waiting on an answer — "
+                "it was already handled or it expired.")
+
+        if pending.kind == PERMISSION:
+            # THE RULE (design spec section 7): allow -> "once", deny ->
+            # "reject", never "always". Raises on anything ambiguous, before
+            # any request is sent.
+            body = {"reply": _permission_reply(choice)}
+        else:
+            options = [str(o) for o in (request.get("options") or [])]
+            body = {"reply": _question_reply(choice, options)}
+
+        await client.post(
+            f"/api/session/{handle}/{pending.kind}/{pending.request_id}/reply", body)
+        h.pending = None
+        # Answered means the agent is moving again, so the next poll reports
+        # "working" rather than "idle" — and any completion that was deferred
+        # behind the ask is read on that same poll, because neither mark moved.
+        h.in_flight = True
 
     def poll(self, handle: str) -> dict[str, Any]:
         """Advance the cursor and map what arrived.
@@ -444,15 +630,28 @@ class OpenCodeProvider(AgentProvider):
 
     async def _poll(self, handle: str, h: _Handle) -> dict[str, Any]:
         client = await self._client()
-        # Both reads at once: poll must cost one round trip, not two. Messages
-        # are only worth fetching while a turn is in flight — that gate is also
-        # what stops a rehydrated session's old replies being read as new ones.
+        # Every read at once: poll runs on Yuri's own 1.5s tick, so the two
+        # ask endpoints must cost latency, not round trips. Messages are only
+        # worth fetching while a turn is in flight — that gate is also what
+        # stops a rehydrated session's old replies being read as new ones.
+        reads: list[Coroutine] = [self._asks(client, handle, PERMISSION),
+                                  self._asks(client, handle, QUESTION),
+                                  self._history(client, handle, h.cursor)]
         if h.in_flight:
-            events, messages = await _gather(self._history(client, handle, h.cursor),
-                                             self._messages(client, handle))
-        else:
-            events = await self._history(client, handle, h.cursor)
-            messages = []
+            reads.append(self._messages(client, handle))
+        permissions, questions, events, *rest = await _gather(*reads)
+        messages = rest[0] if rest else []
+
+        out: dict[str, Any] = {"session_id": handle}
+        ask = self._ask(h, permissions, questions)
+        if ask is not None:
+            # Deliberately BEFORE the cursor advances and without touching
+            # msg_seen: an ask outranks history but must not consume it. Both
+            # marks are high-water marks over state the server still holds, so
+            # a completion or a failure waiting behind this ask is deferred to
+            # the poll after it clears — reported once, from the same marks —
+            # rather than swallowed by an early return.
+            return {**out, **ask}
 
         # Only past what actually came back. This one line is the exactly-once
         # property; an unmapped type is carried past by it, not by a branch.
@@ -460,7 +659,6 @@ class OpenCodeProvider(AgentProvider):
         if highest > h.cursor:
             h.cursor = highest
 
-        out: dict[str, Any] = {"session_id": handle}
         failure = _failure_in(events)
         if failure is not None:
             h.in_flight = False
@@ -477,6 +675,33 @@ class OpenCodeProvider(AgentProvider):
                     "assistant_text": _assistant_text(fresh)[:MAX_ASSISTANT_TEXT]}
 
         return {**out, "status": "working" if h.in_flight else "idle"}
+
+    @staticmethod
+    def _ask(h: _Handle, permissions: list[dict[str, Any]],
+             questions: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """The pending request to report, and remember for `answer`.
+
+        Permissions outrank questions when both are waiting. Pinned in that
+        order because a permission gates a side effect the agent is blocked
+        on, carries the risk label, and holds the domain's one-pending-
+        approval slot; a question only shapes what happens next, and it is
+        still there — surfaced by the very next poll — once the permission is
+        answered.
+        """
+        request = _first_request(permissions)
+        if request is not None:
+            prompt = _permission_prompt(request)
+            h.pending = _Pending(PERMISSION, prompt["request_id"])
+            return {"status": "needs_permission", "prompt": prompt}
+        request = _first_request(questions)
+        if request is not None:
+            prompt = _question_prompt(request)
+            h.pending = _Pending(QUESTION, prompt["request_id"])
+            return {"status": "needs_choice", "prompt": prompt}
+        # Nothing pending server-side: forget whatever we were holding. A
+        # request answered in OpenCode's own UI must not stay answerable here.
+        h.pending = None
+        return None
 
     async def interrupt(self, handle: str) -> None:
         h = self._get(handle)
