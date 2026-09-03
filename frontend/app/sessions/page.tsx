@@ -15,19 +15,18 @@ import { ViewError } from "@/components/ViewError";
 import LiveTerminal from "@/components/LiveTerminal";
 import { Icon } from "@/components/ui/Icon";
 import { CopyBtn } from "@/components/ui/CopyBtn";
-import { tmuxAttachCommand, type Sess } from "@/lib/sessions";
-import { yget, ypost, ApiError } from "@/lib/api";
+import { sessionLabel } from "@/lib/sessions";
+import { ypost, ApiError } from "@/lib/api";
 
 export default function Page() {
   // sessions is kept fresh by the provider's own 2.5s poll, which runs
   // regardless of which view is mounted (see VoiceProvider.tsx) — a *later*
-  // poll failure just leaves the last-known list on screen. But that poll
-  // (like refreshApprovals/refreshMissions) swallows its own fetch failures,
-  // so an empty `sessions` on first mount can't be told apart from "the
-  // backend is unreachable." This view can't accept that: it probes the same
-  // endpoint itself once, purely to observe success/failure, before trusting
-  // an empty list — the same fetch-then-adopt shape app/page.tsx uses.
-  const { sessions, callTool, refresh, modeBusy, switchMode, commitRename, pollSession } = useYuri();
+  // poll failure just leaves the last-known list on screen. refresh("sessions")
+  // itself now rejects on a failed fetch (VoiceProvider's fetchSessions), so
+  // this view can await it directly instead of probing the endpoint first
+  // purely to observe success/failure.
+  const { sessions, callTool, refresh, modeBusy, switchMode, commitRename, pollSession, clearPendingFor } =
+    useYuri();
 
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -35,9 +34,8 @@ export default function Page() {
 
   const load = useCallback(async () => {
     try {
-      await yget<{ sessions: Sess[] }>("sessions");
-      setLoadError(null);
       await refresh("sessions");
+      setLoadError(null);
     } catch (e) {
       setLoadError(e);
     }
@@ -70,6 +68,28 @@ export default function Page() {
   const [liveSession, setLiveSession] = useState<string | null>(null);
   const [liveFullscreen, setLiveFullscreen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+
+  // The tmux co-drive command, fetched from the backend on demand (never
+  // guessed client-side — see lib/sessions.ts's removed tmuxAttachCommand).
+  // Keyed by handle; absent = not fetched yet, null = fetched and this
+  // backend has no live pane, string = the real attach command.
+  const [handoffAttach, setHandoffAttach] = useState<Record<string, string | null>>({});
+  const [handoffLoading, setHandoffLoading] = useState<Record<string, boolean>>({});
+  const fetchHandoff = useCallback(
+    async (handle: string) => {
+      if (handle in handoffAttach || handoffLoading[handle]) return;
+      setHandoffLoading((h) => ({ ...h, [handle]: true }));
+      try {
+        const res: any = await callTool("get_handoff", { session_id: handle });
+        setHandoffAttach((h) => ({ ...h, [handle]: res?.attach_command ?? null }));
+      } catch {
+        setHandoffAttach((h) => ({ ...h, [handle]: null }));
+      } finally {
+        setHandoffLoading((h) => ({ ...h, [handle]: false }));
+      }
+    },
+    [callTool, handoffAttach, handoffLoading],
+  );
 
   // Inline session rename (voice "call this one X" also works).
   const [editing, setEditing] = useState<string | null>(null);
@@ -148,6 +168,11 @@ export default function Page() {
     setError(null);
     try {
       await ypost(`/sessions/${handle}/interrupt`);
+      // Mirrors onEvent's handling of a voice-triggered interrupt_session:
+      // an interrupt dismisses any pending permission server-side too, so
+      // drop the now-stale card rather than leaving it pointed at a turn
+      // that no longer exists.
+      clearPendingFor(handle);
     } catch (e) {
       setError(
         e instanceof ApiError ? `Could not interrupt that session: ${e.message}` : "Could not interrupt that session.",
@@ -163,6 +188,9 @@ export default function Page() {
     setError(null);
     try {
       await callTool("close_session", { session_id: handle });
+      // Same reasoning as interrupt above — a closed session can't answer a
+      // prompt that was pending on it.
+      clearPendingFor(handle);
       if (liveSession === handle) {
         setLiveSession(null);
         setLiveFullscreen(false);
@@ -218,6 +246,9 @@ export default function Page() {
                     setLiveFullscreen(false);
                   }}
                   onExpandTranscript={() => setFullscreen(true)}
+                  attachCommand={handoffAttach[s.handle]}
+                  attachLoading={!!handoffLoading[s.handle]}
+                  onOpenHandoff={() => void fetchHandoff(s.handle)}
                 />
                 <form
                   className="sess-msgbar"
@@ -283,9 +314,15 @@ export default function Page() {
         liveSession &&
         (() => {
           const liveSess = sessions.find((x) => x.handle === liveSession);
-          const liveTmuxCmd = liveSess ? tmuxAttachCommand(liveSess) : null;
-          const liveName =
-            liveSess?.name || liveSess?.cwd.split("/").pop() || liveSess?.handle.slice(0, 8) || "Live Claude CLI";
+          // Only offered when this session actually has a live pane —
+          // liveSession can only be set via SessionCard's Watch-live button,
+          // which itself only renders when can_watch is true, but a session
+          // can go stale (close, mode/backend change) while its modal is
+          // open, so re-check rather than assume.
+          const canAttach = !!liveSess?.can_watch;
+          const attachCmd = handoffAttach[liveSession];
+          const attachLoading = !!handoffLoading[liveSession];
+          const liveName = liveSess ? sessionLabel(liveSess) : "Live Claude CLI";
           return (
             <div
               className="tx-overlay"
@@ -298,12 +335,16 @@ export default function Page() {
                 <div className="tx-modal-head">
                   <span>{liveName}</span>
                   <div className="tx-head-actions">
-                    {liveTmuxCmd && (
+                    {canAttach && (
                       <button
                         className="attachbtn"
                         title="Attach to this session in your own terminal"
                         aria-expanded={attachOpen}
-                        onClick={() => setAttachOpen((v) => !v)}
+                        onClick={() => {
+                          const next = !attachOpen;
+                          setAttachOpen(next);
+                          if (next) void fetchHandoff(liveSession);
+                        }}
                       >
                         <Icon name="keyboard" size={16} strokeWidth={1.75} />
                         Attach in your terminal
@@ -320,17 +361,21 @@ export default function Page() {
                     </button>
                   </div>
                 </div>
-                {attachOpen && liveTmuxCmd && (
+                {attachOpen && canAttach && (
                   <div className="attach-pop">
                     <div className="ap-title">Open in your terminal</div>
                     <div className="ap-why">
                       Attach to this session&apos;s tmux in your own terminal for a full native session — keyboard
                       shortcuts, copy-paste, and scrollback.
                     </div>
-                    <div className="cmdfield">
-                      <code>{liveTmuxCmd}</code>
-                      <CopyBtn text={liveTmuxCmd} />
-                    </div>
+                    {attachLoading ? (
+                      <div className="cmdfield">Asking the backend for its pane…</div>
+                    ) : attachCmd ? (
+                      <div className="cmdfield">
+                        <code>{attachCmd}</code>
+                        <CopyBtn text={attachCmd} />
+                      </div>
+                    ) : null /* fetched and no live pane — never a guessed command */}
                   </div>
                 )}
                 <div className="tx-modal-body term">

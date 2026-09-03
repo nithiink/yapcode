@@ -3,7 +3,7 @@
 import { Icon } from "./ui/Icon";
 import { CopyBtn } from "./ui/CopyBtn";
 import LiveTerminal from "./LiveTerminal";
-import { sessionStatus, tmuxAttachCommand, MODES, type Sess } from "@/lib/sessions";
+import { sessionStatus, sessionLabel, MODES, type Sess } from "@/lib/sessions";
 import { abbrevHome } from "@/lib/format";
 
 // One event in a Claude session's own transcript (distinct from the voice
@@ -67,6 +67,9 @@ export function SessionCard({
   onExpandLive,
   onMinimizeLive,
   onExpandTranscript,
+  attachCommand,
+  attachLoading,
+  onOpenHandoff,
 }: {
   s: Sess;
   open: boolean; // transcript expanded
@@ -86,10 +89,18 @@ export function SessionCard({
   onExpandLive: () => void;
   onMinimizeLive: () => void;
   onExpandTranscript: () => void;
+  // The tmux co-drive command, fetched from the backend's own get_handoff
+  // (never fabricated client-side — see lib/sessions.ts's removed
+  // tmuxAttachCommand). undefined: not fetched yet (the handoff panel hasn't
+  // been opened); null: fetched, and this backend genuinely has no pane.
+  attachCommand?: string | null;
+  attachLoading?: boolean;
+  // Fetch attachCommand lazily — called when the handoff <details> is opened,
+  // not for every card on every render.
+  onOpenHandoff?: () => void;
 }) {
   // From the provider — only it knows how to reopen its own session.
   const cmd = s.resume_command || null;
-  const tmuxCmd = tmuxAttachCommand(s);
   const st = sessionStatus(s);
   const queuedTurns = (s.queue || []).filter((q) => q.state === "queued");
 
@@ -110,7 +121,7 @@ export function SessionCard({
           />
         ) : (
           <button className="name namebtn" title="Rename session" onClick={() => onStartRename()}>
-            {s.name || s.cwd.split("/").pop()}
+            {sessionLabel(s)}
             <span className="penicon" aria-hidden>
               <Icon name="edit" size={15} strokeWidth={1.7} />
             </span>
@@ -215,19 +226,28 @@ export function SessionCard({
         )}
       </div>
 
-      {(tmuxCmd || cmd) && (
-        <details className="handoff">
+      {(s.can_watch || cmd) && (
+        <details
+          className="handoff"
+          onToggle={(e) => {
+            if ((e.target as HTMLDetailsElement).open) onOpenHandoff?.();
+          }}
+        >
           <summary>
             <span className="chev"><Icon name="chevron-right" size={10} /></span> Continue in your terminal
           </summary>
-          {tmuxCmd && (
+          {s.can_watch && (
             <div className="hopt">
               <div className="htitle">Take the keyboard</div>
               <div className="hwhy">Jump into this live session in your own terminal.</div>
-              <div className="hcmd">
-                <code>{tmuxCmd}</code>
-                <CopyBtn text={tmuxCmd} />
-              </div>
+              {attachLoading ? (
+                <div className="hcmd">Asking the backend for its pane…</div>
+              ) : attachCommand ? (
+                <div className="hcmd">
+                  <code>{attachCommand}</code>
+                  <CopyBtn text={attachCommand} />
+                </div>
+              ) : null /* fetched and no live pane, or not opened yet — never a guessed command */}
             </div>
           )}
           {cmd && (
