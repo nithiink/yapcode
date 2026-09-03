@@ -64,15 +64,18 @@ export const BACKEND_LABEL: Record<ClaudeBackend, string> = {
   sdk: "SDK",
 };
 
-// The tmux attach command for a live co-drive of this session's own pane, or
-// null when this session has none. Only Claude Code's CLI backend runs
-// inside a tmux pane (named vc_<handle prefix> — see backend/tmux_runner.py);
-// its SDK backend and OpenCode don't. Phase 5's actual bug was the frontend
-// constructing a PROVIDER's command itself (that's why resume_command now
-// comes from the backend instead of being guessed here) — this one is still
-// computed client-side, so it stays in exactly one place rather than the
-// three that used to each hardcode `backend === "cli"` next to it, which
-// would otherwise drift the moment the pane-naming convention changes.
-export function tmuxAttachCommand(s: Sess): string | null {
-  return s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
+// The best available label for a session, so the same one never shows five
+// different ways across Dashboard/Sessions/Terminal/Mission detail: an
+// explicit name if the user (or Yuri) set one, else the session's own folder
+// (never the parent path, just its basename), else a short handle prefix —
+// never the raw handle/session id in full. Structurally typed rather than
+// `Sess`-only so callers holding a differently-shaped session record (e.g.
+// MissionDetail's AgentSession, keyed by `id`/`native_session_id`/
+// `working_directory`) can adapt with an object literal instead of this file
+// growing a second, near-identical helper.
+export function sessionLabel(s: { name?: string | null; cwd: string; handle: string }): string {
+  if (s.name) return s.name;
+  const base = s.cwd.split("/").filter(Boolean).pop();
+  if (base) return base;
+  return s.handle.slice(0, 8);
 }

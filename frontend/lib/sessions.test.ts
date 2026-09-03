@@ -1,7 +1,7 @@
 // Run: npm test (node --test)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MODES, MODE_LABEL, sessionStatus, tmuxAttachCommand, type Sess } from "./sessions.ts";
+import { MODES, MODE_LABEL, sessionStatus, sessionLabel, type Sess } from "./sessions.ts";
 
 const base: Sess = {
   handle: "h1", session_id: "s1", cwd: "/tmp/proj", model: "opus",
@@ -32,15 +32,28 @@ test("needs_permission is surfaced as its own lead", () => {
   assert.notEqual(st.lead, sessionStatus(base).lead);
 });
 
-test("a CLI-backend session gets a tmux attach command", () => {
-  const cmd = tmuxAttachCommand({ ...base, backend: "cli" });
-  assert.equal(cmd, `tmux attach -t vc_${base.handle.slice(0, 8)}`);
+test("sessionLabel prefers an explicit name", () => {
+  assert.equal(sessionLabel({ ...base, name: "Billing fix" }), "Billing fix");
 });
 
-test("an SDK-backend session has no tmux pane to attach to", () => {
-  assert.equal(tmuxAttachCommand({ ...base, backend: "sdk" }), null);
+test("sessionLabel falls back to the folder basename when unnamed", () => {
+  assert.equal(sessionLabel({ ...base, name: null, cwd: "/Users/ankur/code/yuri-code" }), "yuri-code");
 });
 
-test("a session with no backend field has no tmux command either", () => {
-  assert.equal(tmuxAttachCommand(base), null);
+test("sessionLabel ignores a trailing slash on the folder", () => {
+  assert.equal(sessionLabel({ ...base, name: null, cwd: "/Users/ankur/code/yuri-code/" }), "yuri-code");
+});
+
+test("sessionLabel never falls back to the raw handle in full", () => {
+  const label = sessionLabel({ handle: "3f9c7a2b-1234-5678-9abc-def012345678", cwd: "", name: null });
+  assert.equal(label, "3f9c7a2b");
+  assert.ok(label.length < 36);
+});
+
+test("sessionLabel adapts a differently-shaped session record via an object literal", () => {
+  // MissionDetail's AgentSession has no `cwd`/`handle` — this is the adapter
+  // shape every call site not already holding a `Sess` should use.
+  const agentSession = { name: null as string | null, working_directory: "/tmp/proj", native_session_id: "abcdef1234567890" };
+  const label = sessionLabel({ name: agentSession.name, cwd: agentSession.working_directory, handle: agentSession.native_session_id });
+  assert.equal(label, "proj");
 });
