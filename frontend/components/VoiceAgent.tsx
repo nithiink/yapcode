@@ -127,6 +127,19 @@ export default function VoiceAgent() {
   useEffect(() => () => {
     if (txPollRef.current) clearInterval(txPollRef.current);
   }, []);
+  // Disconnecting used to stop this poll (the old disconnect() cleared
+  // txPollRef directly). Now that the connection lives in the provider and
+  // the transcript poll lives here, this effect is what preserves that:
+  // without it an expanded transcript keeps polling read_transcript forever
+  // after Disconnect. The old code did NOT collapse the open card or clear
+  // its transcript on disconnect -- only the polling stopped -- so this
+  // matches that exactly rather than also resetting openSession/transcript.
+  useEffect(() => {
+    if (!connected && txPollRef.current) {
+      clearInterval(txPollRef.current);
+      txPollRef.current = null;
+    }
+  }, [connected]);
 
   const totalCost = sessions.reduce((s, x) => s + (x.cost_usd || 0), 0);
 

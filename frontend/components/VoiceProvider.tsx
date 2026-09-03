@@ -15,6 +15,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -1121,52 +1122,112 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     refreshSessions();
   };
 
-  const value: YuriContext = {
-    connected,
-    muted,
-    vstate,
-    provider,
-    model,
-    connect,
-    disconnect,
-    toggleMute,
-    setProvider,
-    setModel,
+  // Memoised so a consumer that reads only a slice of this (e.g. a future
+  // nav badge reading just approvals.length) doesn't re-render on every
+  // /debug/stream frame, transcript delta or 2s session poll -- all of which
+  // otherwise re-render this provider and, without this, would hand out a
+  // brand-new `value` object every single time regardless.
+  //
+  // The dependency list is deliberately complete rather than trimmed for
+  // convenience: it includes every non-setState-setter, non-ref identifier
+  // the object below actually reads, INCLUDING several action functions
+  // (connect, disconnect, toggleMute, setNarrationMode, switchMode,
+  // commitRename, answerPrompt, clearPendingFor, pollSession) that are plain
+  // closures redefined on every render rather than useCallback-wrapped. That
+  // means this memo does not yet stop those renders from producing a new
+  // `value` -- being honest about the dependency list surfaces that
+  // limitation instead of hiding it by omitting them. Stabilising those
+  // functions (and the cost-log/audio-analyser machinery some of them close
+  // over) via useCallback, or extracting them into their own hooks, would be
+  // the natural follow-up but is a larger, separate change.
+  //
+  // Omitted on purpose, both provably stable for the component's lifetime:
+  // setProvider/setBackend (raw useState setters -- a React guarantee) and
+  // orbRef/glowRef (ref objects never change identity).
+  const value: YuriContext = useMemo(
+    () => ({
+      connected,
+      muted,
+      vstate,
+      provider,
+      model,
+      connect,
+      disconnect,
+      toggleMute,
+      setProvider,
+      setModel,
 
-    timeline,
-    pending,
+      timeline,
+      pending,
 
-    sessions,
-    approvals,
-    missions,
-    agents,
-    narrationMode,
-    setNarrationMode,
+      sessions,
+      approvals,
+      missions,
+      agents,
+      narrationMode,
+      setNarrationMode,
 
-    debugEvents,
-    onYuriEvent,
+      debugEvents,
+      onYuriEvent,
 
-    callTool,
-    refresh,
+      callTool,
+      refresh,
 
-    backend,
-    setBackend,
-    azureModels,
-    modelOptions,
-    status,
-    modelLabel,
-    voiceUsage,
-    narrationBusy,
-    orbRef,
-    glowRef,
-    modeBusy,
-    switchMode,
-    commitRename,
-    answerPrompt,
-    clearPendingFor,
-    pollSession,
-    clearDebugEvents: () => setDebugEvents([]),
-  };
+      backend,
+      setBackend,
+      azureModels,
+      modelOptions,
+      status,
+      modelLabel,
+      voiceUsage,
+      narrationBusy,
+      orbRef,
+      glowRef,
+      modeBusy,
+      switchMode,
+      commitRename,
+      answerPrompt,
+      clearPendingFor,
+      pollSession,
+      clearDebugEvents: () => setDebugEvents([]),
+    }),
+    [
+      connected,
+      muted,
+      vstate,
+      provider,
+      model,
+      connect,
+      disconnect,
+      toggleMute,
+      setModel,
+      timeline,
+      pending,
+      sessions,
+      approvals,
+      missions,
+      agents,
+      narrationMode,
+      setNarrationMode,
+      debugEvents,
+      onYuriEvent,
+      callTool,
+      refresh,
+      backend,
+      azureModels,
+      modelOptions,
+      status,
+      modelLabel,
+      voiceUsage,
+      narrationBusy,
+      modeBusy,
+      switchMode,
+      commitRename,
+      answerPrompt,
+      clearPendingFor,
+      pollSession,
+    ],
+  );
 
   return (
     <YuriCtx.Provider value={value}>
