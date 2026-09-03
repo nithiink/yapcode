@@ -87,6 +87,30 @@ export type Agent = {
   active_sessions: number;
 };
 
+// Mirrors AgentSession (backend/yuri/domain/session.py) exactly — the raw
+// store record, asdict()'d. NOT the same shape as lib/sessions.ts's `Sess`:
+// that's SessionService.list()'s own enriched projection for the Sessions
+// view (keyed by `handle`, carrying the live work-pipeline). MissionDetail's
+// `sessions` come from the store directly (MissionService.detail(), services/
+// missions.py:166), so `id` is the key here, not `handle`, and there is no
+// `running`/`queue`/`agent_name` — those are SessionService's own additions.
+export type AgentSession = {
+  id: string;
+  project_id: string;
+  agent_id: string;
+  native_session_id: string;
+  backend: string;
+  working_directory: string;
+  mission_id: string | null;
+  status: string; // starting | running | needs_permission | needs_choice | idle | stopped | lost
+  name: string | null;
+  mode: string;
+  model: string | null;
+  started_at: string;
+  last_activity_at: string;
+  runtime_metadata: Record<string, unknown>;
+};
+
 export type MissionStep = {
   id: string;
   mission_id: string;

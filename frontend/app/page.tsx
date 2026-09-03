@@ -15,22 +15,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { bands } from "@/lib/dashboard";
+import { canCancel, canPause, canResume } from "@/lib/missions";
 import { sessionStatus } from "@/lib/sessions";
 import { yget, ypost, ApiError } from "@/lib/api";
 import type { Approval, Mission } from "@/lib/yuriTypes";
-
-// What each blocked mission status allows, per the backend's transition table
-// (yuri/domain/mission.py TRANSITIONS): "waiting_for_approval" can still move
-// to running/paused/cancelled, but "failed" is terminal — nothing to offer.
-// Kept local rather than in a shared lib/missions.ts, which Task 8 owns.
-const MISSION_CONTROLS: Record<string, { action: "pause" | "resume" | "cancel"; label: string; danger?: boolean }[]> = {
-  waiting_for_approval: [
-    { action: "resume", label: "Resume" },
-    { action: "pause", label: "Pause" },
-    { action: "cancel", label: "Cancel", danger: true },
-  ],
-  failed: [],
-};
 
 export default function Page() {
   const { approvals, missions, sessions, refresh, onYuriEvent } = useYuri();
@@ -152,18 +140,35 @@ export default function Page() {
                             <span className="dash-row-title">{item.mission.title}</span>
                             <span className="dash-row-meta">{item.mission.status.replace(/_/g, " ")}</span>
                           </div>
-                          {MISSION_CONTROLS[item.mission.status]?.length > 0 && (
+                          {(canResume(item.mission) || canPause(item.mission) || canCancel(item.mission)) && (
                             <div className="dash-row-actions">
-                              {MISSION_CONTROLS[item.mission.status].map((c) => (
+                              {canResume(item.mission) && (
                                 <button
-                                  key={c.action}
-                                  className={`dash-btn${c.danger ? " danger" : ""}`}
+                                  className="dash-btn"
                                   disabled={busyMission === item.mission.id}
-                                  onClick={() => void missionAction(item.mission.id, c.action)}
+                                  onClick={() => void missionAction(item.mission.id, "resume")}
                                 >
-                                  {c.label}
+                                  Resume
                                 </button>
-                              ))}
+                              )}
+                              {canPause(item.mission) && (
+                                <button
+                                  className="dash-btn"
+                                  disabled={busyMission === item.mission.id}
+                                  onClick={() => void missionAction(item.mission.id, "pause")}
+                                >
+                                  Pause
+                                </button>
+                              )}
+                              {canCancel(item.mission) && (
+                                <button
+                                  className="dash-btn danger"
+                                  disabled={busyMission === item.mission.id}
+                                  onClick={() => void missionAction(item.mission.id, "cancel")}
+                                >
+                                  Cancel
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>

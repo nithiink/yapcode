@@ -650,6 +650,40 @@ details.handoff:hover > summary { color: var(--mut); }
 .sess-msgbox::placeholder { color: var(--dim); }
 .sess-msgbox:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ---- Missions list + detail ---- */
+/* Rows reuse .dash-row/.dash-list/.dash-btn (Dashboard's blocked-band
+   styling) rather than duplicating them — same visual language for the same
+   controls, one place to restyle a mission row either view renders. */
+.miss-view { min-width: 0; }
+.miss-row { cursor: pointer; }
+.miss-row:hover { background: var(--panel2); }
+a.miss-row { text-decoration: none; color: inherit; }
+
+.misschip { flex: none; font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); text-transform: capitalize; }
+.misschip.mut { color: var(--mut); border-color: var(--line2); }
+.misschip.plan { color: var(--plan); border-color: var(--plan); }
+.misschip.acc { color: var(--acc); border-color: var(--acc); }
+.misschip.warn { color: var(--warn); border-color: var(--warn); }
+.misschip.good { color: var(--good); border-color: var(--good); }
+.misschip.danger { color: var(--danger); border-color: var(--danger); }
+
+.miss-detail { display: flex; flex-direction: column; gap: 4px; }
+.miss-back { align-self: flex-start; font-size: 12.5px; color: var(--mut); text-decoration: none; margin-bottom: 10px; }
+.miss-back:hover { color: var(--ink); }
+.miss-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.miss-title { margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.miss-goal { font-size: 13.5px; color: var(--mut); margin: 0 0 6px; max-width: 68ch; }
+.miss-actions { margin: 4px 0 22px; }
+.miss-section { min-width: 0; }
+.miss-section + .miss-section { margin-top: 24px; }
+
+.miss-events { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.miss-event-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 12.5px; min-width: 0; }
+.miss-event-row:last-child { border-bottom: 0; }
+.miss-event-ts { flex: none; color: var(--dim); font-family: var(--mono); font-size: 11px; }
+.miss-event-type { flex: none; color: var(--mut); font-family: var(--mono); font-size: 11.5px; }
+.miss-event-payload { flex: 1; min-width: 0; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- Terminal view ---- */
 .term-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .term-toolbar { flex: none; margin-bottom: 18px; }
