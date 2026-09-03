@@ -47,8 +47,36 @@ Yuri also keeps her own identity and palette rather than restyling toward the
 reference's branding. Her existing `--acc` (#dd8a6a) already sits a shade off
 the reference's orange, which is why the direction lands native.
 
-## Known cost before building it for real
+## How it was actually built (2026-09-04)
 
-The orb draws 1,500 points per frame at centre. Fine on mains power; for a
-laptop, drop to ~600 points and pause the loop when the tab is hidden. Cheap
-to add, easy to forget.
+**Routes stayed; they render as the panel.** The mockup switches views with
+JavaScript, but the eight Phase 6 routes are kept and `{children}` mounts
+inside `.vpanel`. Deep links, reload and the back button therefore all still
+work, and "engaged" is *derived* from the path (`pathname !== "/"`) rather
+than stored — nothing to keep in sync. The one thing the path cannot answer is
+the composer or a session tab taking focus with no panel open; `Stage`'s
+`touched` covers that and any navigation clears it.
+
+**Home is what became of the Dashboard.** Its three bands of cards are one
+sentence under her name, built from the same `bands()` triage
+(`lib/presence.ts`), with anything needing a decision arriving in the dock.
+The full lists stay one rail click away.
+
+**The numbers live in pure modules**, under `node --test`: `lib/orb.ts`
+(geometry, per-state look, her state machine), `lib/presence.ts` (the line),
+`lib/dock.ts` (tab order, provider colour, the live dot).
+
+**The orb's centre had to become responsive.** The design's 0.45 of the stage
+clears the dock at 1400px but buries a third of her at ~850px, so `target()`
+clamps position and radius to the space left of the dock and leaves the
+design's proportions untouched wherever they fit. The naming block is
+positioned from `--orb-x`, which the canvas publishes each frame — hard-coding
+0.45 in the CSS is what made her name drift out from under her once the clamp
+existed.
+
+## Known cost — addressed
+
+The orb draws up to 1,500 points per frame at centre. `pointCount()` drops to
+600 on a machine reporting ≤4 cores and 500 under `prefers-reduced-motion`,
+and the frame loop stops on `visibilitychange` — a hidden tab is not worth
+1,500 points a frame.
