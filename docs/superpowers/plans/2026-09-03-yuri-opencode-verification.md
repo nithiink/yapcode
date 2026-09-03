@@ -69,12 +69,41 @@ an agreeable fake is worse than no fake. Fixed in `_headers()`, the one
 function Task 2 isolated it into, and the fake now enforces the real thing.
 `opencode attach --username` documents the same `opencode` default.
 
-### `opencode attach` — the terminal handoff, better than tmux ✅
-`opencode attach <url> --session <id>` attaches OpenCode's own TUI to the
-**same server and same session** Yuri is driving. Unlike `claude --resume`,
-which opens a *copy* of the conversation in a separate process, this is the
-live session: the user takes the keyboard and Yuri keeps reading it, because
-both are talking to one server. This is now what the session panel offers.
+### `opencode attach --session` does NOT open that session ❌
+I recorded the opposite here first, from reading `opencode attach --help`, and
+then measured it. **`--session` does not open that session's conversation** in
+1.18.25. Tested against a live server with a marker prompt already in the
+session:
+
+| invocation | marker visible |
+|---|---|
+| `attach <url> --session <id>` | no |
+| `attach … --session <id> --mini` (has replay) | no |
+| `attach … --session <id> --mini --replay-limit 20` | no |
+| `attach … --continue` | no |
+| `attach … --dir <cwd> --session <id>` | no |
+| `opencode --session <id>` (root TUI, same cwd) | no |
+| + 14s wait, + Escape, + ctrl-r | no |
+
+Every route lands in a **new** session — the TUI's own rename dialog confirms
+it ("New session - <timestamp>"). The TUI renders fine, so this is not a
+rendering artefact; the conversation simply is not there.
+
+**Consequences, both acted on:**
+- **No "Watch live" for OpenCode.** The plan was a tmux pane running
+  `opencode attach`, streamed through the existing terminal websocket. The
+  plumbing worked — lazily created, idempotent, killed on `stop()` — but it
+  showed *a different conversation*, so it was reverted rather than shipped. A
+  button labelled "Watch live" that shows the wrong session is worse than no
+  button.
+- **`OpenCodeProvider.resume_command` returns None.** It briefly returned
+  `opencode attach <url> --session <id>` with a comment claiming it reached
+  the same session. That claim was wrong; a command that promises to reopen
+  this session and quietly opens another is worse than none.
+
+What *does* work is `opencode attach <url>` as a way to get a terminal on the
+server Yuri is using — but it is not session-scoped, so it does not belong on
+a session card. Revisit if a later OpenCode makes `--session` effective.
 
 ## Not settled
 

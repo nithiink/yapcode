@@ -156,6 +156,17 @@ class AgentProvider(ABC):
                      opts: SessionOptions) -> str:
         raise NotImplementedError(f"{self.id} does not support resume")
 
+    def can_open_terminal(self, handle: str) -> bool:
+        """Could a live terminal view be offered for this session?
+
+        Per-session, not per-provider: Claude Code's CLI backend has a pane
+        and its SDK backend does not, and the answer for OpenCode depends on
+        whether tmux is installed. The UI gates its "Watch live" button on
+        this, so a False here is what stops it offering a button that cannot
+        work.
+        """
+        return bool(self.native_pane(handle))
+
     def resume_command(self, handle: str) -> str | None:
         """A shell command that reopens this session in the user's terminal.
 

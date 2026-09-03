@@ -70,6 +70,21 @@ class OpenCodeServer:
     # --- state -----------------------------------------------------------
 
     @property
+    def password(self) -> str | None:
+        """The server password, for a child that must authenticate the same way.
+
+        Public because the live-view pane runs `opencode attach`, which needs
+        it in ITS environment. Still never rendered: callers put it in an env
+        dict, never in argv (a tmux command line is world-readable via ps) and
+        never in a log line.
+        """
+        return self._password
+
+    @property
+    def username(self) -> str:
+        return self._username
+
+    @property
     def can_spawn(self) -> tuple[bool, str]:
         """(could this object start a server, why not) — without starting one.
 

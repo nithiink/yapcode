@@ -84,6 +84,14 @@ class SessionService:
     # --- lookup ---------------------------------------------------------------
 
     @staticmethod
+    def _can_watch(p: AgentProvider, handle: str) -> bool:
+        try:
+            return bool(p.can_open_terminal(handle))
+        except Exception:
+            log.exception("can_open_terminal failed for %s", p.id)
+            return False
+
+    @staticmethod
     def _resume_command(p: AgentProvider, handle: str) -> str | None:
         """Never let one provider's handoff break the whole session list."""
         try:
@@ -210,6 +218,10 @@ class SessionService:
                         # was a guaranteed failure; and it built its own
                         # `claude --resume` line for every provider.
                         "supports_modes": bool(caps.permission_modes),
+                        # Per-session, not per-provider: Claude Code's CLI
+                        # backend can be watched and its SDK backend cannot,
+                        # and OpenCode's answer depends on tmux being present.
+                        "can_watch": self._can_watch(p, handle),
                         "permission_modes": list(caps.permission_modes),
                         "resume_command": self._resume_command(p, handle)})
         return out

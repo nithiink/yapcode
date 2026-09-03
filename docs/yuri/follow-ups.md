@@ -231,3 +231,16 @@ voice commands — have not been exercised in a live voice round-trip.
   OpenCode. `read_transcript` returns `{found: false}` for an OpenCode handle,
   so OpenCode has no "show me the whole conversation" surface.
   `config.summary()` was never taught the OpenCode keys.
+
+- **No terminal view or per-session handoff for OpenCode**, because
+  `opencode attach --session <id>` does not open that session in 1.18.25 (see
+  the verification doc for the full matrix — `--mini`, `--continue`, `--dir`,
+  the root TUI and longer waits all land in a new session). Two things become
+  possible the day a release makes `--session` effective:
+  1. `resume_command` can return `opencode attach <url> --session <id>`.
+  2. "Watch live" can work by running that in a tmux pane and streaming it
+     through the existing terminal websocket — the session stays in the server,
+     so the pane is only a *view* and nothing fragments. The reverted attempt is
+     in the history if it helps: lazily created, idempotent, killed on `stop()`,
+     with the password passed by environment rather than argv (a tmux command
+     line is world-readable via `ps`).

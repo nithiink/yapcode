@@ -283,6 +283,10 @@ type Sess = {
   // `claude --resume` line for a session Claude had never heard of.
   supports_modes?: boolean;
   resume_command?: string | null;
+  // Whether a live terminal view can be offered for THIS session. Not the
+  // same as backend === "cli": OpenCode's session lives in a server, and its
+  // view is an `opencode attach` pane created on demand.
+  can_watch?: boolean;
   name?: string | null;
   // Live work-pipeline (from the runner's list()): a turn executing now,
   // turns waiting behind it, and finished turns not yet narrated by poll.
@@ -1930,10 +1934,10 @@ export default function VoiceAgent() {
                   )}
 
                   <div className="actionrow">
-                    {s.backend === "cli" && liveSession !== s.handle && (
+                    {s.can_watch && liveSession !== s.handle && (
                       <button
                         className="txtoggle primary"
-                        title="Watch the live CLI in your browser"
+                        title="Watch this session live in your browser"
                         onClick={() => setLiveSession(s.handle)}
                       >
                         <Icon name="play" size={13} /> Watch live
