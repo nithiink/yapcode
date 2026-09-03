@@ -226,8 +226,12 @@ body {
    viewport, not the content) and animated via opacity for a smooth fade in/out.
    JS toggles .more-above / .more-below on .conv-wrap from the scroll position. */
 .conv-wrap { position: relative; }
+/* The dock's transcript reuses the same fades — same problem (a long thread
+   with no cue that there is more above), same solution. */
 .conv-wrap::before,
-.conv-wrap::after {
+.conv-wrap::after,
+.dthread-wrap::before,
+.dthread-wrap::after {
   content: "";
   position: absolute;
   left: 0;
@@ -238,16 +242,20 @@ body {
   opacity: 0;
   transition: opacity 0.35s ease;
 }
-.conv-wrap::before {
+.conv-wrap::before,
+.dthread-wrap::before {
   top: 0;
   background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
 }
-.conv-wrap::after {
+.conv-wrap::after,
+.dthread-wrap::after {
   bottom: 0;
   background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
 }
-.conv-wrap.more-above::before { opacity: 1; }
-.conv-wrap.more-below::after { opacity: 1; }
+.conv-wrap.more-above::before,
+.dthread-wrap.more-above::before { opacity: 1; }
+.conv-wrap.more-below::after,
+.dthread-wrap.more-below::after { opacity: 1; }
 
 /* The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
    the thumb is transparent at rest and only paints in --line2/--mut when the
@@ -521,38 +529,195 @@ details.handoff:hover > summary { color: var(--mut); }
 .cmdfield .copybtn { background: transparent; border: 0; padding: 6px; border-radius: 6px; }
 .cmdfield .copybtn:hover { background: rgba(255,255,255,0.06); }
 
-/* ---- Mission Control shell: nav | routed view | voice rail ---- */
-.shell { display: grid; grid-template-columns: 200px 1fr 380px; gap: 0; min-height: 100vh; }
-/* min-width: 0 on every track — see the note at the .panel rule above. Without
+/* ---- Yuri OS shell: icon rail | stage (canvas + panel + dock) ----
+   The stage is a positioned container and everything on it is absolutely
+   placed over the orb's canvas. That is the design's whole point: a view
+   appears BESIDE Yuri rather than replacing the space she occupies, so she is
+   never hidden and never has to be re-introduced.
+   See docs/yuri/design/README.md. */
+.shell { display: grid; grid-template-columns: 56px 1fr; height: 100vh; min-height: 600px; }
+/* min-width: 0 on both tracks — see the note at the .panel rule above. Without
    it a long path or queued prompt blows out a track and resizes the layout. */
 .shell > * { min-width: 0; }
-.shell-main { padding: 28px 32px; overflow-y: auto; }
-.shell-nav { border-right: 1px solid var(--line); padding: 24px 14px; }
-.shell-rail { border-left: 1px solid var(--line); padding: 24px 18px; display: flex;
-              flex-direction: column; min-height: 0; }
-/* Mirrors .conv-panel .conv-wrap above: makes conv-wrap both a flex item (so
-   it takes the rail's remaining height below the controls) and a flex
-   container for its own conv-scroll child, which then flex:1's inside it.
-   The fade overlay itself (.conv-wrap::before/::after, below) isn't scoped to
-   either ancestor and needs no rail-specific rule. */
-.shell-rail .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 
-/* One breakpoint. Below it the rail is the whole app: mic, transcript and the
-   pending prompt card — the away-from-desk case. Desktop-first by decision. */
-@media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; }
-  .shell-nav, .shell-main { display: none; }
-  .shell-rail { border-left: 0; }
+.stage { position: relative; min-width: 0; overflow: hidden; }
+.orb-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+              pointer-events: none; }
+
+/* ---- icon rail ---- */
+.rail { border-right: 1px solid var(--line); background: var(--bg); display: flex;
+        flex-direction: column; align-items: center; padding: 14px 0; gap: 2px; min-width: 0; }
+.rail-mark { font-family: var(--disp); color: var(--acc); font-size: 20px; line-height: 1;
+             margin-bottom: 16px; letter-spacing: .02em; text-decoration: none; }
+.ric { position: relative; width: 38px; height: 38px; border: 0; background: none;
+       border-radius: 9px; color: var(--dim); display: grid; place-items: center; padding: 0; }
+.ric:hover { background: var(--panel2); color: var(--mut); }
+.ric[aria-current="true"] { color: var(--acc); background: var(--panel2); }
+.ric:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.ric svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6;
+           stroke-linecap: round; stroke-linejoin: round; }
+/* The badge sits on the icon rather than beside it: there is no room for a
+   number in a 56px rail, and a count the user cannot see is the failure this
+   shell inherited from Phase 6. */
+.ric-badge { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px;
+             padding: 0 4px; border-radius: 999px; background: var(--acc); color: var(--acc-ink);
+             font-size: 9.5px; font-weight: 700; display: grid; place-items: center;
+             font-variant-numeric: tabular-nums; }
+
+/* ---- top strip ---- */
+.top { position: absolute; top: 0; left: 0; right: 0; height: 62px; display: flex;
+       align-items: center; gap: 16px; padding: 0 20px; z-index: 5; pointer-events: none; }
+/* Controls opt back in: the transparent band between them must not eat a click. */
+.top > *, .top button, .top .seg { pointer-events: auto; }
+.wordmark { font-family: var(--disp); font-size: 19px; letter-spacing: .16em; color: var(--acc); }
+.wordmark sup { font-size: 9px; letter-spacing: 0; vertical-align: super; opacity: .65; }
+.top-mid { flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; }
+.vpill { display: inline-flex; align-items: center; gap: 9px; background: rgba(33,31,29,.82);
+         border: 1px solid var(--line2); border-radius: 999px; padding: 7px 16px;
+         font-size: 11.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--mut); }
+.vpill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+.vpill[data-voice="live"] .dot { background: var(--good); }
+.vpill[data-voice="muted"] .dot { background: var(--warn); }
+.vpill[data-voice="speaking"] { color: var(--acc); border-color: rgba(221,138,106,.45); }
+.vpill[data-voice="speaking"] .dot { background: var(--acc); animation: orb-breathe 1.5s ease-in-out infinite; }
+@keyframes orb-breathe { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+.vmute { background: rgba(33,31,29,.82); border: 1px solid var(--line2); border-radius: 999px;
+         padding: 7px 13px; font-size: 10.5px; letter-spacing: .11em; text-transform: uppercase;
+         color: var(--mut); }
+.vmute[aria-pressed="true"] { color: var(--warn); border-color: rgba(216,176,122,.45); }
+.top .seg { display: flex; background: rgba(33,31,29,.82); border: 1px solid var(--line2);
+            border-radius: 999px; padding: 3px; }
+.top .seg button { border: 0; background: none; color: var(--dim); font-family: var(--body);
+                   font-size: 10.5px; letter-spacing: .11em; text-transform: uppercase;
+                   padding: 5px 11px; border-radius: 999px; }
+.top .seg button[aria-pressed="true"] { background: var(--acc); color: var(--acc-ink); }
+.top .seg button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+.clock { font-family: var(--mono); font-size: 12px; color: var(--dim);
+         font-variant-numeric: tabular-nums; min-width: 62px; text-align: right; }
+
+/* ---- her name and her one line, at home ---- */
+.naming { position: absolute; left: 0; right: 0; bottom: 96px; z-index: 4; display: flex;
+          flex-direction: column; align-items: center; gap: 12px; pointer-events: none;
+          transition: opacity .45s ease, transform .45s ease; }
+.naming[data-away="true"] { opacity: 0; transform: translateY(14px); }
+.sname { font-family: var(--disp); font-size: 15px; letter-spacing: .42em; text-indent: .42em;
+         color: var(--ink); opacity: .92; }
+.smeta { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .04em;
+         text-align: center; padding: 0 16px; }
+.hint { position: absolute; left: 18px; bottom: 22px; z-index: 6; font-size: 11px;
+        color: var(--dim); letter-spacing: .04em; transition: opacity .45s ease; }
+.hint[data-away="true"] { opacity: 0; }
+
+/* The hit target over the orb's corner position — the canvas itself takes no
+   pointer events, so clicking her home needs a real control. */
+/* Centred on the orb's corner target: lib/orb.ts CORNER is (W-92, 130), so a
+   128px circle needs right: 92-64 and top: 130-64. Keep these in step. */
+.orbhome { position: absolute; top: 66px; right: 28px; width: 128px; height: 128px;
+           border-radius: 50%; border: 0; background: none; z-index: 6; opacity: 0;
+           pointer-events: none; transition: opacity .3s ease; }
+.orbhome[data-shown="true"] { opacity: 1; pointer-events: auto; }
+.orbhome:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.orbhome span { position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%);
+                font-family: var(--disp); font-size: 9px; letter-spacing: .24em;
+                color: var(--dim); white-space: nowrap; }
+.orbhome:hover span { color: var(--acc); }
+
+/* ---- the view panel: every route renders in here ---- */
+.vpanel { position: absolute; left: 26px; top: 80px; width: min(620px, calc(100% - 500px));
+          bottom: 26px; z-index: 4; background: rgba(26,25,23,.93);
+          border: 1px solid var(--line2); border-radius: 14px; padding: 20px 22px;
+          overflow-y: auto; opacity: 0; transform: translateX(-16px); pointer-events: none;
+          transition: opacity .4s ease, transform .4s ease; }
+.vpanel[data-open="true"] { opacity: 1; transform: none; pointer-events: auto; }
+.vpanel-close { position: absolute; top: 14px; right: 16px; width: 26px; height: 26px;
+                border-radius: 7px; border: 1px solid var(--line2); background: none;
+                color: var(--mut); padding: 0; display: grid; place-items: center;
+                font-size: 14px; line-height: 1; z-index: 2; }
+.vpanel-close:hover { color: var(--ink); background: var(--panel2); }
+
+/* ---- the session dock ---- */
+.dock { position: absolute; right: 18px; bottom: 18px; width: 432px;
+        max-width: calc(100% - 36px); z-index: 7; background: rgba(26,25,23,.95);
+        border: 1px solid var(--line2); border-radius: 13px; overflow: hidden;
+        display: flex; flex-direction: column; max-height: calc(100vh - 210px); }
+.dtabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line);
+         padding: 0 10px 0 6px; overflow-x: auto; flex: 0 0 auto; }
+.dtabs::-webkit-scrollbar { height: 0; }
+.dtabs .tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none;
+              color: var(--dim); font-family: var(--body); font-size: 11px; letter-spacing: .1em;
+              text-transform: uppercase; padding: 12px 9px; border-bottom: 2px solid transparent;
+              margin-bottom: -1px; white-space: nowrap; }
+.dtabs .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--acc); }
+.dtabs .tab:focus-visible { outline: 2px solid var(--acc); outline-offset: -4px; }
+.tab-hue { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+.dtab-empty { font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+              color: var(--dim); padding: 12px 9px; }
+.dlive { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+         background: var(--dim); }
+.dlive.working { background: var(--good); }
+.dlive.attn { background: var(--danger); }
+.dstatus { font-size: 11.5px; color: var(--mut); padding: 8px 14px 0; flex: 0 0 auto; }
+.dstatus b { color: var(--ink); font-weight: 600; }
+.dstatus.attn b { color: var(--danger); }
+.dstatus.error b { color: var(--danger); }
+.dstatus.working b { color: var(--good); }
+/* Mirrors .conv-panel .conv-wrap above: makes the wrap both a flex item (so it
+   takes the dock's remaining height) and a flex container for its own scroller.
+   The fade overlay (.conv-wrap::before/::after) is reused via .dthread-wrap. */
+.dthread-wrap { flex: 1 1 auto; min-height: 90px; display: flex; flex-direction: column;
+                position: relative; }
+.dthread { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 14px;
+           display: flex; flex-direction: column; gap: 10px; }
+.dthread-empty { font-size: 12.5px; color: var(--dim); }
+.dsend-error { font-size: 12px; color: var(--danger); padding: 0 14px 8px; }
+
+.comp { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--line);
+        padding: 10px 12px; flex: 0 0 auto; }
+.comp .chip { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; }
+.comp input { flex: 1; min-width: 0; background: none; border: 0; color: var(--ink);
+              font-family: var(--body); font-size: 13px; outline: none; }
+.comp input::placeholder { color: var(--dim); }
+.comp .send { width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--acc);
+              color: var(--acc-ink); display: grid; place-items: center; padding: 0;
+              flex: 0 0 auto; }
+.comp .send:disabled { background: var(--line2); color: var(--dim); }
+.comp .send svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2;
+                  stroke-linecap: round; stroke-linejoin: round; }
+
+.dock-settings { border-top: 1px solid var(--line); flex: 0 0 auto; }
+.dock-settings > summary { font-size: 10.5px; letter-spacing: .11em; text-transform: uppercase;
+                           color: var(--dim); padding: 9px 14px; cursor: pointer; }
+.dock-settings > summary:hover { color: var(--mut); }
+.dock-settings .controls-row { padding: 4px 14px 12px; }
+.modellock { font-size: 11.5px; color: var(--warn); padding: 0 14px 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .naming, .vpanel, .orbhome, .hint { transition: none; }
 }
 
-.viewtitle { font-family: var(--disp); text-transform: uppercase; font-size: 19px; letter-spacing: .02em; font-weight: 400; margin: 0 0 18px; }
+/* One breakpoint. Below it the stage stacks and scrolls, the orb's canvas and
+   her naming block drop out (there is no stage for her to hold), and the dock
+   becomes the app: transcript, prompt card and composer — the away-from-desk
+   case. Desktop-first by decision. */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; height: auto; }
+  .rail { flex-direction: row; border-right: 0; border-bottom: 1px solid var(--line);
+          overflow-x: auto; padding: 8px 10px; }
+  .rail-mark { margin: 0 10px 0 0; }
+  .stage { display: flex; flex-direction: column; overflow: visible; }
+  .orb-canvas, .naming, .hint, .orbhome { display: none; }
+  .top { position: static; height: auto; padding: 14px; flex-wrap: wrap; }
+  .vpanel { position: static; width: auto; margin: 0 14px 14px; opacity: 1; transform: none;
+            pointer-events: auto; max-height: none; }
+  .vpanel[aria-hidden="true"] { display: none; }
+  .dock { position: static; width: auto; margin: 0 14px 14px; max-height: none; }
+}
 
-/* ---- shell nav ---- */
-.navlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.navitem { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; border-radius: 8px; color: var(--mut); text-decoration: none; font-size: 13.5px; font-weight: 500; }
-.navitem:hover { color: var(--ink); background: var(--panel2); }
-.navitem.active { color: var(--ink); background: var(--panel2); box-shadow: inset 0 0 0 1px var(--line2); }
-.navbadge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+/* Every route's heading. It sits inside .vpanel now, with the close button to
+   its right — the padding-right keeps a long title off the ✕. */
+.viewtitle { font-family: var(--disp); text-transform: uppercase; font-size: 19px;
+             letter-spacing: .05em; font-weight: 400; margin: 0 0 16px;
+             padding-right: 34px; color: var(--ink); }
 
 /* ---- approvals view + ApprovalCard (shared with the Dashboard) ---- */
 .apr-view { min-width: 0; }
@@ -718,3 +883,8 @@ a.miss-row { text-decoration: none; color: inherit; }
 /* ---- Activity view ---- */
 .activity-view { min-width: 0; }
 .activity-view .debugpanel { margin-top: 0; }
+
+/* The shown/total count beside a panel heading (Activity). Lowercase and mono
+   so it reads as a readout rather than part of the title. */
+.viewcount { font-family: var(--mono); font-size: 11.5px; color: var(--dim);
+             text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }

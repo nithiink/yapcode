@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState, type UIEvent } from "react";
 import { useYuri } from "@/components/VoiceProvider";
 import { ActivityFeed } from "@/components/ActivityFeed";
+import { filterEvents } from "@/lib/activity";
 
 export default function Page() {
   const { debugEvents, debugStreamConnected, clearDebugEvents } = useYuri();
@@ -47,7 +48,12 @@ export default function Page() {
 
   return (
     <div className="activity-view">
-      <h2 className="viewtitle">Activity</h2>
+      <h2 className="viewtitle">
+        Activity{" "}
+        <span className="viewcount">
+          {filterEvents(debugEvents, filter, errorsOnly).length} / {debugEvents.length}
+        </span>
+      </h2>
       <ActivityFeed
         events={debugEvents}
         streamConnected={debugStreamConnected}

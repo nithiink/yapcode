@@ -2,6 +2,7 @@
 
 import type { RefObject, UIEvent } from "react";
 import { fmtLogTime, fmtLogTimeTitle } from "@/lib/format";
+import { filterEvents } from "@/lib/activity";
 
 // One event on the unified pipeline bus (backend /debug/stream + browser posts).
 export type DebugEvent = {
@@ -52,14 +53,7 @@ export function ActivityFeed({
   scrollRef: RefObject<HTMLDivElement | null>;
   onScroll: (e: UIEvent<HTMLDivElement>) => void;
 }) {
-  const filteredLog = events.filter((ev) => {
-    if (errorsOnly && ev.kind !== "error") return false;
-    if (filter) {
-      const hay = `${ev.source} ${ev.dest} ${ev.kind} ${ev.summary} ${ev.session || ""}`.toLowerCase();
-      if (!hay.includes(filter.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const filteredLog = filterEvents(events, filter, errorsOnly);
 
   // Copy the currently-shown events as readable text (full, untruncated lines)
   // for pasting into a bug report / sharing.
@@ -72,10 +66,11 @@ export function ActivityFeed({
 
   return (
     <div className="panel debugpanel">
+      {/* No heading here: the panel this renders in supplies one (.viewtitle in
+          app/activity/page.tsx), and two "Activity" headings stacked was
+          exactly what the panel shell made visible. The shown/total count the
+          old heading carried moved up there in the page, which filters with the same lib/activity.ts helper. */}
       <div className="loghead">
-        <h2>
-          Activity <span className="ct">{filteredLog.length} / {events.length}</span>
-        </h2>
         <div className="logctl">
           <input
             className="logsearch"

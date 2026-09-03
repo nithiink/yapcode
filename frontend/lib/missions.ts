@@ -57,3 +57,16 @@ export function canResume(m: Mission): boolean {
 export function canCancel(m: Mission): boolean {
   return TRANSITIONS[m.status].has("cancelled");
 }
+
+// Delete is offered only on a mission that has finished moving — a terminal
+// status, i.e. one with no outgoing edges. The backend refuses (409) while any
+// of the mission's sessions is still live, and a terminal mission is the only
+// state where that cannot be true; offering the button anywhere else would be
+// offering a click that fails. Cancel first, then delete.
+//
+// Note this is the ONE destructive operation with no voice path: a speech
+// recogniser must not be able to fire an irreversible delete on a mishearing.
+// See MissionService.delete in the backend.
+export function canDelete(m: Mission): boolean {
+  return TRANSITIONS[m.status].size === 0;
+}

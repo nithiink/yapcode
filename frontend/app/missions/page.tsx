@@ -12,8 +12,8 @@ import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useYuri } from "@/components/VoiceProvider";
 import { ViewError } from "@/components/ViewError";
-import { MISSION_CLASS, canCancel, canPause, canResume } from "@/lib/missions";
-import { yget, ypost, ApiError } from "@/lib/api";
+import { MISSION_CLASS, canCancel, canDelete, canPause, canResume } from "@/lib/missions";
+import { ydelete, yget, ypost, ApiError } from "@/lib/api";
 import type { Mission, ProjectRow } from "@/lib/yuriTypes";
 
 export default function Page() {
@@ -62,6 +62,35 @@ export default function Page() {
     [projects],
   );
 
+  // Which row is asking "really?". Delete is irreversible and there is no
+  // undo, so the button arms first and only the second click sends. A native
+  // confirm() would do too, but it steals focus out of the panel and reads as
+  // a browser dialog rather than part of the shell.
+  const [armed, setArmed] = useState<string | null>(null);
+
+  const remove = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    try {
+      await ydelete(`/missions/${id}`);
+      setArmed(null);
+      // Deletion emits mission.deleted, which the provider refreshes on; but
+      // unlike the transitions above, refresh explicitly too — a dropped event
+      // would leave a row on screen for a mission that no longer exists.
+      await refresh("missions");
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.status === 409
+          ? "That mission still has a live session. Cancel it first, then delete."
+          : e instanceof ApiError && e.status === 404
+            ? "That mission is already gone."
+            : `Could not delete that mission: ${(e as Error).message}`,
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const act = async (id: string, action: "pause" | "resume" | "cancel") => {
     setBusy(id);
     setError(null);
@@ -103,6 +132,9 @@ export default function Page() {
                   busy={busy === m.id}
                   onOpen={() => router.push(`/missions/${m.id}`)}
                   onAct={(action) => void act(m.id, action)}
+                  armed={armed === m.id}
+                  onArm={() => setArmed(armed === m.id ? null : m.id)}
+                  onDelete={() => void remove(m.id)}
                 />
               ))}
             </div>
@@ -119,12 +151,18 @@ function MissionRow({
   busy,
   onOpen,
   onAct,
+  armed,
+  onArm,
+  onDelete,
 }: {
   m: Mission;
   projectName: string;
   busy: boolean;
   onOpen: () => void;
   onAct: (action: "pause" | "resume" | "cancel") => void;
+  armed: boolean;
+  onArm: () => void;
+  onDelete: () => void;
 }) {
   const stop = (e: MouseEvent) => e.stopPropagation();
 
@@ -146,7 +184,7 @@ function MissionRow({
         <span className="dash-row-meta">{projectName}</span>
         {m.current_step && <span className="dash-row-task">{m.current_step}</span>}
       </div>
-      {(canPause(m) || canResume(m) || canCancel(m)) && (
+      {(canPause(m) || canResume(m) || canCancel(m) || canDelete(m)) && (
         <div className="dash-row-actions" onClick={stop}>
           {canResume(m) && (
             <button className="dash-btn" disabled={busy} onClick={() => onAct("resume")}>
@@ -163,6 +201,21 @@ function MissionRow({
               Cancel
             </button>
           )}
+          {canDelete(m) &&
+            (armed ? (
+              <>
+                <button className="dash-btn danger" disabled={busy} onClick={onDelete}>
+                  {busy ? "Deleting…" : "Delete for good"}
+                </button>
+                <button className="dash-btn" disabled={busy} onClick={onArm}>
+                  Keep
+                </button>
+              </>
+            ) : (
+              <button className="dash-btn danger" disabled={busy} onClick={onArm}>
+                Delete
+              </button>
+            ))}
         </div>
       )}
     </div>

@@ -3,15 +3,15 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Anton, Archivo } from "next/font/google";
 import { VoiceProvider } from "@/components/VoiceProvider";
-import { ConversationRail } from "@/components/ConversationRail";
-import { Nav } from "@/components/shell/Nav";
+import { Rail } from "@/components/shell/Rail";
+import { Stage } from "@/components/shell/Stage";
 
 const display = Anton({ weight: "400", subsets: ["latin"], variable: "--font-display" });
 const body = Archivo({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Yap Code",
-  description: "Hands-free voice control for Claude Code",
+  title: "Yuri OS",
+  description: "A voice-first companion that runs your coding agents",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,19 +20,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // which otherwise triggers a dev hydration-mismatch overlay. This only
   // suppresses attribute diffs on these two elements, not their children.
   //
-  // VoiceProvider and ConversationRail live HERE, above the routed
-  // {children} — not inside a page. A layout persists across route changes;
-  // a route does not. So navigating between nav items re-renders only
-  // <main>, and the voice connection plus both SSE subscriptions never
-  // unmount. Get this backwards and Yuri drops mid-sentence on every click.
+  // VoiceProvider, the rail and the whole stage live HERE, above the routed
+  // {children} — not inside a page. A layout persists across route changes; a
+  // route does not. So navigating between rail items re-renders only the
+  // panel's contents, and the voice connection, both SSE subscriptions, the
+  // orb's eased position and the dock's transcript all survive. Get this
+  // backwards and Yuri drops mid-sentence, and jumps back to centre, on every
+  // click.
   return (
     <html lang="en" suppressHydrationWarning className={`${display.variable} ${body.variable}`}>
       <body suppressHydrationWarning>
         <VoiceProvider>
           <div className="shell">
-            <Nav />
-            <main className="shell-main">{children}</main>
-            <ConversationRail />
+            <Rail />
+            <Stage>{children}</Stage>
           </div>
         </VoiceProvider>
       </body>

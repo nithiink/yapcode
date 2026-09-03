@@ -56,3 +56,7 @@ export function ypost<T>(path: string, body?: unknown): Promise<T> {
 export function yput<T>(path: string, body?: unknown): Promise<T> {
   return request<T>("PUT", path, body ?? {});
 }
+
+export function ydelete<T>(path: string): Promise<T> {
+  return request<T>("DELETE", path);
+}

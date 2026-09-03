@@ -1,7 +1,7 @@
 // Run: npm test (node --test)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MISSION_CLASS, canCancel, canPause, canResume } from "./missions.ts";
+import { MISSION_CLASS, canCancel, canDelete, canPause, canResume } from "./missions.ts";
 import type { Mission } from "./yuriTypes.ts";
 
 const m = (status: Mission["status"]): Mission => ({
@@ -42,5 +42,25 @@ test("no control is offered on a terminal mission", () => {
     assert.equal(canPause(m(s)), false, s);
     assert.equal(canResume(m(s)), false, s);
     assert.equal(canCancel(m(s)), false, s);
+  }
+});
+
+test("delete is offered only once a mission has stopped moving", () => {
+  for (const status of ["completed", "failed", "cancelled"] as Mission["status"][]) {
+    assert.ok(canDelete(m(status)), `${status} should be deletable`);
+  }
+  for (const status of ["draft", "queued", "running", "waiting_for_approval", "paused"] as Mission["status"][]) {
+    assert.ok(!canDelete(m(status)),
+      `${status} would 409 on the backend — the button must not be there`);
+  }
+});
+
+test("delete and cancel are never both offered", () => {
+  // They are complements: cancel means it can still move, delete means it
+  // cannot. Both showing at once would mean one of them is a broken click.
+  for (const status of ["draft", "queued", "running", "waiting_for_approval",
+                        "paused", "completed", "failed", "cancelled"] as Mission["status"][]) {
+    const mission = m(status);
+    assert.notEqual(canDelete(mission), canCancel(mission), `both/neither for ${status}`);
   }
 });
