@@ -68,9 +68,26 @@ class MissionRepo(ABC):
     def steps_for(self, mission_id: str) -> list[MissionStep]: ...
     @abstractmethod
     def update_step(self, step: MissionStep) -> None: ...
+    @abstractmethod
+    def delete(self, id: str) -> None:
+        """Remove a mission and its steps. A missing id is a no-op.
+
+        Deliberately does NOT touch the sessions that pointed at it, nor its
+        events. Sessions are detached by SessionRepo.detach_mission (a session
+        row records a real agent session, which happened whether or not the
+        mission survives), and events are an append-only audit log -- deleting
+        log entries to tidy up would be the wrong trade.
+        """
 
 
 class SessionRepo(ABC):
+    @abstractmethod
+    def detach_mission(self, mission_id: str) -> None:
+        """Clear mission_id on every session that pointed at this mission.
+
+        Not a delete: the row is the record of an agent session that really
+        ran. Losing its mission should orphan the link, not the history.
+        """
     @abstractmethod
     def insert(self, s: AgentSession) -> None: ...
     @abstractmethod

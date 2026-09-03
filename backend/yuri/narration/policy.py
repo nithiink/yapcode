@@ -116,6 +116,10 @@ NARRATION_OWNER: dict[str, Owner] = {
     EventType.SESSION_STOPPED: "none",
     EventType.PROJECT_REGISTERED: "none",
     EventType.MEMORY_REMEMBERED: "none",
+    # Delete has no voice tool by design (see MissionService.delete), so the
+    # user is always looking at the screen it happened on and watching the row
+    # go. The event exists for the audit log, not to be read back.
+    EventType.MISSION_DELETED: "none",
 }
 
 # Blocks on the user: never suppressed, whatever the mode. "Be quiet" means

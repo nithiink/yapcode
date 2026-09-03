@@ -19,6 +19,7 @@ from .ids import new_id, utcnow
 class EventType:
     MISSION_CREATED = "mission.created"
     MISSION_STATUS_CHANGED = "mission.status_changed"
+    MISSION_DELETED = "mission.deleted"
     SESSION_CREATED = "session.created"
     SESSION_MESSAGE_SENT = "session.message_sent"
     SESSION_TURN_COMPLETED = "session.turn_completed"
@@ -43,6 +44,7 @@ DEFAULTS: dict[str, tuple[str, bool]] = {
     EventType.SESSION_CREATED: ("info", False),
     EventType.MISSION_CREATED: ("info", True),
     EventType.MISSION_STATUS_CHANGED: ("info", True),
+    EventType.MISSION_DELETED: ("info", True),
     EventType.SESSION_TURN_COMPLETED: ("info", True),
     EventType.SESSION_QUESTION: ("notice", True),
     EventType.APPROVAL_REQUESTED: ("notice", True),

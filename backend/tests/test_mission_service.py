@@ -5,13 +5,14 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from yuri.domain.event import EventType, YuriEvent  # noqa: E402
 from yuri.domain.mission import InvalidTransition  # noqa: E402
 from yuri.domain.project import Project  # noqa: E402
 from yuri.domain.session import AgentSession  # noqa: E402
 from yuri.events.bus import EventBus  # noqa: E402
 from yuri.home import Home  # noqa: E402
 from yuri.services.journal import Journal  # noqa: E402
-from yuri.services.missions import MissionService  # noqa: E402
+from yuri.services.missions import MissionInUse, MissionService  # noqa: E402
 from yuri.store.sqlite import SqliteStore  # noqa: E402
 
 
@@ -176,3 +177,54 @@ class MissionServiceTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissionDeleteTests(MissionServiceTests):
+    """Deleting a mission is irreversible, so the guardrails are the spec."""
+
+    def _session(self, mission_id, status="stopped", handle="h1"):
+        s = AgentSession(project_id=self.project.id, agent_id="a", native_session_id=handle,
+                         backend="cli", working_directory="/tmp/p",
+                         mission_id=mission_id, status=status)
+        self.store.sessions.insert(s)
+        return s
+
+    async def test_delete_removes_the_mission_and_emits_an_event(self):
+        m = self.svc.create(self.project, "scratch", created_by="voice")
+        self._types()
+        await self.svc.delete(m.id, by="ui")
+        self.assertIsNone(self.store.missions.get(m.id))
+        self.assertEqual(self._types(), ["mission.deleted"])
+
+    async def test_delete_refuses_while_sessions_are_live(self):
+        m = self.svc.create(self.project, "busy", created_by="voice")
+        live = self._session(m.id, status="running")
+        with self.assertRaises(MissionInUse):
+            await self.svc.delete(m.id, by="ui")
+        self.assertIsNotNone(self.store.missions.get(m.id), "deleted a mission with live work")
+        self.assertEqual(self.store.sessions.get(live.id).mission_id, m.id)
+
+    async def test_delete_detaches_finished_sessions_but_keeps_their_rows(self):
+        m = self.svc.create(self.project, "done", created_by="voice")
+        s = self._session(m.id, status="stopped")
+        await self.svc.delete(m.id, by="ui")
+        row = self.store.sessions.get(s.id)
+        self.assertIsNotNone(row, "a session row records a real agent session; it must survive")
+        self.assertIsNone(row.mission_id)
+
+    async def test_delete_keeps_the_missions_events(self):
+        """Events are an append-only audit log. Deleting the mission must not
+        rewrite the history of what it did."""
+        m = self.svc.create(self.project, "audited", created_by="voice")
+        # The bus does not persist; the event log is a separate subscriber. Write
+        # the row directly so the assertion is about delete(), not about wiring.
+        self.store.events.insert(YuriEvent.make(EventType.MISSION_CREATED, mission_id=m.id,
+                                                project_id=self.project.id,
+                                                payload={"title": m.title}))
+        await self.svc.delete(m.id, by="ui")
+        kept = self.store.events.list(mission_id=m.id, limit=50)
+        self.assertEqual([e.type for e in kept], [EventType.MISSION_CREATED])
+
+    async def test_delete_of_an_unknown_mission_raises_keyerror(self):
+        with self.assertRaises(KeyError):
+            await self.svc.delete("nope", by="ui")

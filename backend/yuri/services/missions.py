@@ -17,6 +17,13 @@ from yuri.store.base import Store
 
 GOAL_MAX = 500
 
+
+class MissionInUse(Exception):
+    """Raised when a mission cannot be deleted because it still has live
+    sessions. Deleting it would strand running agents whose only link back to
+    what they were doing is the mission row."""
+
+
 # Caps on every string this module hands to the voice model. None of these
 # fields is bounded upstream (a mission title comes straight from a session
 # name; an approval description can be an entire plan), and the model reads
@@ -158,9 +165,11 @@ class MissionService:
         # approval belongs to this mission iff its session does, so fetch
         # per-session (indexed on session_id) and merge. This equivalence
         # holds only under today's implicit invariants: a session's
-        # mission_id is fixed at creation and never reparented, and neither
-        # SessionRepo nor ApprovalRepo exposes a delete. If either operation
-        # is added later, revisit this merge.
+        # mission_id is only ever set at creation or cleared by delete()
+        # (never reparented to a different mission), and neither SessionRepo
+        # nor ApprovalRepo exposes a row delete. delete() is safe here because
+        # it removes the mission too, so detail() 404s rather than returning a
+        # short list. Reparenting or a session/approval delete would break it.
         approvals = [a for s in sessions for a in self.store.approvals.list(session_id=s.id)]
         approvals.sort(key=lambda a: a.requested_at)
         return {"mission": m.to_dict(),
@@ -356,6 +365,38 @@ class MissionService:
         m = self.get(mission_id)
         self.set_status(m, "running", by)
         return m
+
+    async def delete(self, mission_id: str, by: str) -> None:
+        """Permanently remove a mission and its steps.
+
+        Irreversible, so it is guarded rather than convenient:
+
+        - refuses (MissionInUse) while any session is live, since deleting
+          would strand running work with no record of what it was for. Cancel
+          the mission first, which stops its agents, then delete.
+        - detaches, never deletes, the sessions that pointed at it. A session
+          row is the record of an agent session that really ran; losing its
+          mission orphans the link, not the history. This also satisfies the
+          sessions.mission_id foreign key, which would otherwise refuse the
+          delete outright.
+        - leaves the mission's events in place. They are an append-only audit
+          log, and the deletion is itself logged as mission.deleted.
+
+        Deliberately not exposed as a voice tool: a speech recogniser should
+        not be able to fire a destructive delete on a mishearing.
+        """
+        m = self.get(mission_id)
+        live = self.store.sessions.list(mission_id=m.id, live_only=True)
+        if live:
+            raise MissionInUse(
+                f"mission '{m.title}' still has {len(live)} live session(s); "
+                "cancel it before deleting")
+        self.store.sessions.detach_mission(m.id)
+        self.store.missions.delete(m.id)
+        self.bus.publish(YuriEvent.make(EventType.MISSION_DELETED, mission_id=m.id,
+                                        project_id=m.project_id,
+                                        payload={"title": m.title, "status": m.status, "by": by}))
+        self.journal.append(f"mission deleted: {m.title}")
 
     async def cancel(self, mission_id: str, by: str) -> Mission:
         m = self.get(mission_id)

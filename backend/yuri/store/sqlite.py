@@ -174,9 +174,21 @@ class SqliteMissions(_Base, MissionRepo):
         sql, args = _update_sql("mission_steps", _to_row(step))
         self._c.get().execute(sql, args)
 
+    def delete(self, id):
+        # Steps first: they are owned by the mission and meaningless without
+        # it. One transaction, so a failure cannot leave orphaned steps.
+        con = self._c.get()
+        with con:
+            con.execute("DELETE FROM mission_steps WHERE mission_id = ?", (id,))
+            con.execute("DELETE FROM missions WHERE id = ?", (id,))
+
 
 class SqliteSessions(_Base, SessionRepo):
     table, cls = "sessions", AgentSession
+
+    def detach_mission(self, mission_id):
+        self._c.get().execute(
+            "UPDATE sessions SET mission_id = NULL WHERE mission_id = ?", (mission_id,))
 
     def insert(self, row):
         try:

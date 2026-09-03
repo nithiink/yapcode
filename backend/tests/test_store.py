@@ -27,6 +27,11 @@ class StoreTests(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
+    def _project(self, slug="p"):
+        p = Project(slug=slug, name=slug.upper(), root_path="/tmp/" + slug)
+        self.store.projects.insert(p)
+        return p
+
     def test_migrate_idempotent_and_versioned(self):
         self.store.migrate()
         self.assertEqual(self.store.settings.get("schema_version"), SCHEMA_VERSION)
@@ -106,6 +111,56 @@ class StoreTests(unittest.TestCase):
         since = got[1].ts
         later = self.store.events.list(mission_id="m1", since=since)
         self.assertTrue(all(e.ts >= since for e in later))
+
+    def test_delete_mission_removes_it_and_its_steps(self):
+        m = Mission(title="scratch", project_id=self._project().id)
+        self.store.missions.insert(m)
+        self.store.missions.insert_step(MissionStep(mission_id=m.id, ordinal=0, title="one"))
+        self.store.missions.insert_step(MissionStep(mission_id=m.id, ordinal=1, title="two"))
+        self.assertEqual(len(self.store.missions.steps_for(m.id)), 2)
+
+        self.store.missions.delete(m.id)
+        self.assertIsNone(self.store.missions.get(m.id))
+        self.assertEqual(self.store.missions.steps_for(m.id), [],
+                         "steps outlived the mission that owned them")
+
+    def test_delete_mission_leaves_other_missions_and_their_steps_alone(self):
+        pid = self._project().id
+        keep = Mission(title="keep", project_id=pid)
+        drop = Mission(title="drop", project_id=pid)
+        for m in (keep, drop):
+            self.store.missions.insert(m)
+            self.store.missions.insert_step(MissionStep(mission_id=m.id, ordinal=0, title="s"))
+
+        self.store.missions.delete(drop.id)
+        self.assertIsNotNone(self.store.missions.get(keep.id))
+        self.assertEqual(len(self.store.missions.steps_for(keep.id)), 1)
+
+    def test_deleting_a_missing_mission_is_a_no_op(self):
+        self.store.missions.delete("nope")          # must not raise
+
+    def test_detaching_sessions_keeps_the_rows_and_clears_the_link(self):
+        """A session row is the record of a real agent session. The mission
+        going away does not mean the session never happened, so the row stays
+        and only the link is cleared."""
+        pid = self._project().id
+        m = Mission(title="scratch", project_id=pid)
+        keep_mission = Mission(title="keeper", project_id=pid)
+        self.store.missions.insert(m)
+        self.store.missions.insert(keep_mission)
+        mine = AgentSession(project_id=pid, agent_id="fake", native_session_id="h1",
+                            backend="cli", working_directory="/tmp", mission_id=m.id,
+                            status="stopped")
+        other = AgentSession(project_id=pid, agent_id="fake", native_session_id="h2",
+                             backend="cli", working_directory="/tmp",
+                             mission_id=keep_mission.id, status="stopped")
+        self.store.sessions.insert(mine)
+        self.store.sessions.insert(other)
+
+        self.store.sessions.detach_mission(m.id)
+        self.assertIsNone(self.store.sessions.get(mine.id).mission_id)
+        self.assertEqual(self.store.sessions.get(other.id).mission_id, keep_mission.id,
+                         "detached a session belonging to a different mission")
 
     def test_settings_json(self):
         self.store.settings.set("k", {"x": [1, 2]})

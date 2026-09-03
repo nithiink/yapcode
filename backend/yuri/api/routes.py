@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from yuri.app import container, narration_mode, set_narration_mode
 from yuri.domain.mission import InvalidTransition
+from yuri.services.missions import MissionInUse
 from yuri.narration.policy import MODES
 from .schemas import NarrationUpdate, ProjectCreate
 
@@ -138,6 +139,18 @@ def build_router(require_auth: Callable) -> APIRouter:
     @r.post("/missions/{mission_id}/cancel")
     async def cancel(mission_id: str, request: Request):
         return await _transition(mission_id, "cancel", request)
+
+    @r.delete("/missions/{mission_id}")
+    async def delete_mission(mission_id: str, request: Request):
+        """Permanently remove a mission. 409 while it still has live sessions —
+        cancel it first, which stops its agents."""
+        try:
+            await container().missions.delete(mission_id, by=_by(request))
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except MissionInUse as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"deleted": mission_id}
 
     # --- sessions -----------------------------------------------------------
     @r.get("/sessions")

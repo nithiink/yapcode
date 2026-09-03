@@ -128,6 +128,19 @@ class YuriApi(unittest.IsolatedAsyncioTestCase):
     def test_mission_not_found(self):
         self.assertEqual(self.client.get("/yuri/missions/nope").status_code, 404)
         self.assertEqual(self.client.post("/yuri/missions/nope/pause").status_code, 404)
+        self.assertEqual(self.client.delete("/yuri/missions/nope").status_code, 404)
+
+    def test_delete_mission_refuses_while_live_then_succeeds_after_cancel(self):
+        mid = self._start()["mission_id"]
+        r = self.client.delete(f"/yuri/missions/{mid}")
+        self.assertEqual(r.status_code, 409, "deleted a mission whose session was still live")
+        self.assertEqual(self.client.get(f"/yuri/missions/{mid}").status_code, 200)
+
+        self.client.post(f"/yuri/missions/{mid}/cancel")
+        r = self.client.delete(f"/yuri/missions/{mid}")
+        self.assertEqual((r.status_code, r.json()), (200, {"deleted": mid}))
+        self.assertEqual(self.client.get(f"/yuri/missions/{mid}").status_code, 404)
+        self.assertEqual(self.client.get("/yuri/missions").json()["missions"], [])
 
     # --- sessions -----------------------------------------------------------
 
