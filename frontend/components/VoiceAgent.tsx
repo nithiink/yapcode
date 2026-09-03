@@ -20,25 +20,18 @@ import {
 } from "@/lib/narration";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
-
-// One ordered list of bubbles + tool rows so the live "Conversation" panel renders
-// tool calls inline with the surrounding turns instead of piling them at the end.
-type TimelineItem =
-  | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
-  | { kind: "tool"; id: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
-
-// A plan-approval prompt carries the plan markdown after this marker (set in
-// the backend's _summarize_tool); split it off so the card can render it
-// formatted instead of as one raw blob.
-function splitPlan(text: string): { lead: string; plan: string | null } {
-  const i = text.indexOf("The full plan follows");
-  if (i < 0) return { lead: text, plan: null };
-  const nl = text.indexOf("\n", i);
-  return {
-    lead: text.slice(0, i).replace(/[—.\s]+$/, ""),
-    plan: nl < 0 ? null : text.slice(nl).trim(),
-  };
-}
+import {
+  splitPlan,
+  fmtPayload,
+  isFlatObject,
+  toolState,
+  toolSummary,
+  type TimelineItem,
+  type ToolItem,
+} from "@/lib/timeline";
+import { clip, abbrevHome, fmtLogTime, fmtLogTimeTitle } from "@/lib/format";
+import { sessionStatus, MODES, MODE_LABEL, BACKEND_LABEL, type Sess } from "@/lib/sessions";
+import { MODEL_OPTIONS, connectionParams, PROVIDER_LABEL, NARRATION_LABEL, orbCaption } from "@/lib/voiceui";
 
 // Minimal markdown rendering (headings, lists, bold, inline code, fences) as
 // React elements — no innerHTML, so prompt content can't inject markup.
@@ -80,87 +73,6 @@ function MarkdownLite({ md }: { md: string }) {
     out.push(l.trim() ? <div key={key++} className="mdp">{inline(l)}</div> : <div key={key++} className="mdgap" />);
   }
   return <div className="planmd">{out}</div>;
-}
-
-// Pretty-print a tool call's input/output for the expandable detail view.
-// Strings pass through; objects are JSON-formatted; nullish renders as a dash.
-function fmtPayload(v: unknown): string {
-  if (v === undefined || v === null) return "—";
-  if (typeof v === "string") return v;
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
-}
-
-// The backend stamps activity-log timestamps as UTC ISO strings ("…Z"). Show
-// them in the viewer's own timezone: parse to a Date and format a compact local
-// clock (HH:MM:SS.mmm). Falls back to the raw UTC time slice if unparseable.
-function fmtLogTime(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts.slice(11, 23);
-  const p = (n: number, w = 2) => String(n).padStart(w, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
-}
-
-// Full local date-time (incl. timezone) for the timestamp's hover title, so the
-// date — omitted from the compact row — is still available on demand.
-function fmtLogTimeTitle(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "long" });
-}
-
-type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
-
-// A flat object (all primitive values) renders as an aligned key/value grid;
-// anything nested falls back to a JSON code block.
-function isFlatObject(v: unknown): v is Record<string, unknown> {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every(
-    (x) => x === null || ["string", "number", "boolean"].includes(typeof x),
-  );
-}
-
-const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-
-// Done / working / error — drives the status dot and accent. `working` is the
-// transient state tell_claude & friends return before the real result polls in.
-function toolState(item: ToolItem): "done" | "working" | "error" {
-  if (item.ok === false) return "error";
-  const status = (item.result as { status?: string } | undefined)?.status;
-  if (status === "working") return "working";
-  if (status === "error") return "error";
-  return "done";
-}
-
-// A short, human-readable gloss of what the call actually did, so the row reads
-// like an action ("told Claude to…", "mode → auto") instead of bare jargon.
-function toolSummary(name: string, args: unknown, result: unknown): string {
-  const a = (args ?? {}) as Record<string, any>;
-  const r = (result ?? {}) as Record<string, any>;
-  switch (name) {
-    case "tell_claude":
-      return a.message ? clip(String(a.message)) : "";
-    case "answer_prompt":
-      return a.choice ? `“${clip(String(a.choice), 60)}”` : "";
-    case "run_slash_command":
-      return String(r.sent || `/${a.command ?? ""}${a.args ? " " + a.args : ""}`).trim();
-    case "set_mode":
-      return r.mode || a.mode ? `mode → ${r.mode || a.mode}` : "";
-    case "rename_session":
-      return r.name ? `→ ${r.name}` : a.name || "";
-    case "start_session":
-      return r.name ? `${r.name}${r.project_path ? " · " + String(r.project_path).split("/").pop() : ""}` : "";
-    case "list_sessions":
-      return Array.isArray(r.sessions) ? `${r.sessions.length} session${r.sessions.length === 1 ? "" : "s"}` : "";
-    case "list_projects":
-      return Array.isArray(r.projects) ? `${r.projects.length} projects` : "";
-  }
-  if (typeof r.message === "string") return clip(r.message);
-  if (typeof r.status === "string") return r.status;
-  return "";
 }
 
 function PayloadView({ value }: { value: unknown }) {
@@ -266,58 +178,6 @@ function renderConversation(items: TimelineItem[]): ReactElement[] {
   }
   return nodes;
 }
-type Sess = {
-  handle: string;
-  session_id: string | null;
-  cwd: string;
-  model: string;
-  status: string;
-  cost_usd?: number;
-  backend?: string;
-  mode?: string;
-  agent_id?: string;
-  agent_name?: string;
-  // What this session's provider actually supports. The panel used to assume
-  // every session was Claude Code: it rendered a permission-mode switcher for
-  // OpenCode (which has no modes, so every click failed) and built its own
-  // `claude --resume` line for a session Claude had never heard of.
-  supports_modes?: boolean;
-  resume_command?: string | null;
-  // Whether a live terminal view can be offered for THIS session. Not the
-  // same as backend === "cli": OpenCode's session lives in a server, and its
-  // view is an `opencode attach` pane created on demand.
-  can_watch?: boolean;
-  name?: string | null;
-  // Live work-pipeline (from the runner's list()): a turn executing now,
-  // turns waiting behind it, and finished turns not yet narrated by poll.
-  running?: boolean;
-  queued?: number;
-  pending?: number;
-  // The actual in-flight + waiting turns, in order, with their message text.
-  queue?: { text: string; state: "running" | "queued" }[];
-  // The live pending prompt when status is needs_permission/needs_choice —
-  // lets an agent that connected after the prompt fired still see it in full.
-  prompt?: { kind: string; text: string; options?: string[] };
-};
-
-// Abbreviate the user's home dir to ~ for a compact path display.
-function abbrevHome(path: string): string {
-  return path.replace(/^\/(Users|home)\/[^/]+/, "~");
-}
-
-// Headline status for a session's status strip: a dot/accent class, a one-word
-// lead, and the current-task line — derived from the live work-pipeline so the
-// panel answers "what is it doing right now?" at a glance.
-function sessionStatus(s: Sess): { cls: string; lead: string; task: string } {
-  const running = s.queue?.find((q) => q.state === "running")?.text;
-  if (s.status === "needs_permission" || s.status === "needs_choice")
-    return { cls: "attn", lead: "Needs you", task: "Waiting for your approval" };
-  if (s.status === "error")
-    return { cls: "error", lead: "Error", task: "The last turn ran into an error" };
-  if (s.running)
-    return { cls: "working", lead: "Working", task: running || "Running a task…" };
-  return { cls: "ready", lead: "Ready", task: "Waiting for your next instruction" };
-}
 
 // Small copy-to-clipboard button with transient ✓ feedback.
 function CopyBtn({ text }: { text: string }) {
@@ -354,84 +214,12 @@ type DebugEvent = {
   detail?: unknown;
 };
 
-const MODES: { id: string; label: string; title: string }[] = [
-  { id: "default", label: "Normal", title: "Asks before risky actions; approve/deny by voice" },
-  { id: "plan", label: "Plan", title: "Only plans — makes no edits or commands" },
-  { id: "acceptEdits", label: "Accept Edits", title: "File edits auto-apply; other risky actions still asked" },
-  { id: "auto", label: "Auto", title: "Runs everything without asking" },
-];
-const MODE_LABEL: Record<string, string> = Object.fromEntries(MODES.map((m) => [m.id, m.label]));
 type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
 type TxEvent =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "tool"; name: string; summary: string; risky: boolean }
   | { kind: "tool_result"; ok: boolean; text: string };
-
-// Realtime models the user can pick per provider, best/most-capable first.
-// Azure's list is dynamic: its "models" are the server-side deployment names
-// (AZURE_OPENAI_DEPLOYMENTS env), fetched from /api/voice/models at mount —
-// the static entry stays empty so no dropdown shows until they load.
-const MODEL_OPTIONS: Record<VoiceProvider, { value: string; label: string }[]> = {
-  azure: [],
-  openai: [
-    { value: "gpt-realtime-2", label: "gpt-realtime-2 · most capable" },
-    { value: "gpt-realtime-1.5", label: "gpt-realtime-1.5 · best audio" },
-    { value: "gpt-realtime-mini", label: "gpt-realtime-mini · economy" },
-  ],
-  gemini: [
-    { value: "gemini-3.1-flash-live-preview", label: "Gemini 3.1 Flash Live · best" },
-    { value: "gemini-2.5-flash-native-audio-preview-12-2025", label: "Gemini 2.5 Native Audio" },
-  ],
-};
-
-// Per-provider connection params. `model` is the user's dropdown choice.
-function connectionParams(provider: VoiceProvider, model: string): Partial<RealtimeOptions> {
-  if (provider === "gemini") {
-    return { provider: "gemini", model, voice: "Kore" };
-  }
-  if (provider === "azure") {
-    // Azure-hosted OpenAI realtime. `model` is an Azure *deployment* name from
-    // /api/voice/models; the backend only honors allowlisted names and falls
-    // back to its default deployment otherwise (e.g. empty before the fetch).
-    return { provider: "azure", model: model || undefined, voice: "marin" };
-  }
-  // OpenAI direct — the "native" option, kept switchable alongside Azure.
-  return { provider: "openai", model, voice: "marin" };
-}
-
-// "azure" and "openai" are the same engine family reached over different
-// routes (Azure-hosted deployment vs OpenAI direct) — the UI presents them as
-// OpenAI with a route sub-choice, not as separate top-level providers.
-const PROVIDER_LABEL: Record<VoiceProvider, string> = {
-  azure: "OpenAI · Azure",
-  openai: "OpenAI",
-  gemini: "Gemini",
-};
-
-const BACKEND_LABEL: Record<ClaudeBackend, string> = {
-  cli: "CLI",
-  sdk: "SDK",
-};
-
-// How much Yuri says out loud. Wording matches the voice instructions in
-// lib/operating.ts so the button and the spoken command mean the same thing.
-const NARRATION_LABEL: Record<NarrationMode, { label: string; title: string }> = {
-  quiet: { label: "Quiet", title: "Only problems and things needing your answer" },
-  normal: { label: "Normal", title: "Meaningful progress (recommended)" },
-  verbose: { label: "Verbose", title: "Every tool call and cost update too" },
-};
-
-// A calm, coarse caption for the orb. The orb's volume animation conveys the
-// moment-to-moment activity, so we deliberately collapse listening/hearing/
-// speaking into one steady "Listening" label instead of churning the words.
-function orbCaption(connected: boolean, muted: boolean, vstate: VoiceState): string {
-  if (!connected || vstate === "idle") return "Offline";
-  if (muted) return "Muted";
-  if (vstate === "connecting") return "Connecting…";
-  if (vstate === "thinking") return "Thinking…"; // keep this one — it's a genuine longer pause
-  return "Listening";
-}
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
