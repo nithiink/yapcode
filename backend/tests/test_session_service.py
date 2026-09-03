@@ -7,7 +7,7 @@ from unittest import mock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config  # noqa: E402
-from yuri.domain.session import AgentSession  # noqa: E402
+from yuri.domain.session import LIVE_STATUSES, AgentSession  # noqa: E402
 from yuri.events.bus import EventBus  # noqa: E402
 from yuri.home import Home  # noqa: E402
 from yuri.providers.base import ProviderEvent  # noqa: E402
@@ -580,6 +580,47 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
         again = await self.svc.adopt(UUID_A, os.path.join(self.root, "proj"))
         self.assertFalse(again["already"])
         self.assertEqual(len(self.store.missions.list()), 2)
+
+    async def test_an_unenumerable_provider_cannot_strand_a_second_mission(self):
+        """One live row per native handle, enforced by migration 0002.
+
+        Reachable before it: when list_native() raises, _native_map swallows
+        it and _native() comes back empty, so adopt() took the
+        not-yet-adopted branch and inserted a SECOND live row with its own
+        mission. Reproduced as two live rows for one handle carrying two
+        missions -- neither misroutes, but one is stranded forever.
+        """
+        first = await self.svc.adopt(UUID_A, os.path.join(self.root, "proj"),
+                                     name="handed")
+
+        broken = self.fake.list_native
+        self.fake.list_native = lambda: (_ for _ in ()).throw(RuntimeError("down"))
+        try:
+            again = await self.svc.adopt(UUID_A, os.path.join(self.root, "proj"),
+                                         name="second")
+        finally:
+            self.fake.list_native = broken
+
+        # The honest answer is the already-adopted one.
+        self.assertTrue(again["already"])
+        self.assertEqual(again["name"], "handed")
+        self.assertEqual(again["mission_id"], first["mission_id"])
+
+        live = [r for r in self.store.sessions.list() if r.status in LIVE_STATUSES]
+        handles = [r.native_session_id for r in live]
+        self.assertEqual(len(handles), len(set(handles)), "two live rows for one handle")
+
+        # And the mission that has nothing to run is retired, not left active.
+        by_title = {m.title: m.status for m in self.store.missions.list()}
+        self.assertEqual(by_title["second"], "cancelled")
+
+    async def test_the_index_still_allows_re_adopting_a_stopped_handle(self):
+        """The reason a full UNIQUE index was declined: re-adoption is
+        legitimate once the row is no longer live."""
+        await self.svc.adopt(UUID_A, os.path.join(self.root, "proj"), name="handed")
+        await self.svc.stop(UUID_A)
+        again = await self.svc.adopt(UUID_A, os.path.join(self.root, "proj"))
+        self.assertFalse(again["already"])
 
     async def test_interrupt_read_peek_and_slash(self):
         out = await self.svc.start("proj")

@@ -696,6 +696,15 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         log.warning("tool %s unavailable: %s", req.name, exc)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
+    except NotImplementedError as exc:
+        # A capability this provider does not have -- set_mode on OpenCode,
+        # send_keys on the SDK backend. The message names the provider and what
+        # it cannot do, which is exactly what the model should relay; the
+        # generic handler below would replace all of it with "failed
+        # unexpectedly" and the user would hear nothing useful.
+        log.info("tool %s unsupported: %s", req.name, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
+        return {"ok": False, "error": str(exc)}
     except ProviderUnavailable as exc:
         # A provider that cannot serve wrote an actionable message about how to
         # fix it; the generic handler below would throw that away. Soft, like

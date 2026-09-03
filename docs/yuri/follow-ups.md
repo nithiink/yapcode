@@ -9,25 +9,41 @@ runs. Items are grouped by the phase that carried them:
 * **Phase 1-3 (foundation)** — the domain, store, providers and services build
   (merged as `4d47cb8`).
 
-## Recommended next fixes
+## Fixed (2026-09-03, after the phase 5 merge)
 
-**Partial unique index on `sessions.native_session_id`.** A full unique index
-would break `adopt()`'s legitimate re-adoption of a stopped handle, so it was
-declined — but the justification ("only one row is ever live") is unenforced,
-and a reviewer reproduced a violation: if `list_native()` fails, `_native()`
-returns empty, `adopt()` takes the not-yet-adopted branch and inserts a second
-*live* row for the same handle. It cannot misroute (both rows name the same
-handle and get different session names), but it strands a mission. The idiomatic
-guard is a partial index mirroring `approvals_one_pending` in `0001_init.sql`:
-`UNIQUE(native_session_id) WHERE status IN (<live statuses>)`.
+All three "recommended next fixes" are done, plus four more from the lists
+below. Kept here rather than deleted, because each one records a reachable
+failure and the reasoning that closed it.
 
-**`_touch(row, "running")` can re-admit a lost row without de-duplicating its
-name.** Reachable from `send`/`poll`/`answer` between a handle's return and the
-next restart. Fails closed today — `resolve()` refuses an ambiguous name — but
-the de-dupe belongs in `_touch` alongside the revive path.
-
-**`ClaudeRunner._notify` coverage is one test deep.** The "an observer bug must
-never break a turn" guarantee is the safety net under the whole event pipeline.
+- **Partial unique index on `sessions.native_session_id`** — migration 0002,
+  `sessions_one_live`, mirroring `approvals_one_pending`. The violation was
+  reproduced first: when `list_native()` raises, `_native()` comes back empty
+  and `adopt()` inserted a SECOND live row with its own mission, stranding one.
+  `adopt()` now treats the constraint as "already adopted" and cancels the
+  mission it had just created. `migrate()` asserts `LIVE_STATUSES` still
+  matches the statuses the index hardcodes, since sqlite cannot import a Python
+  constant, and `sqlite.py` no longer keeps its own copy of that list.
+- **`_touch` re-admitting a lost row without de-duplicating its name** — the
+  de-dupe now runs on every path into the live set, not just rehydrate's revive
+  branch. A returning session comes back as "alpha 2".
+- **`ClaudeRunner._notify` was untested** — five tests, including that one
+  raising event does not poison the stream behind it. Removing the guard fails
+  three of them.
+- **Poll-path approvals under-classified risk** — `Prompt` carries
+  `tool_input` and `AdvanceResult.to_dict()` serialises it, so `rm -rf /` from
+  the poll path scores `dangerous` rather than `confirm`. It only labels, but
+  the user hears that label: Yuri says "that's a destructive action" off it.
+- **A moved read mark was only persisted on the poll path** — `send_message`
+  rewinds the cursor and `interrupt` bumps `msg_seen`; one `_merge_marks`
+  helper now serves send, interrupt and poll, so an interrupt through the API
+  or `interrupt_many` writes it down.
+- **`NotImplementedError` is soft at `/tools/execute`** — `set_mode` on
+  OpenCode and `send_keys` on the SDK backend now reach the user with the
+  message that names what the provider cannot do.
+- **Three robustness items in `claude_code.py`** — `_version` orphaned a child
+  on timeout (on every health probe); `shutdown` let one raising runner skip
+  the rest of teardown and left `on_event` pointing at a cleared provider; two
+  loops iterated `self._runners` live, which `runner()` inserts into lazily.
 
 ## Carried out of phase 4 (narration)
 
@@ -102,11 +118,8 @@ surfaces every sub-question to the voice model, so the user is asked — but
 narration built purely on events would under-report. Do not assume every turn
 and every prompt emits.
 
-**Poll-path approvals under-classify risk.** `AdvanceResult.to_dict()` omits
-`tool_input`, so an approval recorded via `poll` scores `confirm` where the
-observer path scores `dangerous`. Harmless while the observer wins the
-request_id dedup; load-bearing the moment `risk` drives policy rather than
-just labelling.
+**Poll-path approvals under-classify risk.** FIXED — see the Fixed section
+above. `Prompt` now carries `tool_input` and `to_dict()` serialises it.
 
 **`cost.updated` no longer reaches the Activity feed.** Bridged events are
 filtered to non-debug severities to stop double-logging, and cost had no
@@ -180,7 +193,7 @@ voice commands — have not been exercised in a live voice round-trip.
 
 ## Phase 5 (OpenCode provider)
 
-- **`NotImplementedError` is not soft at `/tools/execute`.** `main.py`'s exception
+- **FIXED — `NotImplementedError` is not soft at `/tools/execute`.** `main.py`'s exception
   chain maps `YuriUnavailable` and `ValueError` to soft errors and `KeyError` to
   404, but everything else — including `NotImplementedError` — becomes a generic
   "the tool failed unexpectedly". So `set_mode` on an OpenCode session (which has
@@ -219,11 +232,8 @@ voice commands — have not been exercised in a live voice round-trip.
   `answered` set stays honest. That is a deliberate design change to a
   cross-service contract, not an end-of-branch patch.
 
-- **Smaller, from the same review:** `interrupt()` and `send_message()` move a
-  mark without persisting it (the poll timer catches up within ~1.5s in the
-  voice flow, but `/yuri/sessions/{id}/interrupt` and `interrupt_many` do not) —
-  the fix is one `runtime_metadata_for` merge in a shared helper rather than in
-  `poll` alone. A session row's `backend` reads `"cli"` for OpenCode (the UI is
+- **Smaller, from the same review:** the mark-persistence item is FIXED (one
+  `_merge_marks` helper now serves send, interrupt and poll). Still open: A session row's `backend` reads `"cli"` for OpenCode (the UI is
   right because `list_native` says `opencode`, but the row, `start_session`'s
   result and the `revived` payload are wrong). `send_keys`/`run_slash_command`
   tell an OpenCode user "this session uses the SDK backend", which is false

@@ -15,13 +15,14 @@ from yuri.domain.approval import Approval
 from yuri.domain.event import YuriEvent
 from yuri.domain.mission import Mission, MissionStep
 from yuri.domain.project import Project
-from yuri.domain.session import AgentSession
-from .base import (ApprovalRepo, EventRepo, MissionRepo, PendingApprovalExists, ProjectRepo,
+from yuri.domain.session import LIVE_STATUSES, AgentSession
+from .base import (ApprovalRepo, EventRepo, LiveSessionExists, MissionRepo,
+                   PendingApprovalExists, ProjectRepo,
                    SessionRepo, SettingsRepo, Store)
 
 log = logging.getLogger("yuri.store.sqlite")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
 _JSON_COLS = {"metadata", "result", "runtime_metadata", "tool_input", "payload"}
@@ -177,6 +178,19 @@ class SqliteMissions(_Base, MissionRepo):
 class SqliteSessions(_Base, SessionRepo):
     table, cls = "sessions", AgentSession
 
+    def insert(self, row):
+        try:
+            super().insert(row)
+        except sqlite3.IntegrityError as exc:
+            # sessions_one_live (migration 0002). sqlite names the index in
+            # some builds and the column in others, so match either -- and
+            # re-raise anything else untouched rather than mislabelling a
+            # different constraint as this one.
+            if "sessions_one_live" in str(exc) or "sessions.native_session_id" in str(exc):
+                raise LiveSessionExists(
+                    f"a live session row already exists for {row.native_session_id}") from exc
+            raise
+
     def get_by_native(self, native_id):
         return self._one("SELECT * FROM sessions WHERE native_session_id = ? "
                          "ORDER BY started_at DESC LIMIT 1", (native_id,))
@@ -187,7 +201,11 @@ class SqliteSessions(_Base, SessionRepo):
             where.append("mission_id = ?")
             args.append(mission_id)
         if live_only:
-            live = ("starting", "running", "needs_permission", "needs_choice", "idle")
+            # The domain's list, not a copy: 0002's partial unique index is
+            # written against these same statuses, and a drift between the
+            # three would make "one live row per handle" quietly stop meaning
+            # what live_rows() returns.
+            live = tuple(sorted(LIVE_STATUSES))
             where.append(f"status IN ({', '.join('?' * len(live))})")
             args.extend(live)
         sql = "SELECT * FROM sessions" + (" WHERE " + " AND ".join(where) if where else "") + \
@@ -279,6 +297,16 @@ class SqliteStore(Store):
         self.settings = SqliteSettings(self._conn)
 
     def migrate(self) -> None:
+        # 0002's partial unique index hardcodes the live statuses -- sqlite
+        # cannot import a Python constant. Fail loudly here if someone adds a
+        # status to LIVE_STATUSES without touching the index, rather than
+        # letting "one live row per handle" silently stop covering it.
+        expected = {"starting", "running", "needs_permission", "needs_choice", "idle"}
+        if set(LIVE_STATUSES) != expected:
+            raise RuntimeError(
+                "LIVE_STATUSES changed but migrations/0002_one_live_session_per_handle.sql "
+                f"still indexes {sorted(expected)}; add a migration that rebuilds "
+                "sessions_one_live for the new set")
         con = self._conn.get()
         con.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         current = self.settings.get("schema_version", 0)

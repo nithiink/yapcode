@@ -284,6 +284,31 @@ class MarksThroughTheStore(_ServiceBase):
         self.assertEqual(self._row(h).runtime_metadata,
                          {"opencode_cursor": 1, "opencode_msg_seen": 1})
 
+    async def test_an_interrupt_with_no_poll_behind_it_still_writes_the_mark(self):
+        """interrupt() consumes the abandoned turn's messages, so the mark
+        moves -- but only poll used to merge marks before persisting. Via the
+        voice flow a poll follows within ~1.5s and covers it; via
+        /yuri/sessions/{id}/interrupt or interrupt_many nothing does, and the
+        moved mark was lost, so a restart re-narrated the abandoned reply."""
+        svc, _ = self._boot()
+        h = (await svc.start("proj"))["session_id"]
+        svc.send(h, "go")
+        self.fake.state.push_assistant(h, "half a sent", finish="")
+        svc.poll(h)                                  # in flight, mark at 0
+        self.assertEqual(self._row(h).runtime_metadata["opencode_msg_seen"], 0)
+
+        await svc.interrupt(h)                       # no poll afterwards
+        self.assertEqual(self._row(h).runtime_metadata["opencode_msg_seen"], 1,
+                         "the interrupt's mark never reached the row")
+
+    async def test_a_send_writes_a_rewound_cursor(self):
+        """send_message rewinds the cursor to admittedSeq-1 when that is lower,
+        so the admitted event is read back. That is a moved mark too."""
+        svc, _ = self._boot()
+        h = (await svc.start("proj"))["session_id"]
+        svc.send(h, "go")
+        self.assertIn("opencode_cursor", self._row(h).runtime_metadata)
+
     async def test_a_quiet_poll_still_records_a_cursor_that_moved(self):
         """An idle poll takes none of the status branches that persist the row,
         and its cursor still moved — server-side activity Yuri did not start
