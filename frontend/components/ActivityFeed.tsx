@@ -21,6 +21,7 @@ export type DebugEvent = {
 // filtered rows from the raw `events` it's given.
 export function ActivityFeed({
   events,
+  streamConnected,
   filter,
   onFilter,
   errorsOnly,
@@ -34,6 +35,11 @@ export function ActivityFeed({
   onScroll,
 }: {
   events: DebugEvent[];
+  // Whether the /debug/stream this feed is fed by is currently connected —
+  // an empty list on a dead stream is a different situation from an empty
+  // list because nothing has happened yet, and only one of those means
+  // talking to the agent will make anything show up here.
+  streamConnected: boolean;
   filter: string;
   onFilter: (v: string) => void;
   errorsOnly: boolean;
@@ -94,7 +100,11 @@ export function ActivityFeed({
       <div className="rule" />
       <div className="logscroll" ref={scrollRef} onScroll={onScroll}>
         {filteredLog.length === 0 && (
-          <div className="empty">No matching events yet — talk to the agent and the full pipeline shows here.</div>
+          <div className="empty">
+            {events.length === 0 && !streamConnected
+              ? "The activity stream is unreachable right now — this stays empty until the backend comes back."
+              : "No matching events yet — talk to the agent and the full pipeline shows here."}
+          </div>
         )}
         {filteredLog.map((ev) => (
           <div

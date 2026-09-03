@@ -10,7 +10,7 @@ import { useYuri } from "@/components/VoiceProvider";
 import { ActivityFeed } from "@/components/ActivityFeed";
 
 export default function Page() {
-  const { debugEvents, clearDebugEvents } = useYuri();
+  const { debugEvents, debugStreamConnected, clearDebugEvents } = useYuri();
   const [filter, setFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -50,6 +50,7 @@ export default function Page() {
       <h2 className="viewtitle">Activity</h2>
       <ActivityFeed
         events={debugEvents}
+        streamConnected={debugStreamConnected}
         filter={filter}
         onFilter={setFilter}
         errorsOnly={errorsOnly}
