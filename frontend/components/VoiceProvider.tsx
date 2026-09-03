@@ -661,17 +661,31 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Mission-level narration: the poll loop owns the session-turn events, the
-  // stream owns mission state and lost contact (the backend's
-  // yuri/narration/policy.py decides which, and sends narration:null on the
-  // carrier that doesn't own an event — so subscribing to both cannot
-  // double-speak). Only frames carrying a line are spoken.
+  // The Yuri events stream: mission-level narration AND every view's
+  // onYuriEvent fan-out ride the same connection. The poll loop owns the
+  // session-turn events, this stream owns mission state and lost contact (the
+  // backend's yuri/narration/policy.py decides which, and sends
+  // narration:null on the carrier that doesn't own an event — so subscribing
+  // to both cannot double-speak).
   //
-  // Gated on the voice session being connected: narrating into a closed
-  // session is pointless, and it avoids holding a stream open on a page nobody
-  // is talking to.
+  // The subscription itself is NOT gated on the voice session being
+  // connected — every routed view depends on onYuriEvent to know when its
+  // list is stale (nav badges, Approvals refreshing on approval.*, and so
+  // on), and that has to work with the mic off. Only SPEAKING a line is
+  // gated: injectUpdate would push into a closed voice session, which is
+  // pointless (there is nothing to inject into) rather than merely wasteful.
+  // connectedRef (kept current by the effect below) is read at delivery
+  // time, not captured at subscribe time, so a connect/disconnect mid-stream
+  // takes effect on the very next frame without resubscribing.
+  //
+  // Mount-only ([] deps): the subscription no longer depends on `connected`,
+  // so re-running it on every connect/disconnect would just tear down and
+  // reopen an EventSource that has no reason to move, and would re-run the
+  // seed fetch for no benefit. gate.lineFor still runs on every frame
+  // regardless of connected — see the comment at that call — which is what
+  // keeps a later connect from re-speaking whatever piled up while
+  // disconnected.
   useEffect(() => {
-    if (!connected) return;
     let cancelled = false;
     const gate = (narrationGateRef.current ??= createSpokenGate());
     (async () => {
@@ -712,8 +726,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           // mission.status_changed) is NOT the same thing as "already
           // delivered", so `line !== null` cannot stand in for it.
           const isNew = !gate.hasSeen(frame);
+          // Called unconditionally — even while disconnected — because the
+          // gate must keep consuming ids the whole time. If this were
+          // skipped while disconnected, connecting later would replay-speak
+          // everything that happened in between; consuming here (and simply
+          // not acting on the result) is what keeps a later connect silent
+          // about the backlog, the same "replay is silent" property the seed
+          // logic gives the very first subscription.
           const line = gate.lineFor(frame);
-          if (line) {
+          if (line && connectedRef.current) {
             // Always false today (the blocking types are poll-owned, so they
             // carry no line here) — passed anyway so both carriers apply the
             // one rule if ownership ever moves.
@@ -745,7 +766,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       narrationEsRef.current?.close();
       narrationEsRef.current = null;
     };
-  }, [connected]);
+  }, []);
 
   // Keep the orb-loop's connection gate current.
   useEffect(() => {
