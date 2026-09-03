@@ -66,10 +66,14 @@
 **Interfaces — Produces** (later tasks import these exact names):
 ```ts
 // lib/timeline.ts
+// The REAL shape, verified against VoiceAgent.tsx at HEAD. An earlier draft of
+// this plan sketched separate "user"/"assistant" variants; there is one "turn"
+// variant carrying a role. `id` is REQUIRED on the tool variant -- it is the
+// React key at VoiceAgent.tsx:168,171,173, so an optional id renders
+// key="tool-undefined" and duplicates keys when there are several.
 export type TimelineItem =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; args?: unknown; result?: unknown; ok?: boolean };
+  | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
+  | { kind: "tool"; id: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
 export type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 export function splitPlan(text: string): { lead: string; plan: string | null };
 export function toolState(item: ToolItem): "done" | "working" | "error";
