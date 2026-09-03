@@ -100,6 +100,11 @@ NARRATION_OWNER: dict[str, Owner] = {
     EventType.SESSION_TURN_COMPLETED: "poll",
     EventType.AGENT_ERROR: "poll",
     # Stream owns mission-level state and lost contact — poll cannot see them.
+    # The same reasoning covers every workflow/task type: `line_for_poll` takes
+    # SessionService.poll()'s RESULT dict, not an event, so a fact the engine
+    # publishes on the bus can never reach the poll carrier. Declaring one
+    # `poll`-owned is not a routing choice, it is silence — which for
+    # workflow.deadlocked is exactly the stall spec §12 forbids.
     EventType.MISSION_CREATED: "stream",
     EventType.MISSION_STATUS_CHANGED: "stream",
     EventType.SESSION_LOST: "stream",
@@ -120,6 +125,11 @@ NARRATION_OWNER: dict[str, Owner] = {
     # user is always looking at the screen it happened on and watching the row
     # go. The event exists for the audit log, not to be read back.
     EventType.MISSION_DELETED: "none",
+    # The mission finishing is ALREADY spoken by mission.status_changed, which
+    # names it ('"the billing fix" is done.') — a strictly better sentence than
+    # anything this event can say, since it has the title. One owner per FACT,
+    # so this one stays quiet rather than both firing.
+    EventType.WORKFLOW_COMPLETED: "none",
     # RosterService.create/update/archive are UI/API-only (spec: voice tools
     # never create, edit or delete a specialist), so the user is always
     # looking at the screen where it just happened -- narrating it back would
@@ -127,6 +137,27 @@ NARRATION_OWNER: dict[str, Owner] = {
     EventType.SPECIALIST_CREATED: "none",
     EventType.SPECIALIST_UPDATED: "none",
     EventType.SPECIALIST_ARCHIVED: "none",
+    # --- Phase 7: WorkflowEngine (spec §11) ---------------------------------
+    # Workflow-level state, exactly like mission-level state: the stream is the
+    # only carrier that can see it, because a session poll knows nothing about
+    # a task graph.
+    EventType.WORKFLOW_CREATED: "stream",
+    EventType.TASK_DISPATCHED: "stream",
+    # Texture in a long workflow: worth hearing when the user asked for
+    # everything, noise otherwise — the same judgement tool.started got.
+    EventType.TASK_COMPLETED: "stream_verbose",
+    # Poll owns the three that need the user, because in every case the same
+    # fact is ALSO on its way through the session that produced it: a task
+    # fails because its agent errored (agent.error, poll-owned, carrying the
+    # identical reason string), and blocked/deadlocked are that same failure
+    # having run out of attempts. Duplicating it on the stream is the
+    # `_fail_if_alone` double-speak the module docstring opens with.
+    EventType.TASK_FAILED: "stream",
+    EventType.TASK_BLOCKED: "stream",
+    EventType.WORKFLOW_DEADLOCKED: "stream",
+    # Internal: `verifying` is the state, the verdict is the news. Task 9's
+    # verification.failed is what gets spoken.
+    EventType.TASK_VERIFYING: "none",
 }
 
 # Blocks on the user: never suppressed, whatever the mode. "Be quiet" means

@@ -12,7 +12,8 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from yuri.domain.event import DEFAULTS, EventType  # noqa: E402
+from yuri.domain.event import DEFAULTS, EventType, YuriEvent  # noqa: E402
+from yuri.narration.service import NarrationService  # noqa: E402
 from yuri.narration import policy  # noqa: E402
 
 
@@ -33,7 +34,11 @@ class OwnershipTable(unittest.TestCase):
         for t, owner in policy.NARRATION_OWNER.items():
             self.assertIn(owner, ("poll", "stream", "stream_verbose", "none"), f"{t}: {owner}")
 
-    def test_the_four_poll_owned_types_are_exactly_the_ones_poll_carries(self):
+    def test_the_poll_owned_types_are_exactly_the_declared_set(self):
+        # An exact set, not a subset: a type quietly moved to `poll` is a type
+        # `line_for` stops narrating, and `line_for_poll` reads a poll RESULT
+        # dict rather than an event — so a fact the bus carries can never
+        # reach it. These four are the ones line_for_poll actually renders.
         poll_owned = {t for t, o in policy.NARRATION_OWNER.items() if o == "poll"}
         self.assertEqual(poll_owned, {
             EventType.APPROVAL_REQUESTED, EventType.SESSION_QUESTION,
@@ -160,3 +165,48 @@ class ModeFilter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryOwnerCanActuallySpeakTests(unittest.TestCase):
+    """The gate that was missing.
+
+    NARRATION_OWNER assigns exactly one owner per event type, and a test
+    enforces that. Nothing enforced that the assigned owner could *produce a
+    sentence* — so eight Phase 7 types were declared owned and narrated by
+    nobody. Ownership without a line is silence with paperwork.
+    """
+
+    def _event(self, type_):
+        # A payload rich enough for any branch to render from. A branch that
+        # needs a field absent here should return None rather than raise, and
+        # this asserts a LINE, so a missing field shows up as a failure.
+        return YuriEvent.make(
+            type_, mission_id="m1", project_id="p1", session_id="s1", agent_id="claude-code",
+            payload={
+                "title": "the billing fix", "project": "yuri-code", "created_by": "ui",
+                "from": "running", "to": "completed", "session_name": "billing",
+                "tool_name": "Bash", "agent_name": "Claude", "cost_usd": 0.41,
+                "specialist": "Reviewer", "role": "reviewer", "attempt": 1,
+                "reason": "two tests failed", "will_retry": True, "attempts": 2,
+                "blocking": ["review"], "blocking_count": 1,
+                "tasks": [{"id": "t1", "title": "investigate", "role": "researcher"},
+                          {"id": "t2", "title": "fix", "role": "developer"}],
+            })
+
+    def test_every_stream_owned_type_renders_a_line(self):
+        svc = NarrationService()
+        missing = []
+        for type_, owner in policy.NARRATION_OWNER.items():
+            if owner not in ("stream", "stream_verbose"):
+                continue
+            # verbose so stream_verbose types are in scope too
+            if svc.line_for(self._event(type_), "verbose") is None:
+                missing.append(type_)
+        self.assertEqual(missing, [],
+                         f"declared stream-owned but line_for says nothing: {missing}")
+
+    def test_a_none_owned_type_stays_silent(self):
+        svc = NarrationService()
+        for type_, owner in policy.NARRATION_OWNER.items():
+            if owner == "none":
+                self.assertIsNone(svc.line_for(self._event(type_), "verbose"), type_)

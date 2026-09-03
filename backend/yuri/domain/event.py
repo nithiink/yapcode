@@ -37,6 +37,14 @@ class EventType:
     SPECIALIST_CREATED = "specialist.created"
     SPECIALIST_UPDATED = "specialist.updated"
     SPECIALIST_ARCHIVED = "specialist.archived"
+    WORKFLOW_CREATED = "workflow.created"
+    WORKFLOW_COMPLETED = "workflow.completed"
+    WORKFLOW_DEADLOCKED = "workflow.deadlocked"
+    TASK_DISPATCHED = "task.dispatched"
+    TASK_COMPLETED = "task.completed"
+    TASK_FAILED = "task.failed"
+    TASK_BLOCKED = "task.blocked"
+    TASK_VERIFYING = "task.verifying"
 
 
 # type -> (severity, speakable)   (spec §6.1)
@@ -61,6 +69,18 @@ DEFAULTS: dict[str, tuple[str, bool]] = {
     EventType.SPECIALIST_CREATED: ("info", False),
     EventType.SPECIALIST_UPDATED: ("info", False),
     EventType.SPECIALIST_ARCHIVED: ("info", False),
+    # Phase 7's engine events. The severities are what quiet mode filters on
+    # (policy.speaks reads them), so the three that need a human — a failed
+    # task, an exhausted one, a stalled workflow — are `warning`/`error` and
+    # survive "be quiet", while the per-task texture is not.
+    EventType.WORKFLOW_CREATED: ("info", True),
+    EventType.WORKFLOW_COMPLETED: ("info", True),
+    EventType.WORKFLOW_DEADLOCKED: ("warning", True),
+    EventType.TASK_DISPATCHED: ("info", True),
+    EventType.TASK_COMPLETED: ("info", False),
+    EventType.TASK_FAILED: ("warning", True),
+    EventType.TASK_BLOCKED: ("warning", True),
+    EventType.TASK_VERIFYING: ("debug", False),
 }
 
 
