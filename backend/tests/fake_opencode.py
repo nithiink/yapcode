@@ -9,6 +9,7 @@ rather than silently in production.
 """
 from __future__ import annotations
 
+import base64
 import json
 import socketserver
 import threading
@@ -108,10 +109,26 @@ class _Handler(BaseHTTPRequestHandler):
                          "field": field, "kind": "Payload"})
 
     def _authorized(self) -> bool:
+        """HTTP Basic, exactly as the real server does it.
+
+        Measured against `opencode serve` with OPENCODE_SERVER_PASSWORD set:
+        no header -> 401, `x-opencode-password` -> 401, Basic with an empty
+        username -> 401, Basic as opencode:<pw> -> 200. The fake enforced the
+        header form until Task 8 measured it, which is precisely the kind of
+        agreeable-fake bug that makes a suite lie.
+        """
         want = self.state.require_password
         if not want:
             return True
-        return self.headers.get("x-opencode-password") == want
+        header = self.headers.get("Authorization") or ""
+        if not header.startswith("Basic "):
+            return False
+        try:
+            user, _, password = base64.b64decode(
+                header[6:].strip()).decode().partition(":")
+        except Exception:
+            return False
+        return bool(user) and password == want
 
     def _body(self) -> dict:
         n = int(self.headers.get("Content-Length") or 0)

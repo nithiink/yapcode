@@ -15,6 +15,7 @@ Nothing above this file should know what an envelope is.
 """
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -30,6 +31,9 @@ log = logging.getLogger("yuri.opencode.client")
 # being silently absorbed by tools.py's ValueError-to-soft-error mapping.
 _REQUEST_ERROR_TAGS = frozenset({"InvalidRequestError"})
 
+# `opencode attach --username` documents this same default.
+DEFAULT_USERNAME = "opencode"
+
 
 class OpenCodeError(RuntimeError):
     """The server is unreachable, broken, or refused us. Provider-level."""
@@ -44,8 +48,9 @@ class OpenCodeRequestError(ValueError):
 
 class OpenCodeClient:
     def __init__(self, base_url: str, password: str | None = None,
-                 timeout: float = 30.0) -> None:
+                 timeout: float = 30.0, username: str = DEFAULT_USERNAME) -> None:
         self._base = base_url.rstrip("/")
+        self._username = username or DEFAULT_USERNAME
         # Held privately and never rendered: __repr__ is the default, which
         # shows the class and address, so the secret cannot leak through a log
         # line that interpolates the client.
@@ -57,11 +62,22 @@ class OpenCodeClient:
         return self._base
 
     def _headers(self) -> dict[str, str]:
-        # The OpenAPI declares no security scheme (spec section 9), so the
-        # mechanism is empirical. This header is what the fake enforces and
-        # what Task 8 verifies against a real password-protected server; if
-        # that check shows otherwise, this one method changes.
-        return {"x-opencode-password": self._password} if self._password else {}
+        """HTTP Basic, with a username that defaults to "opencode".
+
+        The OpenAPI declares no security scheme (spec section 9), so this was
+        empirical and the first guess -- an `x-opencode-password` header -- was
+        WRONG: measured against a real `OPENCODE_SERVER_PASSWORD` server, that
+        header gets 401 and Basic gets 200. The username matters too: Basic
+        with an empty user is also 401. `opencode attach --username` documents
+        the same default, which is the corroboration.
+
+        Kept in this one method on purpose, so being wrong cost one function.
+        """
+        if not self._password:
+            return {}
+        token = base64.b64encode(
+            f"{self._username}:{self._password}".encode()).decode()
+        return {"Authorization": f"Basic {token}"}
 
     async def get(self, path: str, **params: Any) -> Any:
         return await self._call("GET", path, params=params or None)

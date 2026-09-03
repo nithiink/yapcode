@@ -200,6 +200,11 @@ OPENCODE_URL: str = (os.getenv("OPENCODE_URL") or "http://127.0.0.1:4096").strip
 OPENCODE_SPAWN: bool = _env_bool("OPENCODE_SPAWN", True)
 OPENCODE_BIN: str = (os.getenv("OPENCODE_BIN") or "opencode").strip()
 OPENCODE_SERVER_PASSWORD: str = (os.getenv("OPENCODE_SERVER_PASSWORD") or "").strip()
+# Basic-auth username. The server pairs the password with a username, and
+# Basic with an empty user is refused -- `opencode attach --username` uses
+# the same default. Measured, not guessed (see the verification doc).
+OPENCODE_SERVER_USERNAME: str = (os.getenv("OPENCODE_SERVER_USERNAME")
+                                 or "opencode").strip() or "opencode"
 OPENCODE_MODEL: str = (os.getenv("OPENCODE_MODEL") or "").strip()
 
 # Whether the spawned OpenCode keeps Yuri's voice-provider keys — see

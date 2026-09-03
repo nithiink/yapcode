@@ -7,6 +7,7 @@ tools.py turns into a soft error the voice model can recover from.
 """
 from __future__ import annotations
 
+import base64
 import os
 import sys
 import unittest
@@ -143,6 +144,70 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(c.base_url.endswith("/"))
             finally:
                 await c.close()
+
+
+class Auth(unittest.IsolatedAsyncioTestCase):
+    """The auth mechanism, as MEASURED against `opencode serve` with
+    OPENCODE_SERVER_PASSWORD set -- the OpenAPI declares no security scheme:
+
+        no header               -> 401
+        x-opencode-password     -> 401   <- what this client sent originally
+        Basic with empty user   -> 401
+        Basic opencode:<pw>     -> 200
+
+    The first guess was wrong in production and right in the fake, because the
+    fake had been written to agree with it. These tests exist so the fake can
+    never drift back into being agreeable.
+    """
+
+    async def test_it_sends_http_basic_not_a_custom_header(self):
+        with FakeOpenCode() as fake:
+            fake.state.require_password = "pw"
+            c = OpenCodeClient(fake.url, password="pw")
+            try:
+                self.assertIsInstance(await c.get("/api/session"), list)
+                header = c._headers()
+                self.assertTrue(header["Authorization"].startswith("Basic "))
+                self.assertNotIn("x-opencode-password", header)
+                user, _, password = base64.b64decode(
+                    header["Authorization"][6:]).decode().partition(":")
+                self.assertEqual((user, password), ("opencode", "pw"))
+            finally:
+                await c.close()
+
+    async def test_the_username_is_configurable_but_never_empty(self):
+        """Basic with an empty username is refused by the real server, so an
+        empty configured value must fall back rather than be sent as-is."""
+        with FakeOpenCode() as fake:
+            fake.state.require_password = "pw"
+            for given, want in (("opencode", "opencode"), ("someone", "someone"),
+                                ("", "opencode")):
+                c = OpenCodeClient(fake.url, password="pw", username=given)
+                try:
+                    user = base64.b64decode(
+                        c._headers()["Authorization"][6:]).decode().partition(":")[0]
+                    self.assertEqual(user, want, given)
+                    self.assertIsInstance(await c.get("/api/session"), list)
+                finally:
+                    await c.close()
+
+    async def test_a_wrong_or_missing_password_is_refused(self):
+        with FakeOpenCode() as fake:
+            fake.state.require_password = "pw"
+            for password in ("wrong", None):
+                c = OpenCodeClient(fake.url, password=password)
+                try:
+                    with self.assertRaises(OpenCodeError, msg=repr(password)):
+                        await c.get("/api/session")
+                finally:
+                    await c.close()
+
+    async def test_no_authorization_header_when_no_password_is_set(self):
+        c = OpenCodeClient("http://127.0.0.1:1")
+        try:
+            self.assertEqual(c._headers(), {})
+        finally:
+            await c.close()
 
 
 if __name__ == "__main__":

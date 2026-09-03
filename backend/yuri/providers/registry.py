@@ -78,6 +78,7 @@ def _opencode_provider() -> AgentProvider:
         binary=config.OPENCODE_BIN,
         # "" is not a password: None means "send no auth header".
         password=config.OPENCODE_SERVER_PASSWORD or None,
+        username=config.OPENCODE_SERVER_USERNAME,
         cwd=roots[0] if roots else None,
         # Its stdout/stderr belong in a log, not in the terminal the voice UI
         # owns. Home.ensure() makes no logs/ dir; _spawn() creates it.
