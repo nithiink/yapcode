@@ -11,6 +11,7 @@ import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { ViewError } from "@/components/ViewError";
 import { MISSION_CLASS, canCancel, canPause, canResume } from "@/lib/missions";
+import { sessionLabel } from "@/lib/sessions";
 import { yget, ypost, ApiError } from "@/lib/api";
 import { fmtLogTime, fmtLogTimeTitle, clip } from "@/lib/format";
 import { isFlatObject } from "@/lib/timeline";
@@ -201,7 +202,9 @@ export default function MissionDetailPage() {
             {sessions.map((s) => (
               <Link className="dash-row miss-row" href="/sessions" key={s.id}>
                 <div className="dash-row-top">
-                  <span className="dash-row-title">{s.name || s.native_session_id}</span>
+                  <span className="dash-row-title">
+                    {sessionLabel({ name: s.name, cwd: s.working_directory, handle: s.native_session_id })}
+                  </span>
                   <span className="dash-row-meta">{s.status}</span>
                 </div>
                 <span className="dash-row-task">{s.agent_id || s.backend}</span>

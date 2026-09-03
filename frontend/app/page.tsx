@@ -17,31 +17,25 @@ import { ApprovalCard } from "@/components/ApprovalCard";
 import { ViewError } from "@/components/ViewError";
 import { bands } from "@/lib/dashboard";
 import { canCancel, canPause, canResume } from "@/lib/missions";
-import { sessionStatus } from "@/lib/sessions";
-import { yget, ypost, ApiError } from "@/lib/api";
-import type { Approval, Mission } from "@/lib/yuriTypes";
+import { sessionLabel, sessionStatus } from "@/lib/sessions";
+import { ypost, ApiError } from "@/lib/api";
 
 export default function Page() {
-  const { approvals, missions, sessions, refresh, onYuriEvent } = useYuri();
+  const { approvals, missions, sessions, refresh } = useYuri();
   const [loadError, setLoadError] = useState<unknown>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyApproval, setBusyApproval] = useState<string | null>(null);
   const [busyMission, setBusyMission] = useState<string | null>(null);
 
-  // useYuri()'s own refresh(what) swallows fetch failures (a stale/empty list
-  // is fine for the shared context — sessions poll again in 2.5s regardless).
-  // This view can't accept that: it has to tell "nothing to do" apart from
-  // "couldn't find out." So it probes the same two endpoints itself, purely
-  // to observe success/failure, and only then asks the context to adopt the
-  // fresh data.
+  // refresh("approvals")/refresh("missions") now reject on a failed fetch
+  // (see VoiceProvider.tsx's refreshApprovals/refreshMissions), so this view
+  // can await them directly to tell "nothing to do" apart from "couldn't
+  // find out," instead of probing both endpoints first purely to observe
+  // success/failure before asking the context to adopt the fresh data.
   const load = useCallback(async () => {
     try {
-      await Promise.all([
-        yget<{ approvals: Approval[] }>("approvals"),
-        yget<{ missions: Mission[] }>("missions"),
-      ]);
-      setLoadError(null);
       await Promise.all([refresh("approvals"), refresh("missions")]);
+      setLoadError(null);
     } catch (e) {
       setLoadError(e);
     }
@@ -51,16 +45,11 @@ export default function Page() {
     void load();
   }, [load]);
 
-  // Refresh on the events that invalidate this view, not on a timer. Sessions
-  // already refresh on the provider's own 2.5s poll.
-  useEffect(
-    () =>
-      onYuriEvent((ev) => {
-        if (ev.type.startsWith("approval.")) void refresh("approvals");
-        if (ev.type.startsWith("mission.")) void refresh("missions");
-      }),
-    [onYuriEvent, refresh],
-  );
+  // No onYuriEvent subscription here: the provider itself now refreshes
+  // approvals/missions on approval.*/mission.* events (see VoiceProvider.tsx)
+  // and this view reads both straight off useYuri(), so a second listener
+  // here would just refetch a list the provider is already refetching.
+  // Sessions refresh on the provider's own 2.5s poll regardless.
 
   const decideApproval = async (id: string, decision: "approve" | "deny") => {
     setBusyApproval(id);
@@ -171,7 +160,7 @@ export default function Page() {
                       ) : (
                         <div className="dash-row" key={`s-${item.session.handle}`}>
                           <div className="dash-row-top">
-                            <span className="dash-row-title">{item.session.name || item.session.handle}</span>
+                            <span className="dash-row-title">{sessionLabel(item.session)}</span>
                           </div>
                           <span className="dash-row-task">Lost — did not survive a restart</span>
                         </div>
@@ -188,7 +177,7 @@ export default function Page() {
                     {b.running.map((s) => (
                       <div className="dash-row" key={s.handle}>
                         <div className="dash-row-top">
-                          <span className="dash-row-title">{s.name || s.handle}</span>
+                          <span className="dash-row-title">{sessionLabel(s)}</span>
                           <span className="dash-row-meta">{s.agent_name || s.agent_id || s.backend}</span>
                         </div>
                         <span className="dash-row-task">{sessionStatus(s).task}</span>

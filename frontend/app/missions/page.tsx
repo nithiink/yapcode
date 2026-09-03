@@ -18,7 +18,7 @@ import type { Mission, ProjectRow } from "@/lib/yuriTypes";
 
 export default function Page() {
   const router = useRouter();
-  const { missions, refresh, onYuriEvent } = useYuri();
+  const { missions, refresh } = useYuri();
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,19 +37,17 @@ export default function Page() {
       });
   }, []);
 
-  // useYuri()'s own refresh("missions") swallows fetch failures (see
-  // VoiceProvider's refreshMissions: a stale/empty list is fine for the
-  // shared context). This view can't accept that for its one and only list:
-  // an empty `missions` and a load failure render identically ("No missions
-  // yet"), and only one of those means there really are none. So this probes
-  // the same endpoint itself, purely to observe success/failure, and only
-  // then asks the context to adopt the fresh data — the same pattern
-  // app/page.tsx uses for approvals/missions.
+  // refresh("missions") now rejects on a failed fetch (see VoiceProvider's
+  // refreshMissions), so this view awaits it directly for its one and only
+  // list — an empty `missions` and a load failure used to render
+  // identically ("No missions yet"), and only one of those means there
+  // really are none. No onYuriEvent subscription for missions: the provider
+  // itself now refreshes missions on every mission.* event, and this view
+  // reads the list straight off useYuri().
   const load = useCallback(async () => {
     try {
-      await yget<{ missions: Mission[] }>("missions");
-      setLoadError(null);
       await refresh("missions");
+      setLoadError(null);
     } catch (e) {
       setLoadError(e);
     }
@@ -58,15 +56,6 @@ export default function Page() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Refresh on the events that invalidate this view, not on a timer.
-  useEffect(
-    () =>
-      onYuriEvent((ev) => {
-        if (ev.type.startsWith("mission.")) void refresh("missions");
-      }),
-    [onYuriEvent, refresh],
-  );
 
   const projectName = useCallback(
     (projectId: string) => projects.find((p) => p.id === projectId)?.name ?? projectId,

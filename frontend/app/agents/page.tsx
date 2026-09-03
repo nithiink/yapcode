@@ -15,7 +15,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useYuri, type Agent } from "@/components/VoiceProvider";
 import { ViewError } from "@/components/ViewError";
-import { yget } from "@/lib/api";
 
 const CAP_LABEL: Record<string, string> = {
   interactive_terminal: "Interactive terminal",
@@ -45,9 +44,8 @@ export default function Page() {
 
   const load = useCallback(async () => {
     try {
-      await yget<{ agents: Agent[] }>("agents");
-      setLoadError(null);
       await refresh("agents");
+      setLoadError(null);
     } catch (e) {
       setLoadError(e);
     }

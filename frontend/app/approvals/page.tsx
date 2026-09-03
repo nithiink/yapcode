@@ -1,32 +1,29 @@
 "use client";
 
-// Approvals: like app/page.tsx and app/missions/page.tsx, useYuri()'s own
-// refreshApprovals() swallows fetch failures (a stale/empty list is fine for
-// the shared context — it's re-fetched on every approval.* event regardless).
-// This view can't accept that for its one and only list: an empty `approvals`
-// and a load failure both render as "Nothing is waiting on you," and only one
-// of those means there is really nothing to do. So this probes the endpoint
-// itself, purely to observe success/failure, and only then asks the context
-// to adopt the fresh data.
+// Approvals: refresh("approvals") now rejects on a failed fetch (see
+// VoiceProvider.tsx's refreshApprovals), so this view awaits it directly for
+// its one and only list — an empty `approvals` and a load failure both used
+// to render as "Nothing is waiting on you," and only one of those means
+// there is really nothing to do. No onYuriEvent subscription: the provider
+// itself now refreshes approvals on every approval.* event, and this view
+// reads the list straight off useYuri().
 import { useCallback, useEffect, useState } from "react";
 import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { ViewError } from "@/components/ViewError";
-import { yget, ypost, ApiError } from "@/lib/api";
+import { ypost, ApiError } from "@/lib/api";
 import { RISK_CLASS, RISK_LABEL, approvalTitle } from "@/lib/approvals";
-import type { Approval } from "@/lib/yuriTypes";
 
 export default function ApprovalsPage() {
-  const { approvals, refresh, onYuriEvent } = useYuri();
+  const { approvals, refresh } = useYuri();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     try {
-      await yget<{ approvals: Approval[] }>("approvals");
-      setLoadError(null);
       await refresh("approvals");
+      setLoadError(null);
     } catch (e) {
       setLoadError(e);
     }
@@ -35,15 +32,6 @@ export default function ApprovalsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Refresh on the events that invalidate this view, not on a timer.
-  useEffect(
-    () =>
-      onYuriEvent((ev) => {
-        if (ev.type.startsWith("approval.")) void refresh("approvals");
-      }),
-    [onYuriEvent, refresh],
-  );
 
   const decide = async (id: string, decision: "approve" | "deny") => {
     setBusy(id);
@@ -66,7 +54,11 @@ export default function ApprovalsPage() {
   const decided = approvals
     .filter((a) => a.status !== "pending")
     .slice()
-    .sort((a, b) => (a.resolved_at ?? "") < (b.resolved_at ?? "") ? 1 : -1)
+    .sort((a, b) => {
+      const ra = a.resolved_at ?? "";
+      const rb = b.resolved_at ?? "";
+      return ra < rb ? 1 : ra > rb ? -1 : 0;
+    })
     .slice(0, 10);
 
   return (
