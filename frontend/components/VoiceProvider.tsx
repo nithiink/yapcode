@@ -125,6 +125,12 @@ export type YuriContext = {
 
   // streams
   debugEvents: DebugEvent[];
+  // Whether the /debug/stream connection (the Activity feed's only source)
+  // is currently up. Lets a view tell "nothing has happened yet" apart from
+  // "the backend is unreachable and this is stuck empty" — an EventSource
+  // that never connects looks identical to one with genuinely nothing to
+  // say otherwise.
+  debugStreamConnected: boolean;
   onYuriEvent: (fn: (ev: YuriEvent) => void) => () => void; // subscribe; returns unsubscribe
 
   // actions
@@ -138,7 +144,6 @@ export type YuriContext = {
   // only the fields above. ---
   backend: ClaudeBackend;
   setBackend: (b: ClaudeBackend) => void;
-  azureModels: { value: string; label: string }[];
   modelOptions: { value: string; label: string }[];
   status: string;
   modelLabel: string;
@@ -191,11 +196,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [voiceUsage, setVoiceUsage] = useState<VoiceUsage | null>(null);
   // Pipeline activity log (voice<->backend<->Claude) from the backend SSE stream.
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [debugStreamConnected, setDebugStreamConnected] = useState(false);
 
   const esRef = useRef<EventSource | null>(null);
   // The narration stream is a SECOND, separate subscription from the Activity
-  // panel's /debug/stream above: different endpoint, different payload, and it
-  // only lives while a voice session is connected.
+  // panel's /debug/stream above: different endpoint, different payload. It
+  // is mount-scoped, not connection-scoped — commit 10dcd5c deliberately
+  // decoupled it from the voice connection, since every routed view's nav
+  // badges and onYuriEvent fan-out depend on it regardless of whether the
+  // mic is on. See the subscription effect below for why.
   const narrationEsRef = useRef<EventSource | null>(null);
   // Held across reconnects on purpose — see createSpokenGate's comment. Built
   // lazily at first use, same reasoning as before the move: this provider
@@ -468,43 +477,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   };
 
   // The other three shared lists. No poll for these — each is fetched once on
-  // mount, and again on demand via refresh(). Unlike sessions (which carries
-  // live turn state the event stream doesn't fully describe), these have
-  // nothing driving them yet in this task; a later view can call refresh()
-  // after an onYuriEvent it cares about, or on its own mount.
+  // mount, and again on demand via refresh(). Unlike refreshSessions (which
+  // this provider's own 2s poll calls constantly and so must never reject —
+  // an unhandled rejection every 2s would be far worse than a stale list),
+  // these three route through yget and DO throw on failure: refresh() is a
+  // view's only way to tell "nothing to do" apart from "couldn't find out",
+  // and yget already gives a well-shaped ApiError instead of a raw fetch
+  // failure. The mount-time seed below is the one caller that doesn't want
+  // that — it has nowhere to report a failure to — so it catches locally.
   const refreshApprovals = async () => {
-    try {
-      const r = await fetch("/api/yuri/approvals", { headers: authHeaders() });
-      if (!r.ok) return;
-      const d = await r.json();
-      setApprovals(Array.isArray(d?.approvals) ? d.approvals : []);
-    } catch {
-      /* ignore */
-    }
+    const d = await yget<{ approvals: Approval[] }>("approvals");
+    setApprovals(Array.isArray(d?.approvals) ? d.approvals : []);
   };
   const refreshMissions = async () => {
-    try {
-      const r = await fetch("/api/yuri/missions", { headers: authHeaders() });
-      if (!r.ok) return;
-      const d = await r.json();
-      setMissions(Array.isArray(d?.missions) ? d.missions : []);
-    } catch {
-      /* ignore */
-    }
+    const d = await yget<{ missions: Mission[] }>("missions");
+    setMissions(Array.isArray(d?.missions) ? d.missions : []);
   };
   const refreshAgents = async () => {
-    try {
-      const r = await fetch("/api/yuri/agents", { headers: authHeaders() });
-      if (!r.ok) return;
-      const d = await r.json();
-      setAgents(Array.isArray(d?.agents) ? d.agents : []);
-    } catch {
-      /* ignore */
-    }
+    const d = await yget<{ agents: Agent[] }>("agents");
+    setAgents(Array.isArray(d?.agents) ? d.agents : []);
   };
 
   const refresh = useCallback(async (what: "sessions" | "approvals" | "missions" | "agents") => {
-    if (what === "sessions") return refreshSessions();
+    if (what === "sessions") {
+      // Unlike refreshSessions (the 2s poll's own swallowing wrapper),
+      // refresh("sessions") has a caller that wants to know about a
+      // failure — mirror the other three and let fetchSessions's rejection
+      // propagate instead of adopting a stale/empty list silently.
+      setSessions(await fetchSessions());
+      return;
+    }
     if (what === "approvals") return refreshApprovals();
     if (what === "missions") return refreshMissions();
     return refreshAgents();
@@ -512,9 +514,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshApprovals();
-    refreshMissions();
-    refreshAgents();
+    refreshApprovals().catch(() => undefined);
+    refreshMissions().catch(() => undefined);
+    refreshAgents().catch(() => undefined);
   }, []);
 
   // Read the server's narration mode. The backend is the single source of
@@ -634,6 +636,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const es = new EventSource(withAuthParam(`${backendBase()}/debug/stream?limit=300`));
     esRef.current = es;
+    es.onopen = () => setDebugStreamConnected(true);
+    // EventSource auto-reconnects on its own; onerror fires on every failed
+    // attempt (including the very first, when the backend is down at load),
+    // and onopen fires again once a retry succeeds.
+    es.onerror = () => setDebugStreamConnected(false);
     es.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data) as DebugEvent;
@@ -661,6 +668,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       listeners.current.delete(fn);
     };
   }, []);
+
+  // The nav badges (and any other consumer reading approvals/missions
+  // straight off useYuri()) have to update no matter which route is
+  // mounted. Before this, onYuriEvent was only ever subscribed to BY views,
+  // so parking on a view that subscribes to nothing (Terminal, Activity,
+  // Sessions) left an incoming approval.*/mission.* event with zero
+  // listeners and a stale nav badge — the alarm was wired but unreachable.
+  // Living here means it fires regardless of which view is mounted.
+  // Best-effort (.catch swallows): a transient refetch failure here just
+  // leaves the last known list on screen, same as the mount-time seed above.
+  useEffect(
+    () =>
+      onYuriEvent((ev) => {
+        if (ev.type.startsWith("approval.")) void refreshApprovals().catch(() => undefined);
+        if (ev.type.startsWith("mission.")) void refreshMissions().catch(() => undefined);
+      }),
+    [onYuriEvent],
+  );
 
   // The Yuri events stream: mission-level narration AND every view's
   // onYuriEvent fan-out ride the same connection. The poll loop owns the
@@ -1155,6 +1180,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setNarrationMode,
 
       debugEvents,
+      debugStreamConnected,
       onYuriEvent,
 
       callTool,
@@ -1162,7 +1188,6 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       backend,
       setBackend,
-      azureModels,
       modelOptions,
       status,
       modelLabel,
@@ -1197,11 +1222,11 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       narrationMode,
       setNarrationMode,
       debugEvents,
+      debugStreamConnected,
       onYuriEvent,
       callTool,
       refresh,
       backend,
-      azureModels,
       modelOptions,
       status,
       modelLabel,
