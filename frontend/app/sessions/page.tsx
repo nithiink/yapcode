@@ -159,7 +159,13 @@ export default function Page() {
       setError(`Could not send that message: ${(e as Error).message}`);
     } finally {
       setBusy(null);
-      await refresh("sessions");
+      // A fire-and-forget action (this is always called as `void send(...)`
+      // etc.) must never let a post-action refresh's rejection escape this
+      // finally as an uncaught rejection — refresh("sessions") now rejects
+      // on a failed fetch so a *view load* can show an error (see load()
+      // above), but the action itself already succeeded or already set its
+      // own error above; a stale session list here is not that case.
+      await refresh("sessions").catch(() => undefined);
     }
   };
 
@@ -179,7 +185,13 @@ export default function Page() {
       );
     } finally {
       setBusy(null);
-      await refresh("sessions");
+      // A fire-and-forget action (this is always called as `void send(...)`
+      // etc.) must never let a post-action refresh's rejection escape this
+      // finally as an uncaught rejection — refresh("sessions") now rejects
+      // on a failed fetch so a *view load* can show an error (see load()
+      // above), but the action itself already succeeded or already set its
+      // own error above; a stale session list here is not that case.
+      await refresh("sessions").catch(() => undefined);
     }
   };
 
@@ -204,7 +216,13 @@ export default function Page() {
       setError(`Could not close that session: ${(e as Error).message}`);
     } finally {
       setBusy(null);
-      await refresh("sessions");
+      // A fire-and-forget action (this is always called as `void send(...)`
+      // etc.) must never let a post-action refresh's rejection escape this
+      // finally as an uncaught rejection — refresh("sessions") now rejects
+      // on a failed fetch so a *view load* can show an error (see load()
+      // above), but the action itself already succeeded or already set its
+      // own error above; a stale session list here is not that case.
+      await refresh("sessions").catch(() => undefined);
     }
   };
 
