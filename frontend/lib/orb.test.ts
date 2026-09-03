@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { CORNER, look, orbState, pointCount, sphere, step, target } from "./orb.ts";
+import { CORNER, DOCK_W, look, orbState, pointCount, sphere, step, target } from "./orb.ts";
 
 test("centre target scales with the viewport, the corner does not", () => {
   const small = target(1000, 800, true);
@@ -98,4 +98,26 @@ test("a live session with no turn in flight is idle, not working", () => {
 test("a modest machine or reduced motion gets the cheap cloud", () => {
   assert.ok(pointCount(false, 10) > pointCount(false, 4));
   assert.ok(pointCount(true, 10) < pointCount(false, 10));
+});
+
+test("at home she never sits behind the dock", () => {
+  for (const [w, h] of [[1920, 1080], [1400, 800], [1100, 700], [950, 560], [901, 500]]) {
+    const t = target(w, h, false);
+    assert.ok(t.x + t.r <= w - DOCK_W - 1,
+      w + "x" + h + ": right edge " + (t.x + t.r).toFixed(0) + " runs under the dock at " + (w - DOCK_W));
+    assert.ok(t.x - t.r >= 0, w + "x" + h + ": she runs off the left edge");
+  }
+});
+
+test("a wide stage keeps the design's proportions exactly", () => {
+  // The clamp is a fallback for narrow windows, not a new layout: where the
+  // design's own numbers fit, they must survive untouched.
+  const t = target(1920, 1080, false);
+  assert.equal(t.x, 1920 * 0.45);
+  assert.equal(t.r, 1080 * 0.34);
+  assert.equal(t.y, 1080 * 0.47);
+});
+
+test("she shrinks rather than overflowing when the stage is tight", () => {
+  assert.ok(target(950, 560, false).r < target(1920, 1080, false).r);
 });

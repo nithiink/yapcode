@@ -19,11 +19,27 @@ export const CORNER = { dx: 92, y: 130, r: 54 };
 export type OrbState = "idle" | "working" | "waiting" | "speaking";
 export type Target = { x: number; y: number; r: number };
 
+/** The dock's footprint on the right of the stage (its width plus its margin).
+ *  She is never allowed to sit behind it: at 1400px the design's 0.45 already
+ *  clears the dock, but at ~850px the same proportion puts a third of her
+ *  underneath it, and a presence you cannot see is not a presence. */
+export const DOCK_W = 450;
+/** Breathing room between her edge and the dock. */
+const GAP = 24;
+
 /** Where the orb wants to be. `engaged` means something has taken the stage —
- *  a panel, a session tab, the composer with focus — and she yields it. */
+ *  a panel, a session tab, the composer with focus — and she yields it.
+ *
+ *  At home the design's proportions (0.45 across, 0.47 down, 0.34 of the short
+ *  side) apply unchanged wherever they fit, and are clamped to the space left
+ *  of the dock where they do not. `free` never drops below half the stage: a
+ *  window narrow enough for that to bite has already switched to the stacked
+ *  layout, where the canvas is hidden entirely. */
 export function target(w: number, h: number, engaged: boolean): Target {
   if (engaged) return { x: w - CORNER.dx, y: CORNER.y, r: CORNER.r };
-  return { x: w * 0.45, y: h * 0.47, r: Math.min(w, h) * 0.34 };
+  const free = Math.max(w - DOCK_W, w * 0.5);
+  const r = Math.min(Math.min(w, h) * 0.34, free * 0.42);
+  return { x: Math.min(w * 0.45, Math.max(free - r - GAP, r + GAP)), y: h * 0.47, r };
 }
 
 /** One lerp step. Position and radius move together — a separate radius

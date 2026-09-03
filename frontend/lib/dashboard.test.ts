@@ -67,22 +67,8 @@ test("terminal mission states are not blocked", () => {
   }
 });
 
-test("running holds only sessions actually working", () => {
-  const b = bands([], [], [
-    sess({ handle: "a", status: "running" }),
-    sess({ handle: "b", status: "idle" }),
-    sess({ handle: "c", status: "lost" }),
-  ]);
-  assert.deepEqual(b.running.map((s) => s.handle), ["a"]);
-});
-
-test("a session cannot be both blocked and running", () => {
-  const b = bands([], [], [sess({ status: "lost" })]);
-  assert.equal(b.running.length, 0);
-});
-
-test("nothing anywhere yields three empty bands, not an error", () => {
-  assert.deepEqual(bands([], [], []), { needsYou: [], blocked: [], running: [] });
+test("nothing anywhere yields empty bands, not an error", () => {
+  assert.deepEqual(bands([], [], []), { needsYou: [], blocked: [] });
 });
 
 test("nav badges count pending approvals and blocked missions only", () => {

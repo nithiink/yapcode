@@ -60,6 +60,18 @@ export function Orb({ engaged }: { engaged: boolean }) {
       const to = target(w, h, s.engaged);
       pos = pos ? step(pos, to) : to;
 
+      // Publish her HOME centre as a CSS variable so the naming block under
+      // her can be positioned from it. Both used to hard-code the same 0.45
+      // and drifted apart the moment target() started clamping for the dock:
+      // her name ended up under the orb's left edge. This is the one link
+      // that cannot go stale. `engaged` is excluded on purpose — the block
+      // fades out then, and following her to the corner would drag it along
+      // as it went.
+      if (!s.engaged) {
+        const home = target(w, h, false);
+        cv.parentElement?.style.setProperty("--orb-x", `${Math.round(home.x)}px`);
+      }
+
       const st = orbState(s.vstate, s.sessions, s.approvals.length);
       const { hue, alpha, spin, jitter, scale } = look(st, t);
       const [cr, cg, cb] = rgb(hue);

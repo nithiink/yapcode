@@ -46,6 +46,9 @@ export function activeHandle(tabs: Sess[], picked: string | null): string | null
 export function liveDot(sessions: Sess[]): "attn" | "working" | "idle" {
   if (sessions.some((s) => s.status === "needs_permission" || s.status === "needs_choice"))
     return "attn";
-  if (sessions.some((s) => s.status === "running")) return "working";
+  // `running`, not `status === "running"`: the latter means the session process
+  // is alive, which is true of every idle session sitting at a prompt. Keying
+  // the dot off it painted green beside the dock's own "Ready".
+  if (sessions.some((s) => s.running)) return "working";
   return "idle";
 }

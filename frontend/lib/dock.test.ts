@@ -49,7 +49,13 @@ test("a vanished pick falls back to the first tab, not to nothing", () => {
 
 test("the live dot reports the most urgent session, not the selected one", () => {
   assert.equal(liveDot([s("a"), s("b", { status: "needs_permission" })]), "attn");
-  assert.equal(liveDot([s("a"), s("b", { status: "running" })]), "working");
+  assert.equal(liveDot([s("a"), s("b", { running: true })]), "working");
   assert.equal(liveDot([s("a")]), "idle");
   assert.equal(liveDot([]), "idle");
+});
+
+test("a live-but-idle session leaves the dot idle", () => {
+  // The dot sits inches from the status strip that says "Ready". Painting it
+  // green off status === "running" made the two disagree on screen.
+  assert.equal(liveDot([s("a", { status: "running", running: false })]), "idle");
 });

@@ -11,10 +11,15 @@ export type BlockedItem =
   | { kind: "mission"; mission: Mission }
   | { kind: "session"; session: Sess };
 
+// No `running` band any more. It filtered sessions on status === "running",
+// which means the session's process is alive — true of every idle session
+// sitting at a prompt — not that work is in flight. Its one consumer, the
+// Dashboard's "Running" list, became the line under Yuri's name, and that line
+// keys off the session's `running` flag (a turn executing) instead. See
+// lib/presence.ts.
 export type Band = {
   needsYou: Approval[];
   blocked: BlockedItem[];
-  running: Sess[];
 };
 
 const RISK_ORDER: Record<Approval["risk"], number> = { dangerous: 0, confirm: 1, safe: 2 };
@@ -43,9 +48,7 @@ export function bands(approvals: Approval[], missions: Mission[], sessions: Sess
       .map((session): BlockedItem => ({ kind: "session", session })),
   ];
 
-  const running = sessions.filter((s) => s.status === "running");
-
-  return { needsYou, blocked, running };
+  return { needsYou, blocked };
 }
 
 export function navBadges(

@@ -596,14 +596,20 @@ details.handoff:hover > summary { color: var(--mut); }
          font-variant-numeric: tabular-nums; min-width: 62px; text-align: right; }
 
 /* ---- her name and her one line, at home ---- */
-.naming { position: absolute; left: 0; right: 0; bottom: 96px; z-index: 4; display: flex;
-          flex-direction: column; align-items: center; gap: 12px; pointer-events: none;
-          transition: opacity .45s ease, transform .45s ease; }
+/* Centred on --orb-x, which components/shell/Orb.tsx writes from target()'s
+   own home position every frame. Hard-coding 45% here instead worked until
+   target() began clamping her clear of the dock on narrower windows, at which
+   point her name sat under her left edge. The fallback is the unclamped
+   proportion, used only for the first paint before the canvas runs. */
+.naming { position: absolute; left: 0; width: calc(var(--orb-x, 45%) * 2); bottom: 96px;
+          z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 12px;
+          pointer-events: none; transition: opacity .45s ease, transform .45s ease; }
 .naming[data-away="true"] { opacity: 0; transform: translateY(14px); }
 .sname { font-family: var(--disp); font-size: 15px; letter-spacing: .42em; text-indent: .42em;
          color: var(--ink); opacity: .92; }
 .smeta { font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: .04em;
-         text-align: center; padding: 0 16px; }
+         text-align: center; padding: 0 16px; max-width: 46ch; }
+
 .hint { position: absolute; left: 18px; bottom: 22px; z-index: 6; font-size: 11px;
         color: var(--dim); letter-spacing: .04em; transition: opacity .45s ease; }
 .hint[data-away="true"] { opacity: 0; }
@@ -707,8 +713,11 @@ details.handoff:hover > summary { color: var(--mut); }
   .stage { display: flex; flex-direction: column; overflow: visible; }
   .orb-canvas, .naming, .hint, .orbhome { display: none; }
   .top { position: static; height: auto; padding: 14px; flex-wrap: wrap; }
-  .vpanel { position: static; width: auto; margin: 0 14px 14px; opacity: 1; transform: none;
-            pointer-events: auto; max-height: none; }
+  /* relative, NOT static: .vpanel-close is absolutely positioned, and a static
+     panel makes it resolve against .stage instead — the ✕ then floats up beside
+     the top bar, nowhere near the panel it closes. */
+  .vpanel { position: relative; inset: auto; width: auto; margin: 0 14px 14px;
+            opacity: 1; transform: none; pointer-events: auto; max-height: none; }
   .vpanel[aria-hidden="true"] { display: none; }
   .dock { position: static; width: auto; margin: 0 14px 14px; max-height: none; }
 }
