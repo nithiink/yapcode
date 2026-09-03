@@ -177,7 +177,16 @@ async def startup() -> Container:
         await shutdown()
     home = default_home().ensure()
     registry = build_registry(config.YURI_AGENTS)
-    c = build_container(home, registry)
+    # claude-code when it is registered, else whatever is. build_container's
+    # own default is the literal "claude-code", so a deployment that set
+    # YURI_AGENTS=opencode got an AgentRouter whose fallback names an agent the
+    # registry does not have -- every unqualified start_session raising
+    # KeyError. That turns "OpenCode is optional" into "OpenCode-only is
+    # broken", which is the opposite of what optional means.
+    ids = registry.ids()
+    c = build_container(home, registry,
+                        default_agent="claude-code" if "claude-code" in ids
+                        else (ids[0] if ids else "claude-code"))
     c.bus.start_writer()
     note_startup_failure(None)   # a successful start clears any earlier failure
     log.info("yuri: home=%s db=%s agents=%s", home.path, home.db_path, registry.ids())
