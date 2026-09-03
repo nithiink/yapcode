@@ -35,17 +35,17 @@ test("fmtPayload survives a circular structure", () => {
 });
 
 test("toolState reads error from ok:false", () => {
-  assert.equal(toolState({ kind: "tool", name: "t", ok: false }), "error");
+  assert.equal(toolState({ kind: "tool", id: 1, name: "t", ok: false }), "error");
 });
 
 test("toolState reads working and error out of the result status", () => {
-  assert.equal(toolState({ kind: "tool", name: "t", result: { status: "working" } }), "working");
-  assert.equal(toolState({ kind: "tool", name: "t", result: { status: "error" } }), "error");
+  assert.equal(toolState({ kind: "tool", id: 2, name: "t", result: { status: "working" } }), "working");
+  assert.equal(toolState({ kind: "tool", id: 3, name: "t", result: { status: "error" } }), "error");
 });
 
 test("toolState defaults to done", () => {
-  assert.equal(toolState({ kind: "tool", name: "t", result: { status: "idle" } }), "done");
-  assert.equal(toolState({ kind: "tool", name: "t" }), "done");
+  assert.equal(toolState({ kind: "tool", id: 4, name: "t", result: { status: "idle" } }), "done");
+  assert.equal(toolState({ kind: "tool", id: 5, name: "t" }), "done");
 });
 
 test("toolSummary never returns an empty string for a known tool", () => {

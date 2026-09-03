@@ -7,7 +7,7 @@ import { clip } from "./format.ts";
 // tool calls inline with the surrounding turns instead of piling them at the end.
 export type TimelineItem =
   | { kind: "turn"; role: "user" | "assistant"; text: string; final: boolean }
-  | { kind: "tool"; id?: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
+  | { kind: "tool"; id: number; name: string; ok?: boolean; args?: unknown; result?: unknown };
 
 // A plan-approval prompt carries the plan markdown after this marker (set in
 // the backend's _summarize_tool); split it off so the card can render it
