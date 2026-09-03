@@ -20,7 +20,7 @@ import time
 from urllib.parse import urlsplit
 
 from ..base import ProviderUnavailable
-from .client import OpenCodeClient
+from .client import DEFAULT_USERNAME, OpenCodeClient
 
 log = logging.getLogger("yuri.opencode.server")
 
@@ -41,13 +41,15 @@ class OpenCodeUnavailable(ProviderUnavailable):
 
 class OpenCodeServer:
     def __init__(self, url: str, *, spawn: bool = True, binary: str = "opencode",
-                 password: str | None = None, cwd: str | None = None,
+                 password: str | None = None, username: str = DEFAULT_USERNAME,
+                 cwd: str | None = None,
                  log_path: str | None = None, ready_timeout: float = 20.0,
                  env: dict[str, str] | None = None) -> None:
         self._url = url.rstrip("/")
         self._spawn_allowed = spawn
         self._binary = binary
         self._password = password
+        self._username = username or DEFAULT_USERNAME
         self._cwd = cwd
         self._log_path = log_path
         self._ready_timeout = ready_timeout
@@ -112,6 +114,7 @@ class OpenCodeServer:
 
     async def is_reachable(self) -> bool:
         probe = OpenCodeClient(self._url, password=self._password,
+                              username=self._username,
                                timeout=PROBE_TIMEOUT)
         try:
             await probe.get("/api/session")
@@ -143,7 +146,8 @@ class OpenCodeServer:
                 await self._forget()
             if await self.is_reachable():
                 log.info("attached to an existing OpenCode server at %s", self._url)
-                self._client = OpenCodeClient(self._url, password=self._password)
+                self._client = OpenCodeClient(self._url, password=self._password,
+                                          username=self._username)
                 self._owned = False           # NOT ours: never stop it
                 return self._client
             if not self._spawn_allowed:
@@ -152,7 +156,8 @@ class OpenCodeServer:
                     "disabled (OPENCODE_SPAWN=0). Start it with "
                     f"`opencode serve --port {self._port()}`, or set OPENCODE_SPAWN=1.")
             await self._spawn()
-            self._client = OpenCodeClient(self._url, password=self._password)
+            self._client = OpenCodeClient(self._url, password=self._password,
+                                          username=self._username)
             self._owned = True                # ours: release() stops it
             return self._client
 
@@ -242,6 +247,8 @@ class OpenCodeServer:
         if self._password:
             # The name in the server's own startup log (design spec section 2).
             env["OPENCODE_SERVER_PASSWORD"] = self._password
+            # So the child expects the same username we send.
+            env["OPENCODE_SERVER_USERNAME"] = self._username
         # Its output belongs in a log, not in the terminal the voice UI owns:
         # with a log path both streams append there, without one both are
         # discarded. Either way nothing reaches our stdout.

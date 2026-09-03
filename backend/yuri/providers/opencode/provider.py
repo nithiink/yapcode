@@ -831,6 +831,26 @@ class OpenCodeProvider(AgentProvider):
         client = await self._client()
         return await self._messages(client, handle)
 
+    def resume_command(self, handle: str) -> str | None:
+        """`opencode attach`, which is better than the tmux handoff it replaces.
+
+        The frontend used to render `claude --resume <id>` for every session,
+        which handed an OpenCode user a Claude command for a session Claude
+        has never heard of.
+
+        This attaches OpenCode's own TUI to the SAME server and the SAME
+        session Yuri is driving -- not a copy of it, which is what
+        `claude --resume` gives. So the user takes the keyboard on the live
+        session and Yuri keeps reading it, because both are talking to one
+        server. `--session` and `--password` are documented by
+        `opencode attach --help`; the password is deliberately NOT interpolated
+        here, since the command would end up on screen and in a clipboard --
+        attach reads OPENCODE_SERVER_PASSWORD from the environment itself.
+        """
+        if handle not in self._handles:
+            return None
+        return f"opencode attach {self._server.url} --session {handle}"
+
     async def peek(self, handle: str, lines: int = 40) -> str | None:
         """None: there is no TUI to snapshot, exactly as the SDK backend does."""
         return None

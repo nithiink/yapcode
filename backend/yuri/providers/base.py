@@ -156,6 +156,16 @@ class AgentProvider(ABC):
                      opts: SessionOptions) -> str:
         raise NotImplementedError(f"{self.id} does not support resume")
 
+    def resume_command(self, handle: str) -> str | None:
+        """A shell command that reopens this session in the user's terminal.
+
+        Only the provider can know this: the frontend used to hardcode
+        `claude --resume <id>` for every session, which handed an OpenCode
+        user a Claude command for a session Claude has never heard of.
+        None means the provider offers no such handoff.
+        """
+        return None
+
     def native_pane(self, handle: str) -> str | None:
         return None
 

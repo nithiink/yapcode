@@ -83,6 +83,15 @@ class SessionService:
 
     # --- lookup ---------------------------------------------------------------
 
+    @staticmethod
+    def _resume_command(p: AgentProvider, handle: str) -> str | None:
+        """Never let one provider's handoff break the whole session list."""
+        try:
+            return p.resume_command(handle)
+        except Exception:
+            log.exception("resume_command failed for %s", p.id)
+            return None
+
     def _native_map(self) -> tuple[dict[str, tuple[AgentProvider, dict]], set[str]]:
         """(handle -> (provider, runner dict), ids of providers that answered).
 
@@ -190,9 +199,19 @@ class SessionService:
         out: list[dict] = []
         for handle, (p, s) in self._native().items():
             r = rows.get(handle)
-            out.append({**s, "agent_id": p.id, "name": r.name if r else None,
+            caps = p.capabilities()
+            out.append({**s, "agent_id": p.id, "agent_name": p.name,
+                        "name": r.name if r else None,
                         "mission_id": r.mission_id if r else None,
-                        "yuri_session_id": r.id if r else None})
+                        "yuri_session_id": r.id if r else None,
+                        # What the UI may offer for THIS session. Without these
+                        # the panel rendered a permission-mode switcher for
+                        # OpenCode, which has no modes at all, so every click
+                        # was a guaranteed failure; and it built its own
+                        # `claude --resume` line for every provider.
+                        "supports_modes": bool(caps.permission_modes),
+                        "permission_modes": list(caps.permission_modes),
+                        "resume_command": self._resume_command(p, handle)})
         return out
 
     def native_pane(self, ref: str) -> str | None:

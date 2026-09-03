@@ -169,6 +169,12 @@ class ClaudeCodeProvider(AgentProvider):
                 out.append({**s, "backend": backend})
         return out
 
+    def resume_command(self, handle: str) -> str | None:
+        row = {s["handle"]: s for s in self.list_native()}.get(handle)
+        if not row or not row.get("session_id"):
+            return None
+        return f"cd {row['cwd']} && claude --resume {row['session_id']}"
+
     def native_pane(self, handle: str) -> str | None:
         if self.backend_of(handle) != "cli":
             return None
