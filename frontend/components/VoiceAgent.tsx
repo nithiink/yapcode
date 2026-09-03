@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RealtimeSession } from "@/lib/realtime";
 import { GeminiSession } from "@/lib/gemini";
 import { ClaudeBackend, RealtimeEvent, RealtimeOptions, VoiceProvider, VoiceSession, VoiceState, VoiceUsage } from "@/lib/voice";
@@ -20,206 +20,17 @@ import {
 } from "@/lib/narration";
 import LiveTerminal from "./LiveTerminal";
 import { Icon } from "./ui/Icon";
-import {
-  splitPlan,
-  fmtPayload,
-  isFlatObject,
-  toolState,
-  toolSummary,
-  type TimelineItem,
-  type ToolItem,
-} from "@/lib/timeline";
-import { clip, abbrevHome, fmtLogTime, fmtLogTimeTitle } from "@/lib/format";
-import { sessionStatus, MODES, MODE_LABEL, BACKEND_LABEL, type Sess } from "@/lib/sessions";
+import { CopyBtn } from "./ui/CopyBtn";
+import { MarkdownLite } from "./conversation/MarkdownLite";
+import { Timeline } from "./conversation/Timeline";
+import { SessionCard, renderTimeline, type TxEvent } from "./SessionCard";
+import { ActivityFeed, type DebugEvent } from "./ActivityFeed";
+import { splitPlan, type TimelineItem } from "@/lib/timeline";
+import { clip } from "@/lib/format";
+import { BACKEND_LABEL, type Sess } from "@/lib/sessions";
 import { MODEL_OPTIONS, connectionParams, PROVIDER_LABEL, NARRATION_LABEL, orbCaption } from "@/lib/voiceui";
 
-// Minimal markdown rendering (headings, lists, bold, inline code, fences) as
-// React elements — no innerHTML, so prompt content can't inject markup.
-function MarkdownLite({ md }: { md: string }) {
-  let key = 0;
-  const inline = (s: string): ReactNode[] => {
-    const nodes: ReactNode[] = [];
-    const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-    let last = 0;
-    for (let m = re.exec(s); m; m = re.exec(s)) {
-      if (m.index > last) nodes.push(s.slice(last, m.index));
-      const t = m[0];
-      nodes.push(t.startsWith("`") ? <code key={key++}>{t.slice(1, -1)}</code> : <b key={key++}>{t.slice(2, -2)}</b>);
-      last = m.index + t.length;
-    }
-    if (last < s.length) nodes.push(s.slice(last));
-    return nodes;
-  };
-  const out: ReactElement[] = [];
-  const lines = md.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    if (l.startsWith("```")) {
-      const buf: string[] = [];
-      while (++i < lines.length && !lines[i].startsWith("```")) buf.push(lines[i]);
-      out.push(<pre key={key++}>{buf.join("\n")}</pre>);
-      continue;
-    }
-    const h = l.match(/^(#{1,4})\s+(.*)/);
-    if (h) {
-      out.push(<div key={key++} className={`mdh mdh${h[1].length}`}>{inline(h[2])}</div>);
-      continue;
-    }
-    const li = l.match(/^\s*([-*]|\d+\.)\s+(.*)/);
-    if (li) {
-      out.push(<div key={key++} className="mdli"><span className="mdb">{li[1] === "-" || li[1] === "*" ? "•" : li[1]}</span>{inline(li[2])}</div>);
-      continue;
-    }
-    out.push(l.trim() ? <div key={key++} className="mdp">{inline(l)}</div> : <div key={key++} className="mdgap" />);
-  }
-  return <div className="planmd">{out}</div>;
-}
-
-function PayloadView({ value }: { value: unknown }) {
-  if (value === undefined || value === null || value === "") return <div className="tc-empty">—</div>;
-  if (isFlatObject(value)) {
-    const entries = Object.entries(value).filter(([, v]) => v !== undefined && v !== "");
-    if (entries.length === 0) return <div className="tc-empty">—</div>;
-    return (
-      <dl className="tc-kv">
-        {entries.map(([k, v]) => (
-          <div className="tc-kv-row" key={k}>
-            <dt>{k}</dt>
-            <dd>{typeof v === "string" ? v : String(v)}</dd>
-          </div>
-        ))}
-      </dl>
-    );
-  }
-  return <pre className="tc-code">{fmtPayload(value)}</pre>;
-}
-
-// One tool call as an expandable inline "action card": collapsed shows a status
-// dot, the mono tool name, and a human summary; expanded reveals structured
-// input/output.
-function ToolCall({
-  item,
-  variant = "card",
-  defaultOpen = false,
-}: {
-  item: ToolItem;
-  variant?: "card" | "line";
-  defaultOpen?: boolean;
-}) {
-  const state = toolState(item);
-  const summary = toolSummary(item.name, item.args, item.result);
-  // Isolated calls open by default so their input/output is visible at a glance
-  // (controlled so the user can still collapse them and it survives re-renders).
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <details
-      className={`tcall ${variant} ${state}`}
-      open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary>
-        <span className={`tc-dot ${state}`} aria-hidden />
-        <span className="tc-name">{item.name}</span>
-        {summary && <span className="tc-summary">{summary}</span>}
-        <Icon name="chevron-down" size={13} strokeWidth={1.5} className="tc-chev" />
-      </summary>
-      <div className="tc-body">
-        <section className="tc-sec">
-          <div className="tc-label">Input</div>
-          <PayloadView value={item.args} />
-        </section>
-        <section className="tc-sec">
-          <div className="tc-label">Output</div>
-          <PayloadView value={item.result} />
-        </section>
-      </div>
-    </details>
-  );
-}
-
-// Render the conversation timeline, grouping runs of consecutive tool calls.
-// An isolated call renders as a full card; a run of 2+ condenses into light
-// lines inside one grouped container, so a burst of actions reads as a single
-// tidy block instead of a stack of heavy boxes. Each line stays independently
-// expandable (native <details>, keyed by stable id so open state survives
-// re-renders and the timeline cap).
-function renderConversation(items: TimelineItem[]): ReactElement[] {
-  const nodes: ReactElement[] = [];
-  let i = 0;
-  while (i < items.length) {
-    const item = items[i];
-    if (item.kind === "turn") {
-      nodes.push(
-        <div key={`turn-${i}`} className={`bubble ${item.role}`}>
-          <div className="who">{item.role === "user" ? "You" : "Assistant"}</div>
-          {item.text}
-        </div>,
-      );
-      i++;
-      continue;
-    }
-    // Collect the run of consecutive tool calls starting here.
-    const run: ToolItem[] = [];
-    while (i < items.length && items[i].kind === "tool") {
-      run.push(items[i] as ToolItem);
-      i++;
-    }
-    if (run.length === 1) {
-      nodes.push(<ToolCall key={`tool-${run[0].id}`} item={run[0]} variant="card" />);
-    } else {
-      nodes.push(
-        <div key={`tgroup-${run[0].id}`} className="tcall-group">
-          {run.map((t) => (
-            <ToolCall key={`tool-${t.id}`} item={t} variant="line" />
-          ))}
-        </div>,
-      );
-    }
-  }
-  return nodes;
-}
-
-// Small copy-to-clipboard button with transient ✓ feedback.
-function CopyBtn({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className={`copybtn ${done ? "done" : ""}`}
-      title={done ? "Copied" : "Copy"}
-      aria-label={done ? "Copied" : "Copy"}
-      onClick={() => {
-        navigator.clipboard?.writeText(text).catch(() => undefined);
-        setDone(true);
-        setTimeout(() => setDone(false), 1100);
-      }}
-    >
-      {done ? (
-        <Icon name="check" size={14} strokeWidth={2.5} />
-      ) : (
-        <Icon name="copy" size={14} />
-      )}
-    </button>
-  );
-}
-
-// One event on the unified pipeline bus (backend /debug/stream + browser posts).
-type DebugEvent = {
-  seq: number;
-  ts: string;
-  source: string; // voice | backend | claude | user
-  dest: string;
-  kind: string; // tool_call | tool_result | send | decision | hook | assistant | inject | transcript | error | poll | info
-  session?: string | null;
-  summary: string;
-  detail?: unknown;
-};
-
 type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
-type TxEvent =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; summary: string; risky: boolean }
-  | { kind: "tool_result"; ok: boolean; text: string };
 
 export default function VoiceAgent() {
   const [connected, setConnected] = useState(false);
@@ -377,21 +188,9 @@ export default function VoiceAgent() {
     ? (storedModel as string)
     : (modelOptions[0]?.value ?? "");
 
-  const filteredLog = debugEvents.filter((ev) => {
-    if (logErrorsOnly && ev.kind !== "error") return false;
-    if (logFilter) {
-      const hay = `${ev.source} ${ev.dest} ${ev.kind} ${ev.summary} ${ev.session || ""}`.toLowerCase();
-      if (!hay.includes(logFilter.toLowerCase())) return false;
-    }
-    return true;
-  });
-
-  // Copy the currently-shown events as readable text (full, untruncated lines)
-  // for pasting into a bug report / sharing.
-  const copyLog = () => {
-    const text = filteredLog
-      .map((e) => `${e.ts}  ${e.source}→${e.dest}  ${e.kind}${e.session ? "  " + e.session : ""}  ${e.summary}`)
-      .join("\n");
+  // Copy the currently-shown events (built by ActivityFeed, which owns the
+  // filtering) as readable text for pasting into a bug report / sharing.
+  const copyLog = (text: string) => {
     const done = () => {
       setLogCopied(true);
       window.setTimeout(() => setLogCopied(false), 1200);
@@ -465,30 +264,6 @@ export default function VoiceAgent() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen, liveFullscreen]);
-
-  const renderTimeline = (events: TxEvent[]) => {
-    if (events.length === 0) return <div className="empty">No transcript yet.</div>;
-    return events.map((e, i) => {
-      if (e.kind === "tool")
-        return (
-          <div key={i} className="tx tool">
-            <span className="tag">{e.risky ? "🔒" : "🔧"} {e.name}</span> {e.summary}
-          </div>
-        );
-      if (e.kind === "tool_result")
-        return (
-          <div key={i} className={`tx result ${e.ok ? "" : "err"}`}>
-            ↳ {e.ok ? "✓" : "✗"} {e.text}
-          </div>
-        );
-      return (
-        <div key={i} className={`tx ${e.kind}`}>
-          <span className="who">{e.kind === "user" ? "You→Claude" : "Claude"}</span>
-          {e.text}
-        </div>
-      );
-    });
-  };
 
   const stopPolling = (sessionId?: string) => {
     if (sessionId) {
@@ -1589,7 +1364,7 @@ export default function VoiceAgent() {
               {timeline.length === 0 && (
                 <div className="empty">Assistant replies and Claude actions show here.</div>
               )}
-              {renderConversation(timeline)}
+              <Timeline items={timeline} />
             </div>
           </div>
         </div>
@@ -1601,239 +1376,54 @@ export default function VoiceAgent() {
           <div className="rule" />
           <div className="scroll">
             {sessions.length === 0 && <div className="empty">No active sessions.</div>}
-            {sessions.map((s) => {
-              // From the provider — only it knows how to reopen its own session.
-              const cmd = s.resume_command || null;
-              const tmuxCmd = s.backend === "cli" ? `tmux attach -t vc_${s.handle.slice(0, 8)}` : null;
-              const open = openSession === s.handle;
-              const st = sessionStatus(s);
-              const queuedTurns = (s.queue || []).filter((q) => q.state === "queued");
-              return (
-                <div key={s.handle} className="sess">
-                  <div className="shead">
-                    {editing === s.handle ? (
-                      <input
-                        className="nameedit"
-                        autoFocus
-                        value={draftName}
-                        onChange={(e) => setDraftName(e.target.value)}
-                        onBlur={() => commitRename(s.handle)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitRename(s.handle);
-                          else if (e.key === "Escape") setEditing(null);
-                        }}
-                      />
-                    ) : (
-                      <button
-                        className="name namebtn"
-                        title="Rename session"
-                        onClick={() => startRename(s.handle, s.name || (s.cwd.split("/").pop() ?? ""))}
-                      >
-                        {s.name || s.cwd.split("/").pop()}
-                        <span className="penicon" aria-hidden>
-                          <Icon name="edit" size={15} strokeWidth={1.7} />
-                        </span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Status strip — what the session is doing right now. */}
-                  <div className={`statusline ${st.cls}`}>
-                    <span className={`sdot ${st.cls}`} />
-                    <span className="lead">{st.lead}</span>
-                    <span className="task">{st.task}</span>
-                    {(s.queued ?? 0) > 0 && (
-                      <span className="qmore" title="Turns waiting behind the current one">
-                        +{s.queued} queued
-                      </span>
-                    )}
-                    {(s.pending ?? 0) > 0 && (
-                      <span className="qmore" title="Finished turns not yet narrated by the voice agent">
-                        {s.pending} unread
-                      </span>
-                    )}
-                  </div>
-
-                  {queuedTurns.length > 0 && (
-                    <div className="queuelist">
-                      {queuedTurns.map((q, i) => (
-                        <div key={i} className="qitem queued">
-                          <span className="qmark">⋯ queued</span>
-                          <span className="qtext">{q.text || "(turn)"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {liveSession === s.handle && !liveFullscreen && (
-                    <div className="liveterm-box">
-                      <div className="liveterm-bar">
-                        <button
-                          className="ltbtn"
-                          title="Hide the live view (the session keeps running)"
-                          aria-label="Minimize live view"
-                          onClick={() => {
-                            setLiveSession(null);
-                            setLiveFullscreen(false);
-                          }}
-                        >
-                          <Icon name="close" size={14} />
-                        </button>
-                        <span className="ltbar-title">Live CLI</span>
-                        <button
-                          className="ltbtn right"
-                          title="Full screen"
-                          aria-label="Full screen live view"
-                          onClick={() => setLiveFullscreen(true)}
-                        >
-                          <Icon name="fullscreen" size={14} />
-                        </button>
-                      </div>
-                      <div className="liveterm-inner">
-                        <LiveTerminal handle={s.handle} />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="path">
-                    {s.backend?.toUpperCase()} · {s.model}
-                    {s.cost_usd && s.cost_usd > 0 ? ` · $${s.cost_usd.toFixed(4)}` : ""} · {abbrevHome(s.cwd)}
-                  </div>
-
-                  {open && <div className="transcript">{renderTimeline(transcript)}</div>}
-
-                  {s.supports_modes !== false && (
-                  <div className="moderow">
-                    <span className="modelbl">Mode</span>
-                    <div className="modeseg" role="group" aria-label="Permission mode">
-                      {MODES.map((m) => (
-                        <button
-                          key={m.id}
-                          className={(s.mode || "default") === m.id ? "on" : ""}
-                          title={m.title}
-                          disabled={modeBusy === s.handle}
-                          onClick={() => switchMode(s.handle, m.id)}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  )}
-
-                  <div className="actionrow">
-                    {s.can_watch && liveSession !== s.handle && (
-                      <button
-                        className="txtoggle primary"
-                        title="Watch this session live in your browser"
-                        onClick={() => setLiveSession(s.handle)}
-                      >
-                        <Icon name="play" size={13} /> Watch live
-                      </button>
-                    )}
-                    <button className="txtoggle" onClick={() => toggleTranscript(s.handle)}>
-                      {open ? "Hide" : "Transcript"}
-                    </button>
-                    {open && (
-                      <button className="txtoggle" title="Expand" onClick={() => setFullscreen(true)}>
-                        <Icon name="fullscreen" size={13} />
-                      </button>
-                    )}
-                  </div>
-
-                  {(tmuxCmd || cmd) && (
-                    <details className="handoff">
-                      <summary>
-                        <span className="chev"><Icon name="chevron-right" size={10} /></span> Continue in your terminal
-                      </summary>
-                      {tmuxCmd && (
-                        <div className="hopt">
-                          <div className="htitle">Take the keyboard</div>
-                          <div className="hwhy">Jump into this live session in your own terminal.</div>
-                          <div className="hcmd">
-                            <code>{tmuxCmd}</code>
-                            <CopyBtn text={tmuxCmd} />
-                          </div>
-                        </div>
-                      )}
-                      {cmd && (
-                        <div className="hopt">
-                          <div className="htitle">Reopen anywhere</div>
-                          <div className="hwhy">Start a fresh terminal from this session&apos;s history.</div>
-                          <div className="hcmd">
-                            <code>{cmd}</code>
-                            <CopyBtn text={cmd} />
-                          </div>
-                        </div>
-                      )}
-                    </details>
-                  )}
-                </div>
-              );
-            })}
+            {sessions.map((s) => (
+              <SessionCard
+                key={s.handle}
+                s={s}
+                open={openSession === s.handle}
+                live={liveSession === s.handle}
+                modeBusy={modeBusy === s.handle}
+                onToggleTranscript={() => toggleTranscript(s.handle)}
+                onWatch={() => setLiveSession(s.handle)}
+                onSwitchMode={(m) => switchMode(s.handle, m)}
+                transcript={transcript}
+                editing={editing === s.handle}
+                draftName={draftName}
+                onDraftNameChange={setDraftName}
+                onCommitRename={() => commitRename(s.handle)}
+                onCancelRename={() => setEditing(null)}
+                onStartRename={() => startRename(s.handle, s.name || (s.cwd.split("/").pop() ?? ""))}
+                liveFullscreen={liveFullscreen}
+                onExpandLive={() => setLiveFullscreen(true)}
+                onMinimizeLive={() => {
+                  setLiveSession(null);
+                  setLiveFullscreen(false);
+                }}
+                onExpandTranscript={() => setFullscreen(true)}
+              />
+            ))}
           </div>
         </div>
       </div>
 
       {showDebug && (
-        <div className="panel debugpanel">
-          <div className="loghead">
-            <h2>
-              Activity <span className="ct">{filteredLog.length} / {debugEvents.length}</span>
-            </h2>
-            <div className="logctl">
-              <input
-                className="logsearch"
-                placeholder="filter…"
-                value={logFilter}
-                onChange={(e) => setLogFilter(e.target.value)}
-              />
-              <button className={`textbtn ${logErrorsOnly ? "on" : ""}`} onClick={() => setLogErrorsOnly((v) => !v)}>
-                Errors
-              </button>
-              <button className={`textbtn ${logPaused ? "on" : ""}`} onClick={() => setLogPaused((v) => !v)}>
-                {logPaused ? "Resume" : "Pause"}
-              </button>
-              <button className={`textbtn ${logCopied ? "on" : ""}`} onClick={copyLog} title="Copy all shown events to the clipboard">
-                {logCopied ? "Copied ✓" : "Copy"}
-              </button>
-              <button className="textbtn" onClick={() => setDebugEvents([])}>
-                Clear
-              </button>
-            </div>
-          </div>
-          <div className="rule" />
-          <div
-            className="logscroll"
-            ref={logScrollRef}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              logAtBottomRef.current =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-            }}
-          >
-            {filteredLog.length === 0 && (
-              <div className="empty">No matching events yet — talk to the agent and the full pipeline shows here.</div>
-            )}
-            {filteredLog.map((ev) => (
-              <div
-                key={ev.seq}
-                className={`logrow k-${ev.kind}`}
-                title={ev.detail ? JSON.stringify(ev.detail).slice(0, 800) : undefined}
-              >
-                <span className="lt" title={fmtLogTimeTitle(ev.ts)}>{fmtLogTime(ev.ts)}</span>
-                <span className="lhop">
-                  <span className={`htag ${ev.source}`}>{ev.source}</span>
-                  <span className="harr">→</span>
-                  <span className={`htag ${ev.dest}`}>{ev.dest}</span>
-                </span>
-                <span className="lk">{ev.kind}</span>
-                {ev.session && <span className="lsess">{ev.session}</span>}
-                <span className="lsum">{ev.summary}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ActivityFeed
+          events={debugEvents}
+          filter={logFilter}
+          onFilter={setLogFilter}
+          errorsOnly={logErrorsOnly}
+          onToggleErrorsOnly={() => setLogErrorsOnly((v) => !v)}
+          paused={logPaused}
+          onTogglePaused={() => setLogPaused((v) => !v)}
+          copied={logCopied}
+          onCopy={copyLog}
+          onClear={() => setDebugEvents([])}
+          scrollRef={logScrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            logAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }}
+        />
       )}
 
       {fullscreen && openSession && (
