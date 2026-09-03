@@ -427,7 +427,9 @@ class SessionService:
                                       for k, v in marks.items())
         if unsaved:
             row.runtime_metadata = {**row.runtime_metadata, **marks}
-        activity = row.last_activity_at
+        # Which branches below persist the row themselves, via _touch.
+        persisted = (status in ("needs_permission", "needs_choice",
+                                "completed", "error") or status in _IN_FLIGHT)
         if status == "needs_permission":
             prompt = res.get("prompt")
             if prompt:
@@ -456,7 +458,10 @@ class SessionService:
         # merged marks with it. Only a poll that took no branch at all — an idle
         # session whose cursor still advanced past events Yuri did not start —
         # needs its own write, so this costs one UPDATE per poll, never two.
-        if unsaved and row.last_activity_at == activity:
+        # Keyed off which branch ran, not off whether last_activity_at changed:
+        # two _touch calls inside the same millisecond would compare equal and
+        # buy a redundant UPDATE.
+        if unsaved and not persisted:
             self._touch(row)
         # The frontend's whole rule is "if it has a narration line, inject it".
         # Poll owns the four session-turn events (yuri/narration/policy.py); the
