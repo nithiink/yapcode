@@ -43,17 +43,23 @@ export type Mission = {
 };
 
 // TWO shapes, deliberately, and they differ. GET /projects returns
-// ProjectService.list()'s own rows (services/projects.py:94) which include
-// UNREGISTERED discovered directories and use `path`, not `root_path`.
-// GET /projects/{id} and POST /projects return the dataclass.
+// ProjectService.list()'s own rows (services/projects.py:list(), ~line 108)
+// which include UNREGISTERED discovered directories and use `path`, not
+// `root_path`. GET /projects/{id} and POST /projects return the dataclass.
+//
+// list() builds a REGISTERED row as {name, path, registered: true, id, slug,
+// kind, default_agent} (every field present) but an UNREGISTERED row as only
+// {name, path, registered: false} — id/slug/kind/default_agent are genuinely
+// absent for a discovered-but-not-yet-registered directory, not empty
+// strings, so they're optional here rather than nullable.
 export type ProjectRow = {
-  id: string;
   name: string;
   path: string;
   registered: boolean;
-  slug: string;
-  kind: "user" | "home";
-  default_agent: string | null;
+  id?: string;
+  slug?: string;
+  kind?: "user" | "home";
+  default_agent?: string | null;
 };
 
 export type Project = {
@@ -92,12 +98,19 @@ export type MissionStep = {
   result: Record<string, unknown>;
 };
 
+// Matches YuriEvent.to_dict() (backend/yuri/domain/event.py) exactly — an
+// asdict() of the dataclass, so these are the real wire field names: `ts`,
+// not `created_at`, and `agent_id`/`project_id`/`speakable` are real fields,
+// not omissions.
 export type YuriEvent = {
   id: string;
   type: string;
-  severity: string;
+  ts: string;
   mission_id: string | null;
   session_id: string | null;
+  agent_id: string | null;
+  project_id: string | null;
+  severity: string;
+  speakable: boolean;
   payload: Record<string, unknown>;
-  created_at: string;
 };

@@ -24,9 +24,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     cache: "no-store",
   });
   const text = await r.text();
-  const data = text ? JSON.parse(text) : null;
+  // The body isn't guaranteed to be JSON: a backend-unreachable failure comes
+  // back through the Next proxy as an HTML error page with a non-2xx status,
+  // not a JSON error body. JSON.parse would throw on that and this function
+  // would never reach the ApiError below — exactly the backend-down case the
+  // caller most needs status out of. Fall back to null and still throw.
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
   if (!r.ok) {
-    const detail = data && typeof data === "object" && "detail" in data ? String(data.detail) : `HTTP ${r.status}`;
+    const detail =
+      data && typeof data === "object" && "detail" in data ? String((data as { detail: unknown }).detail) : `HTTP ${r.status}`;
     throw new ApiError(r.status, detail);
   }
   return data as T;

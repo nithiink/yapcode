@@ -548,6 +548,12 @@ details.handoff:hover > summary { color: var(--mut); }
 .shell-nav { border-right: 1px solid var(--line); padding: 24px 14px; }
 .shell-rail { border-left: 1px solid var(--line); padding: 24px 18px; display: flex;
               flex-direction: column; min-height: 0; }
+/* Mirrors .conv-panel .conv-wrap above: makes conv-wrap both a flex item (so
+   it takes the rail's remaining height below the controls) and a flex
+   container for its own conv-scroll child, which then flex:1's inside it.
+   The fade overlay itself (.conv-wrap::before/::after, below) isn't scoped to
+   either ancestor and needs no rail-specific rule. */
+.shell-rail .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 
 /* One breakpoint. Below it the rail is the whole app: mic, transcript and the
    pending prompt card — the away-from-desk case. Desktop-first by decision. */
