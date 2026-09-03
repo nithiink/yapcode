@@ -689,3 +689,54 @@ a.miss-row { text-decoration: none; color: inherit; }
 .term-toolbar { flex: none; margin-bottom: 18px; }
 .term-frame { flex: 1; min-height: 360px; background: #14130f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; padding: 8px; }
 .term-empty { flex: 1; min-height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dim); font-size: 14px; max-width: 52ch; margin: 0 auto; padding: 40px 12px; }
+
+/* ---- Agents view ---- */
+/* Cards reuse the same outlined-panel language as .apr/.sess (transparent
+   fill, brighter hairline border) rather than inventing a new card look. */
+.agents-view { min-width: 0; }
+.agents-list { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.agent-card { background: transparent; border: 1px solid var(--line2); border-radius: 14px; padding: 15px 16px; min-width: 0; }
+.agent-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.agent-name { font-family: var(--disp); text-transform: uppercase; font-size: 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agentchip { flex: none; font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); }
+.agentchip.online { color: var(--good); border-color: var(--good); }
+.agentchip.offline { color: var(--danger); border-color: var(--danger); }
+.agent-version { flex: none; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.agent-detail { font-size: 13px; color: var(--mut); margin: 8px 0 0; }
+.agent-meta { font-size: 12px; color: var(--dim); margin-top: 6px; }
+
+/* the capabilities dict, as a labelled grid of ticks/crosses -- this is
+   where "Claude Code is one provider among several" stops being only a test
+   result. A non-boolean value (permission_modes is a list) shows its value
+   instead of a mark. */
+.agent-caps { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 7px 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
+/* flex-wrap, not truncation: a value-bearing cap (permission_modes is a
+   list, and can run longer than the column) wraps its value onto its own
+   line rather than clipping either the label or the value. */
+.agent-cap { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; min-width: 0; }
+.agent-cap-label { color: var(--mut); min-width: 0; }
+.agent-cap-mark { flex: none; font-weight: 700; }
+.agent-cap-mark.yes { color: var(--good); }
+.agent-cap-mark.no { color: var(--dim); }
+.agent-cap-value { flex: none; max-width: 100%; color: var(--ink); font-family: var(--mono); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+
+/* ---- Projects view ---- */
+/* Rows reuse .dash-row/.dash-list/.dash-btn (same visual language Missions
+   already uses for its list) -- one place to restyle a row either view
+   renders. */
+.projects-view { min-width: 0; }
+.proj-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+.proj-input { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 8px 12px; font: inherit; font-size: 13px; outline: none; min-width: 0; transition: border-color 0.12s ease; }
+.proj-input::placeholder { color: var(--dim); }
+.proj-input:focus { border-color: var(--acc); }
+.proj-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.proj-input-path { flex: 2 1 260px; }
+.proj-input-name { flex: 1 1 160px; }
+
+.projchip { flex: none; font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); }
+.projchip.registered { color: var(--good); border-color: var(--good); }
+.projchip.discovered { color: var(--mut); border-color: var(--line2); }
+
+/* ---- Activity view ---- */
+.activity-view { min-width: 0; }
+.activity-view .debugpanel { margin-top: 0; }
