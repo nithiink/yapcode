@@ -122,7 +122,7 @@ class Specialist:
     model: str | None = None       # None = the provider's default
     tools: tuple[str, ...] = ()    # () = the provider's default toolset
     permission_mode: str = "default"
-    capabilities: frozenset[str] = frozenset()   # task capabilities, §6
+    capabilities: tuple[str, ...] = ()   # task capabilities, §6 — a TUPLE, see below
     color: str = "#dd8a6a"         # roster and timeline identity
     builtin: bool = False          # shipped, not user-created
     archived: bool = False         # soft delete
@@ -131,6 +131,28 @@ class Specialist:
 `slug` is what reaches the provider (`--agent <slug>`, `POST /session
 {"agent": slug}`). It is derived once at creation and then immutable, because
 a running session holds it: recomputing it on rename would orphan the link.
+
+**`capabilities` and `tools` are tuples, not sets.** `sqlite.py`'s `_to_row`
+serialises JSON columns with `json.dumps(v, default=str)`. A `frozenset`
+is not JSON-serialisable, so `default=str` would catch it and store the
+literal string `"frozenset({'coding'})"` — silently, with no error, and it
+would read back as garbage. Tuples serialise as arrays. `AgentCapabilities`
+already uses `permission_modes: tuple[str, ...]` for the same reason.
+`from_dict` receives a list and `__post_init__` coerces it back to a tuple.
+
+**Every new JSON and boolean column must be registered.** `sqlite.py` line 28
+carries module-level registries that drive serialisation both ways:
+
+```python
+_JSON_COLS = {"metadata", "result", "runtime_metadata", "tool_input", "payload",
+              "tools", "capabilities", "requires", "verification"}   # 4 added
+_BOOL_COLS = {"auto_approve_edits", "speakable",
+              "builtin", "archived", "read_only"}                     # 3 added
+```
+
+Miss one and the column round-trips wrong with no exception. This is a
+one-line change in a shared file, so it belongs to the first task that
+creates any of these tables, not to whichever task happens to notice.
 
 ### 5.2 Materialisation — how a persona reaches the agent
 
