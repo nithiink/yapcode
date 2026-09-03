@@ -1,0 +1,37 @@
+{
+  "name": "refactor",
+  "description": "Investigate, refactor, test and review, without changing behaviour.",
+  "tasks": [
+    {
+      "id": "investigate",
+      "role": "researcher",
+      "title": "Investigate the current shape",
+      "read_only": true,
+      "instruction": "Understand the current shape of the code involved in: {goal}. Report what exists today and what makes it awkward, with file and line references. Do not change any files."
+    },
+    {
+      "id": "refactor",
+      "role": "developer",
+      "title": "Refactor",
+      "depends_on": ["investigate"],
+      "instruction": "Refactor the code described in the findings. Preserve behaviour exactly — this is a structural change, not a functional one. {goal}"
+    },
+    {
+      "id": "test",
+      "role": "tester",
+      "title": "Run the tests",
+      "depends_on": ["refactor"],
+      "instruction": "Run the project's tests and confirm behaviour is unchanged. Quote any real failure output; never report a pass you did not observe.",
+      "verification": ["tests_pass"]
+    },
+    {
+      "id": "review",
+      "role": "reviewer",
+      "title": "Review the refactor",
+      "depends_on": ["test"],
+      "read_only": true,
+      "instruction": "Review the diff and confirm no observable behaviour changed. Give a concrete failing scenario for each finding. End with exactly one line: 'VERDICT: approved' or 'VERDICT: changes-requested'.",
+      "verification": ["review_approved"]
+    }
+  ]
+}

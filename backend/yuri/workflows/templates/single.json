@@ -1,0 +1,12 @@
+{
+  "name": "single",
+  "description": "One task, one specialist: do the work. This is what every mission gets today, made explicit as a template rather than a special case.",
+  "tasks": [
+    {
+      "id": "work",
+      "role": "developer",
+      "title": "Do the work",
+      "instruction": "{goal}"
+    }
+  ]
+}

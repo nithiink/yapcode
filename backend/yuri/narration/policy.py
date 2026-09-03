@@ -120,6 +120,13 @@ NARRATION_OWNER: dict[str, Owner] = {
     # user is always looking at the screen it happened on and watching the row
     # go. The event exists for the audit log, not to be read back.
     EventType.MISSION_DELETED: "none",
+    # RosterService.create/update/archive are UI/API-only (spec: voice tools
+    # never create, edit or delete a specialist), so the user is always
+    # looking at the screen where it just happened -- narrating it back would
+    # be telling them what they themselves did.
+    EventType.SPECIALIST_CREATED: "none",
+    EventType.SPECIALIST_UPDATED: "none",
+    EventType.SPECIALIST_ARCHIVED: "none",
 }
 
 # Blocks on the user: never suppressed, whatever the mode. "Be quiet" means

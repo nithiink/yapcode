@@ -1,0 +1,13 @@
+{
+  "name": "research",
+  "description": "Investigate a question. Changes nothing.",
+  "tasks": [
+    {
+      "id": "research",
+      "role": "researcher",
+      "title": "Research",
+      "read_only": true,
+      "instruction": "Investigate: {goal}. Report what you find with file and line references. If the answer is not in the code, say so rather than inferring it. Do not change any files."
+    }
+  ]
+}

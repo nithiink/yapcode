@@ -34,6 +34,9 @@ class EventType:
     AGENT_ERROR = "agent.error"
     PROJECT_REGISTERED = "project.registered"
     MEMORY_REMEMBERED = "memory.remembered"
+    SPECIALIST_CREATED = "specialist.created"
+    SPECIALIST_UPDATED = "specialist.updated"
+    SPECIALIST_ARCHIVED = "specialist.archived"
 
 
 # type -> (severity, speakable)   (spec §6.1)
@@ -55,6 +58,9 @@ DEFAULTS: dict[str, tuple[str, bool]] = {
     EventType.AGENT_ERROR: ("error", True),
     EventType.PROJECT_REGISTERED: ("info", False),
     EventType.MEMORY_REMEMBERED: ("info", False),
+    EventType.SPECIALIST_CREATED: ("info", False),
+    EventType.SPECIALIST_UPDATED: ("info", False),
+    EventType.SPECIALIST_ARCHIVED: ("info", False),
 }
 
 

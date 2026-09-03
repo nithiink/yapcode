@@ -592,7 +592,13 @@ class OpenCodeProvider(AgentProvider):
             interactive_terminal=False, slash_commands=False, send_keys=False,
             permission_modes=(), supports_interrupt=True,
             supports_rehydrate=True, supports_resume=False,
-            supports_events=False, cost_tracking=True)
+            supports_events=False, cost_tracking=True,
+            # `POST /session` accepts an `agent` name, and OpenCode's own Agent
+            # schema carries `prompt`. The definition has to exist in its config
+            # first — `GET /api/agent` is read-only — which is what
+            # OpenCodeMaterialiser writes. Measured against a live
+            # `opencode serve` on 2026-09-04.
+            supports_personas=True)
 
     async def health(self) -> AgentHealth:
         """A pure probe, deliberately — never `acquire()`.

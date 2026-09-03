@@ -149,3 +149,10 @@ BUILTINS: tuple[dict, ...] = (
                        "here. Describe the behaviour, not the diff. Do not invent "
                        "rationale that is not present in the work you were given.")},
 )
+
+# Spec §7.32's role-to-provider preference. Derived from BUILTINS rather than
+# written out again: each builtin already declares the provider its role should
+# prefer, and a second copy is a second thing to keep in step. Used only to
+# ORDER candidates — never to exclude one, because a user who created a
+# reviewer on the other provider meant it.
+ROLE_PREFERENCE: dict[str, str] = {b["role"]: b["provider_id"] for b in BUILTINS}

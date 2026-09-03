@@ -30,6 +30,15 @@ class AgentCapabilities:
     supports_resume: bool = False
     supports_events: bool = False
     cost_tracking: bool = False
+    # Whether this provider has its OWN named-agent mechanism that carries a
+    # system prompt — `claude --agents <json>` / `--agent <slug>`, OpenCode's
+    # `POST /session {"agent": slug}`. Phase 7 delegates a specialist's persona
+    # to that rather than reimplementing prompt injection, so a provider
+    # answering False gets its specialists' prompts prepended to the first
+    # message instead: degraded, but honest, and the roster UI says which is
+    # which. Mechanical, like every other flag here — NOT a statement about
+    # what the provider is good at, which is a property of the specialist.
+    supports_personas: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {"interactive_terminal": self.interactive_terminal,
@@ -39,7 +48,8 @@ class AgentCapabilities:
                 "supports_rehydrate": self.supports_rehydrate,
                 "supports_resume": self.supports_resume,
                 "supports_events": self.supports_events,
-                "cost_tracking": self.cost_tracking}
+                "cost_tracking": self.cost_tracking,
+                "supports_personas": self.supports_personas}
 
 
 class ProviderUnavailable(RuntimeError):

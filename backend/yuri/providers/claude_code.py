@@ -105,7 +105,11 @@ class ClaudeCodeProvider(AgentProvider):
         return AgentCapabilities(interactive_terminal=True, slash_commands=True, send_keys=True,
                                  permission_modes=("default", "acceptEdits", "plan", "auto"),
                                  supports_interrupt=True, supports_rehydrate=True,
-                                 supports_resume=True, supports_events=True, cost_tracking=True)
+                                 supports_resume=True, supports_events=True, cost_tracking=True,
+                                 # `claude --agents <json>` defines agents inline at
+                                 # launch and `--agent <slug>` selects one. Verified
+                                 # against the installed CLI on 2026-09-04.
+                                 supports_personas=True)
 
     async def health(self) -> AgentHealth:
         now = time.monotonic()
