@@ -500,6 +500,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                 text=_summarize_tool(ev.get("tool_name", ""), ev.get("tool_input", {})),
                 options=["allow", "deny"],
                 tool_name=ev.get("tool_name", ""),
+                tool_input=ev.get("tool_input") or {},
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.prompt_seq += 1
@@ -1366,6 +1367,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                 text=_summarize_tool(ev.get("tool_name", ""), ev.get("tool_input", {})),
                 options=["allow", "deny"],
                 tool_name=ev.get("tool_name", ""),
+                tool_input=ev.get("tool_input") or {},
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.prompt_seq += 1

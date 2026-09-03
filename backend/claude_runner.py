@@ -49,6 +49,11 @@ class Prompt:
     tool_name: str
     multi_select: bool = False  # AskUserQuestion: select many vs. one
     request_id: str = field(default_factory=lambda: str(uuid4()))
+    # The tool's arguments, so risk_for() can see WHAT is being asked and not
+    # just which tool. Without it a poll-path approval for `rm -rf /` scored
+    # `confirm` where the observer path scored `dangerous` -- harmless while
+    # risk only labels, load-bearing the moment it drives policy.
+    tool_input: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,6 +85,7 @@ class AdvanceResult:
                 "tool_name": self.prompt.tool_name,
                 "multi_select": self.prompt.multi_select,
                 "request_id": self.prompt.request_id,
+                "tool_input": self.prompt.tool_input,
             }
         return d
 
@@ -576,12 +582,14 @@ class SDKClaudeRunner(ClaudeRunner):
         if kind == "question":
             text, options, multi = _parse_question(tool_input)
             return Prompt(kind="choice", text=text, options=options,
-                          tool_name=tool_name, multi_select=multi)
+                          tool_name=tool_name, multi_select=multi,
+                          tool_input=tool_input)
         return Prompt(
             kind="permission",
             text=_summarize_tool(tool_name, tool_input),
             options=["allow", "deny"],
             tool_name=tool_name,
+            tool_input=tool_input,
         )
 
     def _map_decision(self, kind: str, tool_name: str,

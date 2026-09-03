@@ -111,6 +111,32 @@ class ApprovalServiceTests(unittest.TestCase):
             self.svc.record_request(self.sess, PROMPT_NO_REQID)
         self.assertTrue(any("request_id" in line for line in cm.output))
 
+    def test_a_poll_path_prompt_carries_enough_to_classify_the_risk(self):
+        """AdvanceResult.to_dict() used to drop tool_input, so an approval
+        recorded from the poll path scored `confirm` for the same `rm -rf /`
+        the observer path scored `dangerous`. Harmless while risk only labels;
+        wrong the moment it drives policy, and misleading to the user either
+        way, since Yuri says "that's a destructive action" off this label."""
+        from claude_runner import AdvanceResult, Prompt
+
+        prompt = Prompt(kind="permission", text="run rm -rf /",
+                        options=["allow", "deny"], tool_name="Bash",
+                        tool_input={"command": "rm -rf /"})
+        serialized = AdvanceResult(status="needs_permission", assistant_text="",
+                                   prompt=prompt).to_dict()["prompt"]
+        self.assertEqual(serialized["tool_input"], {"command": "rm -rf /"})
+
+        approval = self.svc.record_request(self.sess, serialized)
+        self.assertEqual(approval.risk, "dangerous")
+
+    def test_the_same_prompt_without_tool_input_is_the_weaker_label(self):
+        """Pins the contrast, so a future change that drops tool_input again
+        shows up as a test asking why the risk got weaker."""
+        from yuri.domain.risk import risk_for
+
+        self.assertEqual(risk_for("Bash", {"command": "rm -rf /"}), "dangerous")
+        self.assertEqual(risk_for("Bash", {}), "confirm")
+
     def test_resolve_by_session_allow_deny_ambiguous(self):
         self.svc.record_request(self.sess, PROMPT)
         with self.assertRaises(ValueError):

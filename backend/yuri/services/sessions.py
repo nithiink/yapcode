@@ -52,7 +52,7 @@ from yuri.services.journal import Journal
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
 from yuri.services.router import AgentRouter
-from yuri.store.base import Store
+from yuri.store.base import LiveSessionExists, Store
 
 log = logging.getLogger("yuri.sessions")
 
@@ -366,7 +366,26 @@ class SessionService:
         row = AgentSession(project_id=project.id, agent_id=agent.id, native_session_id=handle, backend="cli",
                            working_directory=project.root_path, mission_id=mission.id, status="idle",
                            name=sess_name)
-        self.store.sessions.insert(row)
+        try:
+            self.store.sessions.insert(row)
+        except LiveSessionExists:
+            # We got here because _native() reported the handle unadopted, but
+            # a live row says otherwise -- which happens when list_native()
+            # raised and _native_map swallowed it. Before migration 0002 this
+            # inserted a SECOND live row with its own mission, stranding one of
+            # them; now the index refuses and the honest answer is the one the
+            # already-adopted branch above gives.
+            existing = self.row_for(handle)
+            log.warning("adopt(%s): the provider could not be enumerated but a live row "
+                        "exists; reporting it as already adopted", handle[:12])
+            # The mission we just created has nothing to run; leaving it
+            # active is what "stranded" meant in the first place.
+            self.missions.set_status(mission, "cancelled", by="system",
+                                     reason="the handle was already adopted")
+            return {"session_id": handle, "name": existing.name if existing else None,
+                    "cwd": existing.working_directory if existing else project.root_path,
+                    "attach": self._attach_for(agent, handle), "already": True,
+                    "mission_id": existing.mission_id if existing else None}
         self._persist_name(agent, handle, sess_name)
         self.bus.publish(YuriEvent.make(EventType.SESSION_CREATED, mission_id=mission.id, session_id=row.id,
                                         agent_id=agent.id, project_id=project.id,

@@ -30,6 +30,14 @@ class PendingApprovalExists(ValueError):
     """A session already has a pending approval (one decision per prompt)."""
 
 
+class LiveSessionExists(ValueError):
+    """A live row already exists for this native handle (one live row each).
+
+    Named, not a bare IntegrityError, so the caller can treat it as what it
+    actually means -- "this handle is already adopted" -- instead of a 500.
+    """
+
+
 class ProjectRepo(ABC):
     @abstractmethod
     def insert(self, p: Project) -> None: ...
