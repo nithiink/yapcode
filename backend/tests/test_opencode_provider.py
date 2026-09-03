@@ -277,6 +277,23 @@ class Surface(_Base):
         self.assertEqual(self.fake.state.interrupts, [h])
         self.assertEqual(self.p.poll(h)["status"], "idle")
 
+    async def test_an_interrupted_partial_reply_never_joins_the_next_turn(self):
+        """An interrupt is exactly when an unfinished reply is most likely to
+        be sitting there. If it survives, the next turn completes with text
+        the agent never finished saying, answering a different question."""
+        h = await self._session()
+        self.p.send_message(h, "one")
+        self.fake.state.push_assistant(h, "partial reply mid-typing", finish="")
+        self.assertEqual(self.p.poll(h)["status"], "working")
+        await self.p.interrupt(h)
+
+        self.p.send_message(h, "two")
+        self.fake.state.push_assistant(h, "final answer")
+        res = self.p.poll(h)
+        self.assertEqual(res["status"], "completed")
+        self.assertEqual(res["assistant_text"], "final answer")
+        self.assertNotIn("partial", res["assistant_text"])
+
     async def test_list_native_is_shaped_like_the_other_providers(self):
         h = await self._session("/tmp")
         row, = [s for s in self.p.list_native() if s["handle"] == h]

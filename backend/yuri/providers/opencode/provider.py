@@ -480,14 +480,29 @@ class OpenCodeProvider(AgentProvider):
 
     async def interrupt(self, handle: str) -> None:
         h = self._get(handle)
-        await self._arun(self._interrupt(handle))
+        seen = await self._arun(self._interrupt(handle))
         # Only after OpenCode accepted it: a failed interrupt leaves the turn
         # running, and reporting idle for a live turn is the worse lie.
         h.in_flight = False
+        # Consume the abandoned turn's messages, exactly as the error path
+        # does. An interrupt is when a half-written reply is MOST likely to be
+        # sitting there unfinished, and without this it survives to be glued
+        # onto the next turn's completion -- so Yuri would narrate a sentence
+        # the agent never finished saying, attributed to a different question.
+        if seen is not None:
+            h.msg_seen = seen
 
-    async def _interrupt(self, handle: str) -> None:
+    async def _interrupt(self, handle: str) -> int | None:
         client = await self._client()
         await client.post(f"/api/session/{handle}/interrupt", {})
+        # After the interrupt lands, so anything written while it was in
+        # flight is consumed too.
+        try:
+            return len(await self._messages(client, handle))
+        except OpenCodeError:
+            # The interrupt itself succeeded; failing to read the count back
+            # is not a reason to report the turn still running.
+            return None
 
     async def stop(self, handle: str) -> None:
         """Forget the handle. Deliberately no delete: OpenCode sessions are
