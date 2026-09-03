@@ -21,10 +21,13 @@ export default function Page() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Projects aren't part of useYuri()'s shared state (nothing else needs them
   // continuously), so this view fetches its own copy purely to resolve
-  // project_id -> name for display.
+  // project_id -> name for display. Best-effort: a failure here just falls
+  // back to showing raw project ids, so it doesn't get the same
+  // fetch-then-adopt treatment as missions below.
   useEffect(() => {
     yget<{ projects: ProjectRow[] }>("projects")
       .then((r) => setProjects(Array.isArray(r?.projects) ? r.projects : []))
@@ -33,9 +36,27 @@ export default function Page() {
       });
   }, []);
 
-  useEffect(() => {
-    void refresh("missions");
+  // useYuri()'s own refresh("missions") swallows fetch failures (see
+  // VoiceProvider's refreshMissions: a stale/empty list is fine for the
+  // shared context). This view can't accept that for its one and only list:
+  // an empty `missions` and a load failure render identically ("No missions
+  // yet"), and only one of those means there really are none. So this probes
+  // the same endpoint itself, purely to observe success/failure, and only
+  // then asks the context to adopt the fresh data — the same pattern
+  // app/page.tsx uses for approvals/missions.
+  const load = useCallback(async () => {
+    try {
+      await yget<{ missions: Mission[] }>("missions");
+      setLoadError(null);
+      await refresh("missions");
+    } catch (e) {
+      setLoadError(e instanceof ApiError ? e.message : "Could not reach Yuri's backend.");
+    }
   }, [refresh]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // Refresh on the events that invalidate this view, not on a timer.
   useEffect(
@@ -74,23 +95,34 @@ export default function Page() {
     <div className="miss-view">
       <h2 className="viewtitle">Missions</h2>
 
-      {error && <div className="apr-error">{error}</div>}
-
-      {sorted.length === 0 ? (
-        <div className="empty">No missions yet — start a session to create one.</div>
-      ) : (
-        <div className="dash-list">
-          {sorted.map((m) => (
-            <MissionRow
-              key={m.id}
-              m={m}
-              projectName={projectName(m.project_id)}
-              busy={busy === m.id}
-              onOpen={() => router.push(`/missions/${m.id}`)}
-              onAct={(action) => void act(m.id, action)}
-            />
-          ))}
+      {loadError ? (
+        <div className="apr-error dash-loaderror">
+          <span>{loadError}</span>
+          <button className="txtoggle" onClick={() => void load()}>
+            Retry
+          </button>
         </div>
+      ) : (
+        <>
+          {error && <div className="apr-error">{error}</div>}
+
+          {sorted.length === 0 ? (
+            <div className="empty">No missions yet — start a session to create one.</div>
+          ) : (
+            <div className="dash-list">
+              {sorted.map((m) => (
+                <MissionRow
+                  key={m.id}
+                  m={m}
+                  projectName={projectName(m.project_id)}
+                  busy={busy === m.id}
+                  onOpen={() => router.push(`/missions/${m.id}`)}
+                  onAct={(action) => void act(m.id, action)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
