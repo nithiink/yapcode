@@ -460,8 +460,12 @@ body {
 
 .txtoggle { background: transparent; border: 1px solid var(--line); color: var(--mut); font: inherit; font-size: 11.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .txtoggle:hover { color: var(--ink); border-color: var(--line2); }
+.txtoggle:disabled { opacity: 0.5; cursor: default; }
+.txtoggle:disabled:hover { color: var(--mut); border-color: var(--line); }
 .txtoggle.primary { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); }
 .txtoggle.primary:hover { color: var(--acc); background: color-mix(in srgb, var(--acc) 12%, transparent); }
+.txtoggle.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.txtoggle.danger:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 
 /* "Continue in your terminal" — the reframed handoff: a collapsible section with
    two clearly-explained choices (take the keyboard / reopen anywhere). */
@@ -630,3 +634,24 @@ details.handoff:hover > summary { color: var(--mut); }
 .dash-btn:disabled { opacity: 0.5; cursor: default; }
 .dash-btn.danger { color: var(--danger); border-color: var(--danger); }
 .dash-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* ---- Sessions view ---- */
+/* SessionCard used to render at half a panel's width, beside the Conversation
+   panel; here it gets the whole shell-main column, so the list is just a
+   single flex column at that width rather than a fixed max-width. */
+.sessions-view { min-width: 0; }
+.sessions-list { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.sesswrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The per-card message box: lets a session be driven by typing, not just
+   voice. Sits in its own pill below the card rather than inside it, since
+   SessionCard (Task 2) takes no slot for extra controls. */
+.sess-msgbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; min-width: 0; }
+.sess-msgbox { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--ink); background: transparent; border: 0; padding: 6px 0; outline: none; }
+.sess-msgbox::placeholder { color: var(--dim); }
+.sess-msgbox:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Terminal view ---- */
+.term-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.term-toolbar { flex: none; margin-bottom: 18px; }
+.term-frame { flex: 1; min-height: 360px; background: #14130f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; padding: 8px; }
+.term-empty { flex: 1; min-height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dim); font-size: 14px; max-width: 52ch; margin: 0 auto; padding: 40px 12px; }
