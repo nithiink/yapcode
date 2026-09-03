@@ -17,10 +17,12 @@ import socket
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.dirname(__file__))
 
+import config  # noqa: E402
 from fake_opencode import FakeOpenCode  # noqa: E402
 from yuri.providers.opencode.server import (  # noqa: E402
     OpenCodeServer, OpenCodeUnavailable)
@@ -258,6 +260,16 @@ class Spawn(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(got, want, url)
             self.assertIsInstance(got, str, url)   # it goes on a command line
 
+    async def test_the_base_url_is_public_and_normalised(self):
+        # provider.py's health message names the address ("did not answer at
+        # ..." is most of what makes it actionable), and health() must not
+        # acquire, so there is usually no client to ask for it. It read the
+        # private attribute until this property existed.
+        self.assertEqual(OpenCodeServer("http://127.0.0.1:4096/", spawn=False).url,
+                         "http://127.0.0.1:4096")
+        self.assertEqual(OpenCodeServer("http://127.0.0.1:4096", spawn=False).url,
+                         "http://127.0.0.1:4096")
+
     async def test_an_explicit_env_is_used_verbatim_and_is_the_seam_for_secrets(self):
         """Design spec section 4 wants the child to inherit no Yuri secrets, but
         which names are secret is only knowable at the construction site (task
@@ -481,6 +493,72 @@ class Spawn(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(await second.get("/api/session"), list)
             finally:
                 await srv.release()
+
+
+class ChildEnvironment(unittest.IsolatedAsyncioTestCase):
+    """Design spec section 4: the spawned child "inherits no Yuri secrets".
+
+    `server.py` cannot decide which names those are — it may not import config,
+    and OPENAI_API_KEY/GEMINI_API_KEY are genuinely ambiguous (Yuri's voice
+    keys, and plausibly OpenCode's own provider auth). So config.py builds the
+    environment and server.py takes it verbatim. These tests read what the
+    CHILD PROCESS actually received, so they cover the whole path rather than
+    the filter in isolation.
+    """
+
+    async def _child_env(self, d: str) -> dict[str, str]:
+        """Spawn the stub with config's child environment; return what it got."""
+        port = _free_port()
+        binary = _stub_binary(d, port)
+        dump = os.path.join(d, "env.txt")
+        with mock.patch.dict(os.environ, {"YURI_ENV_DUMP": dump}):
+            env = config.opencode_child_env()
+        srv = OpenCodeServer(f"http://127.0.0.1:{port}", spawn=True, binary=binary,
+                             cwd=d, log_path=os.path.join(d, "logs", "oc.log"), env=env)
+        try:
+            await srv.acquire()
+        finally:
+            await srv.release()
+        with open(dump) as f:
+            return dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+
+    async def test_yuris_own_auth_token_never_reaches_the_child(self):
+        # VC_AUTH_TOKEN is the shared secret gating Yuri's own endpoints.
+        # OpenCode has no possible use for it, so it is stripped
+        # unconditionally — the escape hatch below does not reach it.
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {"VC_AUTH_TOKEN": "yuris-shared-secret"}):
+            child = await self._child_env(d)
+        self.assertNotIn("VC_AUTH_TOKEN", child)
+        self.assertNotIn("yuris-shared-secret", "".join(child.values()))
+        # Everything else passes through: the child cannot run without these.
+        self.assertIn("PATH", child)
+        self.assertEqual(child.get("PATH"), os.environ["PATH"])
+        self.assertEqual(child.get("HOME"), os.environ.get("HOME"))
+
+    async def test_the_voice_keys_are_stripped_by_default(self):
+        self.assertFalse(config.OPENCODE_INHERIT_KEYS,
+                         "OPENCODE_INHERIT_KEYS must default to off — the spec says strip")
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {v: f"voice-{v}" for v in config.VOICE_KEY_VARS}):
+            child = await self._child_env(d)
+        for var in config.VOICE_KEY_VARS:
+            self.assertNotIn(var, child, var)
+
+    async def test_opencode_inherit_keys_hands_the_model_keys_over(self):
+        """The escape hatch, for an OpenCode that reads its provider auth from
+        the environment rather than from its own `opencode auth login` store.
+        It covers the ambiguous model keys and nothing else."""
+        env = {v: f"voice-{v}" for v in config.VOICE_KEY_VARS}
+        env["VC_AUTH_TOKEN"] = "yuris-shared-secret"
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, env), \
+                mock.patch.object(config, "OPENCODE_INHERIT_KEYS", True):
+            child = await self._child_env(d)
+        for var in config.VOICE_KEY_VARS:
+            self.assertEqual(child.get(var), f"voice-{var}", var)
+        self.assertNotIn("VC_AUTH_TOKEN", child,
+                         "the escape hatch is for model keys — never for Yuri's own token")
 
 
 if __name__ == "__main__":

@@ -187,6 +187,58 @@ YURI_AGENTS: str = (os.getenv("YURI_AGENTS") or "claude-code").strip()
 YURI_HOME: str = os.path.abspath(os.path.expanduser(os.getenv("YURI_HOME") or "~/Yuri"))
 
 
+# --- OpenCode provider ------------------------------------------------------
+# Only read when YURI_AGENTS includes "opencode"; OpenCode is optional.
+#
+# Yuri attaches to a server already answering at OPENCODE_URL; only when
+# nothing answers does she spawn one, and she only ever stops a server she
+# started. OPENCODE_SPAWN=0 makes her attach-only, for a user who wants to own
+# the process. OPENCODE_SERVER_PASSWORD is never logged: summary() above prints
+# names and sources only, and `yuri doctor` prints the URL and the status, never
+# the value.
+OPENCODE_URL: str = (os.getenv("OPENCODE_URL") or "http://127.0.0.1:4096").strip()
+OPENCODE_SPAWN: bool = _env_bool("OPENCODE_SPAWN", True)
+OPENCODE_BIN: str = (os.getenv("OPENCODE_BIN") or "opencode").strip()
+OPENCODE_SERVER_PASSWORD: str = (os.getenv("OPENCODE_SERVER_PASSWORD") or "").strip()
+OPENCODE_MODEL: str = (os.getenv("OPENCODE_MODEL") or "").strip()
+
+# Whether the spawned OpenCode keeps Yuri's voice-provider keys — see
+# opencode_child_env(). Off by default: the spec says strip.
+OPENCODE_INHERIT_KEYS: bool = _env_bool("OPENCODE_INHERIT_KEYS", False)
+
+
+def opencode_child_env() -> dict[str, str]:
+    """The environment a spawned `opencode serve` is given.
+
+    Design spec §4: the child "inherits no Yuri secrets". This is the only
+    layer that knows which names those are — `OpenCodeServer` may not import
+    config, so it takes whatever this returns verbatim.
+
+    * **VC_AUTH_TOKEN is stripped unconditionally.** It is the shared secret
+      gating Yuri's own endpoints; OpenCode has no use for it, and a coding
+      agent that can read it could authenticate to her API as the user.
+    * **VOICE_KEY_VARS are stripped by default, and that is a judgement call.**
+      They are Yuri's voice-model keys *and* plausibly OpenCode's own provider
+      auth (the same GEMINI_API_KEY / OPENAI_API_KEY names). The spec says
+      strip, so stripping is the default; OPENCODE_INHERIT_KEYS=1 is the escape
+      hatch for a user whose OpenCode reads its model auth from the environment
+      rather than from its own `opencode auth login` store. The hatch covers
+      the ambiguous model keys only — never VC_AUTH_TOKEN, which is never
+      OpenCode's.
+    * **Everything else passes through**, PATH and HOME in particular: the child
+      cannot find its own binary or its config without them.
+
+    The server password is *not* set here. `OpenCodeServer._spawn` layers it on
+    top of whatever this returns, so filtering can never disarm server auth.
+    """
+    env = dict(os.environ)
+    env.pop("VC_AUTH_TOKEN", None)
+    if not OPENCODE_INHERIT_KEYS:
+        for var in VOICE_KEY_VARS:
+            env.pop(var, None)
+    return env
+
+
 # --- Access control ---------------------------------------------------------
 #
 # The backend turns voice/tool calls into real command execution on this

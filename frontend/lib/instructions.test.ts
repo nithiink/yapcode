@@ -26,6 +26,18 @@ test('"be quiet" is claimed by narration only — never by mute', () => {
   assert.ok(mute[0].includes("set_narration"), "mute must redirect the talk-less case");
 });
 
+test("the AGENTS bullet teaches agent choice without promising a tool that does not exist", () => {
+  // There is no list_agents voice tool, which is why the bullet points at the
+  // context's AGENTS list; and `agent` is the parameter start_session actually
+  // declares, so a rename on either side must break this.
+  const bullets = INSTRUCTIONS.split("\n").filter((l) => l.startsWith("- AGENTS:"));
+  assert.equal(bullets.length, 1, `claimed by ${bullets.length} bullets`);
+  assert.ok(bullets[0].includes('agent="opencode"'));
+  assert.ok(/AGENTS list in your context/.test(bullets[0]));
+  assert.ok(bullets[0].includes("set_mode"), "set_mode does not apply to an OpenCode session");
+  assert.ok(!/list_agents/.test(INSTRUCTIONS), "no such tool exists");
+});
+
 test("context block is empty when the backend is unreachable", () => {
   assert.equal(yuriContextBlock(null), "");
   assert.equal(yuriContextBlock(undefined), "");

@@ -151,22 +151,6 @@ class _Handle:
     pending: _Pending | None = None   # the ask poll surfaced; answer replies to it
 
 
-def _server_url(server: OpenCodeServer) -> str:
-    """The base URL, for diagnostics.
-
-    `OpenCodeServer` exposes `client` (None until acquired) and `owned`, but no
-    public URL — and `health()` must not acquire, so there is usually no client
-    to ask. Naming the address is most of a health message's value ("did not
-    answer at http://127.0.0.1:4096" tells the user what to fix), so read the
-    private attribute here rather than change server.py, which this task may
-    not touch. Follow-up: give OpenCodeServer a public `url` property.
-    """
-    client = server.client
-    if client is not None:
-        return client.base_url
-    return str(getattr(server, "_url", "") or "the configured URL")
-
-
 def _model_ref(model: str | None) -> dict[str, str] | None:
     """`"provider/model"` → OpenCode's `ModelRef`.
 
@@ -391,6 +375,16 @@ class OpenCodeProvider(AgentProvider):
         self._closed = False
         self._guard = threading.Lock()      # guards loop creation, not the loop
 
+    @property
+    def server(self) -> OpenCodeServer:
+        """The server this provider acquires through. Read-only.
+
+        Public so that a caller checking whether construction stayed lazy
+        (`provider.server.client is None`) does not have to reach into a
+        private attribute to do it. Nothing here acquires.
+        """
+        return self._server
+
     # --- the sync/async bridge -------------------------------------------
     #
     # One mechanism, used by every method. See the module docstring for why it
@@ -520,7 +514,7 @@ class OpenCodeProvider(AgentProvider):
         now = time.monotonic()
         if self._health is not None and now - self._health[0] < HEALTH_TTL_S:
             return self._health[1]
-        url = _server_url(self._server)
+        url = self._server.url
         try:
             online = bool(await self._arun(self._server.is_reachable()))
         except Exception as exc:

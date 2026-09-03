@@ -138,6 +138,27 @@ class ToolsDispatch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["backend"], "cli")
         self.assertEqual(out["project_path"], os.path.join(self.root, "proj"))
 
+    def test_start_session_declares_the_agent_parameter(self):
+        """The voice model can only pass parameters the schema declares, so
+        without this the prompt's "use OpenCode" instruction would be dropped
+        and a claude-code session started instead — a silent agent switch."""
+        d = next(x for x in tools.TOOL_DEFINITIONS if x["name"] == "start_session")
+        agent = d["parameters"]["properties"]["agent"]
+        self.assertEqual(agent["type"], "string")
+        self.assertIn("opencode", agent["description"])
+
+    async def test_start_session_forwards_the_requested_agent(self):
+        """`agent` must reach AgentRouter. If it were dropped, this call would
+        succeed on claude-code instead of failing."""
+        with self.assertRaises(ValueError) as cm:
+            await self._start(agent="not-an-agent")
+        msg = str(cm.exception)
+        self.assertIn("not-an-agent", msg)
+        self.assertIn("claude-code", msg)   # names what IS registered
+        # A failed start must not arm the duplicate guard either.
+        self.assertIsNone(tools._last_start)
+        self.assertNotIn("duplicate_guard", await self._start())
+
     async def test_start_session_duplicate_guard(self):
         first = await self._start()
         second = await self._start()

@@ -63,6 +63,17 @@ class OpenCodeServer:
     # --- state -----------------------------------------------------------
 
     @property
+    def url(self) -> str:
+        """The base URL, normalised (no trailing slash).
+
+        Public because diagnostics need it when there is no client to ask:
+        `health()` deliberately never acquires, so naming the address is most
+        of what makes its message actionable ("did not answer at
+        http://127.0.0.1:4096" tells the user what to fix).
+        """
+        return self._url
+
+    @property
     def owned(self) -> bool:
         """True only for a server this object spawned. The kill switch."""
         return self._owned
