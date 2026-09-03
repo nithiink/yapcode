@@ -42,6 +42,20 @@ class AgentCapabilities:
                 "cost_tracking": self.cost_tracking}
 
 
+class ProviderUnavailable(RuntimeError):
+    """A provider cannot serve right now, and the message says what to do.
+
+    A named type so the surfaces above can show the reason instead of burying
+    it: /tools/execute maps unknown exceptions to "the tool failed
+    unexpectedly", which would discard exactly the actionable text a provider
+    took care to write ("install OpenCode, or set OPENCODE_BIN to its full
+    path, or set OPENCODE_SPAWN=0 and run `opencode serve` yourself").
+
+    Lives here rather than in yuri.app so a provider package can raise it
+    without importing the composition root.
+    """
+
+
 @dataclass(frozen=True)
 class AgentHealth:
     online: bool

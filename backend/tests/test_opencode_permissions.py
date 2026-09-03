@@ -284,14 +284,46 @@ class TheTwoMarks(_Base):
         self.fake.state.push_assistant(self.h, "listed them")
         self.assertIn("listed them", self.p.poll(self.h)["assistant_text"])
 
-    async def test_an_ask_repeated_across_polls_keeps_the_same_request_id(self):
-        """Yuri polls every 1.5s while the user thinks. Each poll re-reports
-        the same ask, and ApprovalService dedups on request_id — a synthesized
-        or changing id would open a new approval per poll."""
+    async def test_a_repeated_ask_keeps_its_status_but_surfaces_its_prompt_once(self):
+        """Yuri polls every 1.5s while the user thinks, and OpenCode keeps the
+        request pending until it is answered.
+
+        The STATUS must keep coming — SessionService reads it to hold the row
+        at needs_permission and the mission at waiting_for_approval. The PROMPT
+        must not: it is what narration speaks and what the frontend injects,
+        and enqueueInjection deliberately never evicts a blocking item, so
+        re-reporting it grew the injection queue without bound while the user
+        was still deciding and Yuri would read the backlog aloud after they had
+        already answered. Both Claude backends pop each result off a queue, so
+        poll hands a given result back exactly once; this matches that.
+        """
         self.p.send_message(self.h, "do it")
         self.fake.state.add_permission(self.h, "req1", "run ls")
-        ids = {self.p.poll(self.h)["prompt"]["request_id"] for _ in range(3)}
-        self.assertEqual(ids, {"req1"})
+
+        first = self.p.poll(self.h)
+        self.assertEqual(first["status"], "needs_permission")
+        self.assertEqual(first["prompt"]["request_id"], "req1")
+
+        for i in range(3):
+            again = self.p.poll(self.h)
+            self.assertEqual(again["status"], "needs_permission", f"repeat {i}")
+            self.assertNotIn("prompt", again, f"repeat {i} re-offered the prompt")
+
+        # It is still answerable — the id is remembered, not forgotten.
+        self.p.answer(self.h, "allow")
+        self.assertEqual(self.fake.state.replies[-1][2], "req1")
+
+    async def test_a_genuinely_new_ask_surfaces_even_right_after_another(self):
+        """The de-dupe is per request_id, not a one-ask-per-session latch."""
+        self.p.send_message(self.h, "do it")
+        self.fake.state.add_permission(self.h, "req1", "run ls")
+        self.assertEqual(self.p.poll(self.h)["prompt"]["request_id"], "req1")
+        self.assertNotIn("prompt", self.p.poll(self.h))
+
+        self.p.answer(self.h, "allow")
+        self.fake.state.add_permission(self.h, "req2", "run rm -rf build")
+        second = self.p.poll(self.h)
+        self.assertEqual(second["prompt"]["request_id"], "req2")
 
     async def test_answering_an_unknown_handle_still_raises_keyerror(self):
         theirs = self.fake.state.new_session("/tmp/their-own-work")

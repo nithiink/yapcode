@@ -561,5 +561,34 @@ class ChildEnvironment(unittest.IsolatedAsyncioTestCase):
                          "the escape hatch is for model keys — never for Yuri's own token")
 
 
+class ActionableRefusals(unittest.IsolatedAsyncioTestCase):
+    """Every OpenCodeUnavailable message says what to do about it. That text
+    only reaches the user if /tools/execute recognises the type: its handler
+    maps YuriUnavailable and ValueError to soft errors and everything else to
+    "the tool failed unexpectedly", which would discard exactly the wording
+    these refusals were written for."""
+
+    def test_it_is_a_provider_unavailable_so_the_message_survives(self):
+        from yuri.providers.base import ProviderUnavailable
+
+        self.assertTrue(issubclass(OpenCodeUnavailable, ProviderUnavailable))
+        # And still a RuntimeError, so nothing that already caught one changes.
+        self.assertTrue(issubclass(OpenCodeUnavailable, RuntimeError))
+
+    async def test_the_refusals_name_what_to_do(self):
+        cases = (
+            (dict(spawn=False), ("OPENCODE_SPAWN", "opencode serve")),
+            (dict(spawn=True, binary="definitely-not-a-binary"),
+             ("OPENCODE_BIN", "install OpenCode")),
+        )
+        for kwargs, expect in cases:
+            srv = OpenCodeServer(f"http://127.0.0.1:{_free_port()}", **kwargs)
+            with self.assertRaises(OpenCodeUnavailable) as cm:
+                await srv.acquire()
+            for want in expect:
+                self.assertIn(want, str(cm.exception), kwargs)
+            await srv.release()
+
+
 if __name__ == "__main__":
     unittest.main()

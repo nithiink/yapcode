@@ -151,6 +151,32 @@ class _Handle:
     pending: _Pending | None = None   # the ask poll surfaced; answer replies to it
 
 
+def _surface(h: _Handle, kind: str, status: str,
+             prompt: dict[str, Any]) -> dict[str, Any]:
+    """Report an ask, with the prompt only the FIRST time it is surfaced.
+
+    OpenCode keeps a request in its pending list until it is answered, so a
+    naive poll re-reports the same ask on every 1.5s tick. The status has to
+    keep coming -- SessionService reads it to hold the row at
+    needs_permission and the mission at waiting_for_approval -- but the prompt
+    must not, because the prompt is what the narration layer speaks and what
+    the frontend injects.
+
+    Both Claude backends pop each result off a queue, so poll hands a given
+    result back exactly once; VoiceAgent.tsx says in writing that it relies on
+    that, and enqueueInjection deliberately never evicts a blocking item. So
+    re-reporting the prompt grew the injection queue without bound while the
+    user was still deciding, and Yuri would keep reading the backlog aloud
+    after they had already answered.
+
+    A different request_id is a genuinely new ask and surfaces again.
+    """
+    if h.pending is not None and h.pending.request_id == prompt["request_id"]:
+        return {"status": status}
+    h.pending = _Pending(kind, prompt["request_id"])
+    return {"status": status, "prompt": prompt}
+
+
 def _model_ref(model: str | None) -> dict[str, str] | None:
     """`"provider/model"` → OpenCode's `ModelRef`.
 
@@ -530,8 +556,18 @@ class OpenCodeProvider(AgentProvider):
                        else "reachable; not acquired yet")
                 detail = f"OpenCode at {url} answered · {how}"
             else:
-                detail = (f"OpenCode did not answer at {url} — start it with "
-                          "`opencode serve`, or check OPENCODE_URL")
+                # Not answering is not the same as unable to serve. With
+                # spawning allowed and the binary present, the next session
+                # starts one — so `online` (which is what the connect-time
+                # AGENTS block and the voice prompt gate on) has to say yes.
+                # Reporting offline here made Yuri refuse the first "use
+                # OpenCode" of every boot and offer Claude Code instead, in
+                # the DEFAULT configuration, for an agent that works.
+                spawnable, why = self._server.can_spawn
+                online = spawnable
+                detail = (f"OpenCode is not running at {url} yet · {why} · Yuri "
+                          "will start one when a session needs it" if spawnable
+                          else f"OpenCode did not answer at {url} — {why}")
         health = AgentHealth(online=online, version=None, detail=detail)
         self._health = (now, health)
         return health
@@ -660,7 +696,10 @@ class OpenCodeProvider(AgentProvider):
         if h.in_flight:
             reads.append(self._messages(client, handle))
         permissions, questions, events, *rest = await _gather(*reads)
-        messages = rest[0] if rest else []
+        # None means NOT FETCHED, which is not the same claim as "the session
+        # has no messages". Conflating them let the failure branch below read
+        # len([]) == 0 as the true count and rewind msg_seen to zero.
+        messages = rest[0] if rest else None
 
         out: dict[str, Any] = {"session_id": handle}
         ask = self._ask(h, permissions, questions)
@@ -683,9 +722,19 @@ class OpenCodeProvider(AgentProvider):
         if failure is not None:
             h.in_flight = False
             # Consume the messages too: a half-written reply must not resurface
-            # as the next turn's completion.
-            h.msg_seen = len(messages)
+            # as the next turn's completion. Only when we actually read them --
+            # a failure arriving while no turn is in flight (an interrupted
+            # step, or the first poll after a restart) fetched nothing, and
+            # setting msg_seen to 0 there would mark every reply the user has
+            # already heard as unread, re-narrating the whole session on the
+            # next completion. And because this branch persists, it would
+            # survive the restart too.
+            if messages is not None:
+                h.msg_seen = len(messages)
             return {**out, "status": "error", "error": failure}
+
+        if messages is None:            # no turn in flight: nothing to complete
+            return {**out, "status": "idle"}
 
         fresh = messages[h.msg_seen:]
         if any(m.get("type") == "assistant" and m.get("finish") for m in fresh):
@@ -711,13 +760,11 @@ class OpenCodeProvider(AgentProvider):
         request = _first_request(permissions)
         if request is not None:
             prompt = _permission_prompt(request)
-            h.pending = _Pending(PERMISSION, prompt["request_id"])
-            return {"status": "needs_permission", "prompt": prompt}
+            return _surface(h, PERMISSION, "needs_permission", prompt)
         request = _first_request(questions)
         if request is not None:
             prompt = _question_prompt(request)
-            h.pending = _Pending(QUESTION, prompt["request_id"])
-            return {"status": "needs_choice", "prompt": prompt}
+            return _surface(h, QUESTION, "needs_choice", prompt)
         # Nothing pending server-side: forget whatever we were holding. A
         # request answered in OpenCode's own UI must not stay answerable here.
         h.pending = None
@@ -852,6 +899,17 @@ class OpenCodeProvider(AgentProvider):
         dead OpenCode must not break Yuri's startup (design spec section 41).
         """
         if not known:
+            return []
+        # Attach only, never spawn. main.py awaits this inside the lifespan,
+        # before the app serves anything, and _client() would otherwise
+        # acquire -- so a spawn-enabled OpenCode that is merely not running
+        # would be STARTED by Yuri's own startup, blocking the whole boot for
+        # the readiness timeout if it never came up. Design spec section 4 is
+        # explicit that nothing runs `opencode serve` at startup, and Task 4
+        # kept health() out of acquire for the same reason.
+        if not await self._arun(self._server.is_reachable()):
+            log.info("OpenCode is not running; nothing re-adopted (it will be "
+                     "started when a session needs it)")
             return []
         try:
             sessions = await self._arun(self._sessions())

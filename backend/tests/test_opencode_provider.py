@@ -158,6 +158,48 @@ class Cursor(_Base):
         self.assertIn("done anyway", self.p.poll(h)["assistant_text"])
         self.assertEqual(self.p.poll(h)["status"], "idle")
 
+    async def test_a_failure_while_idle_does_not_rewind_msg_seen(self):
+        """Messages are only fetched while a turn is in flight, so a failure
+        arriving when none is (an interrupted step, or the first poll after a
+        restart) reads no messages at all. Treating that as "the session has
+        zero messages" marks every reply the user already heard as unread, and
+        the next completion re-narrates the whole session -- persisted, so it
+        survives the restart too."""
+        h = await self._session()
+        self.p.send_message(h, "one")
+        self.fake.state.push_assistant(h, "REPLY-ONE")
+        self.assertEqual(self.p.poll(h)["assistant_text"], "REPLY-ONE")
+        seen = self.p.runtime_metadata_for(h)["opencode_msg_seen"]
+        self.assertEqual(seen, 1)
+
+        # Idle now. A failed step arrives.
+        self.fake.state.push_event(h, "session.next.step.failed",
+                                   {"error": {"message": "provider 401"}})
+        self.assertEqual(self.p.poll(h)["status"], "error")
+        self.assertEqual(self.p.runtime_metadata_for(h)["opencode_msg_seen"], seen,
+                         "an idle failure rewound msg_seen")
+
+        self.p.send_message(h, "two")
+        self.fake.state.push_assistant(h, "REPLY-TWO")
+        res = self.p.poll(h)
+        self.assertEqual(res["assistant_text"], "REPLY-TWO")
+        self.assertNotIn("REPLY-ONE", res["assistant_text"])
+
+    async def test_a_failure_mid_turn_still_consumes_the_partial_reply(self):
+        """The other direction: when messages WERE read, the abandoned turn's
+        half-written reply must not survive into the next completion."""
+        h = await self._session()
+        self.p.send_message(h, "one")
+        self.fake.state.push_assistant(h, "half a sent", finish="")
+        self.fake.state.push_event(h, "session.next.step.failed",
+                                   {"error": {"message": "boom"}})
+        self.assertEqual(self.p.poll(h)["status"], "error")
+
+        self.p.send_message(h, "two")
+        self.fake.state.push_assistant(h, "the real answer")
+        res = self.p.poll(h)
+        self.assertEqual(res["assistant_text"], "the real answer")
+
     async def test_a_failed_step_becomes_an_error_with_the_message(self):
         h = await self._session()
         self.p.send_message(h, "do it")
@@ -407,6 +449,36 @@ class Health(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(h.detail)
         finally:
             await p.shutdown()
+
+    async def test_a_spawnable_server_reports_online_not_offline(self):
+        """`online` is what the connect-time AGENTS block and the voice prompt
+        gate on, and the prompt says not to use an agent that was offline. A
+        server that is merely not running YET, with spawning allowed and the
+        binary present, serves the next session fine — so reporting it offline
+        made Yuri refuse the first "use OpenCode" of every boot, in the DEFAULT
+        configuration, for an agent that works."""
+        p = OpenCodeProvider(OpenCodeServer(UNREACHABLE, spawn=True,
+                                            binary=sys.executable))
+        try:
+            h = await p.health()
+            self.assertTrue(h.online, "a spawnable OpenCode reported offline")
+            self.assertIn("will start one", h.detail)
+        finally:
+            await p.shutdown()
+
+    async def test_an_unspawnable_server_reports_offline_with_the_reason(self):
+        """The other two states must stay offline, and say which."""
+        for kwargs, expect in (
+                ({"spawn": False}, "OPENCODE_SPAWN=0"),
+                ({"spawn": True, "binary": "definitely-not-a-binary"},
+                 "not found or is not executable")):
+            p = OpenCodeProvider(OpenCodeServer(UNREACHABLE, **kwargs))
+            try:
+                h = await p.health()
+                self.assertFalse(h.online, kwargs)
+                self.assertIn(expect, h.detail, kwargs)
+            finally:
+                await p.shutdown()
 
     async def test_health_is_cached_so_a_ui_poll_cannot_hammer_the_server(self):
         with FakeOpenCode() as fake:

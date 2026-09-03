@@ -190,9 +190,13 @@ class Rehydrate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fake.state.calls, [])
 
     async def test_an_unreachable_server_rehydrates_to_nothing_without_raising(self):
+        """A dead OpenCode must not break startup (design spec section 41).
+        Logged at INFO, not WARNING: since rehydrate attaches rather than
+        spawns, "not running yet" is the ordinary state of a fresh boot, and a
+        warning every time would train the user to ignore them."""
         p = OpenCodeProvider(OpenCodeServer(UNREACHABLE, spawn=False))
         self.addAsyncCleanup(p.shutdown)
-        with self.assertLogs("yuri.providers.opencode", level="WARNING"):
+        with self.assertLogs("yuri.providers.opencode", level="INFO"):
             self.assertEqual(await p.rehydrate(known={"ses_x": {}}), [])
 
     async def test_the_marks_are_exported_for_persistence(self):
@@ -432,6 +436,43 @@ class EveryProviderAcceptsTheWidenedCall(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await p.rehydrate(known={"ses_x": {"cwd": "/tmp"}}), [])
         finally:
             await p.shutdown()
+
+
+class StartupStaysLazy(unittest.IsolatedAsyncioTestCase):
+    """main.py awaits sessions.rehydrate() inside the lifespan, before the app
+    serves anything. If that acquires, a spawn-enabled OpenCode that is merely
+    not running gets STARTED by Yuri's own boot -- and a binary that starts but
+    never becomes ready blocks the whole lifespan for the readiness timeout.
+
+    Design spec section 4: nothing runs `opencode serve` at Yuri startup.
+    """
+
+    async def test_rehydrate_attaches_but_never_spawns(self):
+        srv = OpenCodeServer("http://127.0.0.1:1", spawn=True,
+                             binary=sys.executable)
+        p = OpenCodeProvider(srv)
+        try:
+            self.assertEqual(await p.rehydrate(known={"ses_x": {"cwd": "/tmp"}}), [])
+            self.assertEqual(srv.spawn_count, 0, "startup spawned OpenCode")
+            self.assertIsNone(srv.client, "startup acquired the server")
+            self.assertFalse(srv.owned)
+        finally:
+            await p.shutdown()
+
+    async def test_rehydrate_still_re_adopts_from_a_server_already_running(self):
+        """Attach-only must not cost the feature: a server that IS up is still
+        enumerated and its sessions still come back."""
+        with FakeOpenCode() as fake:
+            sid = fake.state.new_session("/tmp/proj")
+            srv = OpenCodeServer(fake.url, spawn=True, binary=sys.executable)
+            p = OpenCodeProvider(srv)
+            try:
+                got = await p.rehydrate(known={sid: {"cwd": "/tmp/proj"}})
+                self.assertEqual([r["handle"] for r in got], [sid])
+                self.assertEqual(srv.spawn_count, 0)
+                self.assertFalse(srv.owned, "attached, so not owned")
+            finally:
+                await p.shutdown()
 
 
 if __name__ == "__main__":

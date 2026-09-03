@@ -38,6 +38,7 @@ from tmux_runner import validate_session_id
 from tools import TOOL_DEFINITIONS, dispatch_tool
 from yuri import app as yuri_app
 from yuri.api.routes import build_router
+from yuri.providers.base import ProviderUnavailable
 
 # .env is loaded once, by `import config` above. No second load here: a CWD-based
 # re-read would restore the VC_AUTH_TOKEN a run mode intentionally left unset.
@@ -693,6 +694,13 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         # the actionable reason as a SOFT error so it can tell the user what to
         # fix, instead of the generic "failed unexpectedly" below.
         log.warning("tool %s unavailable: %s", req.name, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
+        return {"ok": False, "error": str(exc)}
+    except ProviderUnavailable as exc:
+        # A provider that cannot serve wrote an actionable message about how to
+        # fix it; the generic handler below would throw that away. Soft, like
+        # YuriUnavailable above, so the model relays it instead of retrying.
+        log.warning("tool %s: provider unavailable: %s", req.name, exc)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
     except KeyError as exc:

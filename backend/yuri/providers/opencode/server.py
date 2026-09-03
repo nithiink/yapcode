@@ -19,6 +19,7 @@ import shutil
 import time
 from urllib.parse import urlsplit
 
+from ..base import ProviderUnavailable
 from .client import OpenCodeClient
 
 log = logging.getLogger("yuri.opencode.server")
@@ -29,9 +30,13 @@ TERMINATE_GRACE = 5.0
 DEFAULT_PORT = 4096          # OpenCode's own default for `opencode serve`
 
 
-class OpenCodeUnavailable(RuntimeError):
+class OpenCodeUnavailable(ProviderUnavailable):
     """No server could be attached to, and none could (or may) be spawned.
-    The message says what to do about it."""
+    The message says what to do about it.
+
+    A ProviderUnavailable so /tools/execute shows that message rather than
+    replacing it with "the tool failed unexpectedly" -- still a RuntimeError,
+    so nothing that already catches one changes behaviour."""
 
 
 class OpenCodeServer:
@@ -61,6 +66,29 @@ class OpenCodeServer:
         self.spawn_count = 0          # for tests: proves the lock works
 
     # --- state -----------------------------------------------------------
+
+    @property
+    def can_spawn(self) -> tuple[bool, str]:
+        """(could this object start a server, why not) — without starting one.
+
+        `health()` needs the difference between "nothing is answering, but a
+        session would start one fine" and "nothing is answering and nothing
+        can". Reporting the first as offline made Yuri tell the user her new
+        agent was unavailable in the default configuration, on every fresh
+        boot, before the first OpenCode session had ever run.
+        """
+        if not self._spawn_allowed:
+            return False, ("OPENCODE_SPAWN=0, so Yuri will not start one — run "
+                           "`opencode serve` yourself, or set OPENCODE_SPAWN=1")
+        # Exactly _spawn's own resolution, including the os.access check: an
+        # explicit OPENCODE_BIN path that does not exist or is not executable
+        # would otherwise be reported spawnable and then fail at spawn time.
+        found = (self._binary if os.path.sep in self._binary
+                 else shutil.which(self._binary))
+        if not found or not os.access(found, os.X_OK):
+            return False, (f"{self._binary!r} was not found or is not executable "
+                           "— install OpenCode, or set OPENCODE_BIN to its full path")
+        return True, found
 
     @property
     def url(self) -> str:
