@@ -37,8 +37,13 @@ the exact failure fixed twice during Phase 6:
 
 - a companion/bot hierarchy with delegation (Phase 4 ruled out an
   orchestrator; multi-agent missions are Phase 7)
-- a per-agent persona editor with colour, system prompt, skills and voice
-  (Yuri's agents are *providers*, not personas — there is one persona, hers)
+- ~~a per-agent persona editor with colour, system prompt, skills and voice~~
+  — **reversed on 2026-09-04.** Phase 7 adds exactly this: a roster of named
+  specialists with a role, a system prompt, tools and a colour. The reversal is
+  narrower than it reads. Yuri still has the only voice and the only
+  personality the user talks to; a specialist's "persona" is a job description
+  handed to a provider, not a character. See
+  `docs/superpowers/specs/2026-09-04-yuri-phase-7-design.md` §3.
 - learned memories with confidence scores (memory is markdown today; semantic
   memory is Phase 9)
 - a 60-integration grid (there is no integration layer)
