@@ -11,13 +11,14 @@ Every other route goes through a service."""
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from yuri.app import container, narration_mode, set_narration_mode
+from yuri.app import container, last_spoke_at, narration_mode, set_narration_mode
 from yuri.domain.mission import InvalidTransition
 from yuri.services.missions import MissionInUse
 from yuri.narration.policy import MODES
@@ -48,9 +49,18 @@ def build_router(require_auth: Callable) -> APIRouter:
         health = await c.registry.health_all()
         missions = [m for m in c.missions.list() if m.status in ACTIVE][:20]
         projects = {p.id: p.name for p in c.projects.registered()}
+        # Ordered as she would experience it (spec §5): the time, then who the
+        # user is, then her day, then — last, and only if any — what is
+        # running. The block used to lead with the work, which is a large part
+        # of why work was all she talked about.
         return {"home": c.home.path,
+                "now": datetime.datetime.now().astimezone().strftime("%A %d %B, %H:%M"),
+                "last_spoke_at": last_spoke_at(),
                 "memory_user": c.memory.read_user(),
-                "journal_today": c.journal.read_today(),
+                # Filtered: the raw journal is mostly mission bookkeeping, so
+                # handing all of it over gives her a day with nothing in it
+                # but work. Nothing stops being recorded.
+                "journal_today": c.journal.read_today_personal(),
                 "active_missions": [{"id": m.id, "title": m.title, "goal": m.goal, "status": m.status,
                                      "project": projects.get(m.project_id)} for m in missions],
                 "agents": [{"id": p.id, "name": p.name, **health[p.id].to_dict()} for p in c.registry.all()],

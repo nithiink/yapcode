@@ -222,7 +222,8 @@ class YuriApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evs[-1]["type"], "tool.started")
         self.c.memory.remember("likes tea")
         ctx = self.client.get("/yuri/context").json()
-        self.assertEqual(set(ctx), {"home", "memory_user", "journal_today", "active_missions", "agents",
+        self.assertEqual(set(ctx), {"home", "now", "last_spoke_at", "memory_user",
+                                    "journal_today", "active_missions", "agents",
                                     "narration_mode"})
         self.assertIn("likes tea", ctx["memory_user"])
         self.assertEqual(ctx["active_missions"][0]["title"], "s1")
@@ -298,3 +299,51 @@ class YuriApi(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContextGivesHerSomethingBesidesWorkTests(YuriApi):
+    """She could not tell morning from midnight, and her "today so far" was a
+    list of mission transitions. Both are why work was all she talked about.
+    """
+
+    def test_now_is_a_readable_local_time_she_can_greet_from(self):
+        now = self.client.get("/yuri/context").json()["now"]
+        self.assertTrue(now, "no time at all — every greeting is a guess")
+        # A weekday and an HH:MM, not an ISO stamp: she reads it aloud.
+        self.assertRegex(now, r"^[A-Z][a-z]+day \d{2} [A-Z][a-z]+, \d{2}:\d{2}$")
+
+    def test_last_spoke_at_is_none_before_they_have_ever_spoken(self):
+        # None is a real answer and she can use it ("first time we've talked").
+        # A fabricated timestamp would have her say "it's been a while" about
+        # nothing.
+        self.assertIsNone(self.client.get("/yuri/context").json()["last_spoke_at"])
+
+    async def test_any_voice_tool_stamps_last_spoke_at(self):
+        # Through dispatch_tool, not /tools/execute: that route lives on
+        # main.py's app, while this harness builds only the /yuri router. The
+        # stamp is in dispatch_tool, so this exercises the real wiring.
+        import tools as tools_mod
+        self.assertIsNone(self.client.get("/yuri/context").json()["last_spoke_at"])
+        await tools_mod.dispatch_tool("list_projects", {})
+        stamped = self.client.get("/yuri/context").json()["last_spoke_at"]
+        self.assertTrue(stamped, "a tool ran and nothing recorded that they were talking")
+
+    def test_the_journal_she_is_given_is_her_day_not_the_state_machine(self):
+        c = self.c
+        c.journal.append("mission created: billing fix (yuri-code)")
+        c.journal.append("mission 'billing fix': running → completed")
+        c.journal.append("turn completed in 'billing': did the thing")
+        c.journal.append("remembered: prefers pnpm")
+        c.journal.append("approval allowed (confirm) by voice: run the tests")
+        journal = self.client.get("/yuri/context").json()["journal_today"]
+
+        self.assertIn("prefers pnpm", journal)
+        self.assertIn("run the tests", journal)
+        for noise in ("mission created", "running → completed", "turn completed in"):
+            self.assertNotIn(noise, journal, f"bookkeeping reached her day: {noise}")
+
+    def test_nothing_stops_being_recorded(self):
+        # The filter is a read-side view. The full journal must still hold
+        # everything, or "what happened yesterday" loses the work.
+        self.c.journal.append("mission created: billing fix (yuri-code)")
+        self.assertIn("mission created", self.c.journal.read_today())

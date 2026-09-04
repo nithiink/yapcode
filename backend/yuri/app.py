@@ -31,6 +31,7 @@ from typing import Callable
 import config
 import session_manager
 from yuri.domain.event import YuriEvent
+from yuri.domain.ids import utcnow
 from yuri.events.bus import EventBus, bridge_to_event_log
 from yuri.home import Home, default_home
 from yuri.narration.policy import MODES, Mode, normalize_mode
@@ -269,6 +270,14 @@ async def shutdown() -> None:
 
 
 SETTINGS_NARRATION_MODE = "narration_mode"
+# When Yuri last did anything for the user. Stamped on every voice tool
+# dispatch rather than on a disconnect: a closed tab, a killed browser or a
+# dropped network never fires a disconnect, and a field that is usually stale
+# is worse than an absent one — she would say "it's been a while" on the basis
+# of nothing. This answers a slightly different question ("when did she last
+# do something for them" rather than "when did the conversation end"), which
+# is acceptable because it cannot be missed, and her prompt says as much.
+SETTINGS_LAST_SPOKE = "last_spoke_at"
 
 
 def narration_mode() -> Mode:
@@ -285,6 +294,24 @@ def set_narration_mode(mode: object) -> Mode:
     m = normalize_mode(mode)
     container().store.settings.set(SETTINGS_NARRATION_MODE, m)
     return m
+
+
+def last_spoke_at() -> str | None:
+    """ISO timestamp of the last voice tool dispatch, or None if never."""
+    try:
+        v = container().store.settings.get(SETTINGS_LAST_SPOKE)
+    except Exception:
+        return None
+    return v if isinstance(v, str) and v else None
+
+
+def stamp_last_spoke() -> None:
+    """Best effort by design: this is a nicety for her opening line, and it
+    must never be the reason a tool call fails."""
+    try:
+        container().store.settings.set(SETTINGS_LAST_SPOKE, utcnow())
+    except Exception:
+        log.debug("could not stamp last_spoke_at", exc_info=True)
 
 
 def test_container(home_path: str, provider: AgentProvider, default_agent: str | None = None) -> Container:
