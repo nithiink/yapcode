@@ -8,11 +8,33 @@ import { authHeaders } from "./auth";
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The raw `detail` from the body, when there was one. Some endpoints send
+   *  an object (the MCP save returns `{error, reason, stderr}` so the UI can
+   *  show a server's own stderr), and `message` is only its readable summary. */
+  detail?: unknown;
+  constructor(status: number, message: string, detail?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
   }
+}
+
+/** A readable line from a FastAPI `detail`, which may be a string, an object,
+ *  or a validation-error array. Without this an object detail rendered as
+ *  "[object Object]" — a message that tells the user nothing at all. */
+function readable(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const first = detail[0] as { msg?: string } | undefined;
+    return first?.msg ? String(first.msg) : `HTTP ${status}`;
+  }
+  if (detail && typeof detail === "object") {
+    const d = detail as Record<string, unknown>;
+    const parts = [d.error, d.reason, d.stderr].filter(Boolean).map(String);
+    if (parts.length) return parts.join("\n");
+  }
+  return `HTTP ${status}`;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -38,9 +60,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
   }
   if (!r.ok) {
-    const detail =
-      data && typeof data === "object" && "detail" in data ? String((data as { detail: unknown }).detail) : `HTTP ${r.status}`;
-    throw new ApiError(r.status, detail);
+    const detail = data && typeof data === "object" && "detail" in data
+      ? (data as { detail: unknown }).detail : undefined;
+    throw new ApiError(r.status, readable(detail, r.status), detail);
   }
   return data as T;
 }

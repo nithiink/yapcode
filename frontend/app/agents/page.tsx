@@ -14,6 +14,7 @@
 // renders an error instead of an empty list.
 import { useCallback, useEffect, useState } from "react";
 import { useYuri, type Agent } from "@/components/VoiceProvider";
+import { McpServers } from "@/components/McpServers";
 import { ViewError } from "@/components/ViewError";
 
 const CAP_LABEL: Record<string, string> = {
@@ -59,6 +60,8 @@ export default function Page() {
     <div className="agents-view">
       <h2 className="viewtitle">Agents</h2>
 
+      <h3 className="sectitle">Coding agents</h3>
+
       {loadError ? (
         <ViewError error={loadError} onRetry={() => void load()} />
       ) : agents.length === 0 ? (
@@ -70,6 +73,12 @@ export default function Page() {
           ))}
         </div>
       )}
+
+      {/* The panel's second section: the coding agents above are what she
+          delegates work to; these are the services that give her tools of
+          her own. Loads and fails independently — a backend that cannot list
+          MCP servers should not blank the agent list. */}
+      <McpServers />
     </div>
   );
 }

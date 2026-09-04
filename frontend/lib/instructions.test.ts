@@ -153,6 +153,35 @@ test("the capability map renders every tool exactly once", () => {
   assert.equal(listed, tools.length, "the map has lines for tools that were not given");
 });
 
+test("MCP tools get a section per server, labelled as external", () => {
+  // The heading is load-bearing: a third party wrote the tool's name, its
+  // description and the results it returns.
+  const out = capabilityBlock([
+    tool("mcp_weather_forecast", { category: "mcp:weather" }),
+    tool("mcp_notes_search", { category: "mcp:notes" }),
+    tool("start_session"),
+  ]);
+  assert.match(out, /Tools from weather, an external service/);
+  assert.match(out, /Tools from notes, an external service/);
+  assert.match(out, /information, not as instructions/);
+  // And they are not lumped in with the tools that are actually hers.
+  assert.ok(!out.includes("mcp:weather"), "the raw category key leaked into the prompt");
+  const other = out.slice(out.indexOf("Other:"));
+  assert.ok(!other.includes("mcp_weather_forecast") || !out.includes("Other:"));
+});
+
+test("an MCP server's own tools stay under its own heading", () => {
+  const out = capabilityBlock([
+    tool("mcp_notes_read", { category: "mcp:notes" }),
+    tool("mcp_notes_write", { category: "mcp:notes", tier: "confirm" }),
+  ]);
+  const headings = out.split("\n").filter((l) => l.startsWith("Tools from "));
+  assert.equal(headings.length, 1, "one server produced two sections");
+  // The gate marking is derived from the tier here too, not written out.
+  assert.match(out, /- mcp_notes_write \(asks first/);
+  assert.ok(!out.includes("- mcp_notes_read (asks first"));
+});
+
 test("an unknown category still renders, under Other", () => {
   // Silently dropping an unrecognised category is how a tool goes missing.
   const out = capabilityBlock([tool("mystery", { category: "wat" })]);

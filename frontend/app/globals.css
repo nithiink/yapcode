@@ -3677,3 +3677,240 @@ a.miss-row {
 .apr-outcome.good .apr-outcome-label { color: var(--good); }
 .apr-outcome.danger .apr-outcome-label { color: var(--danger); }
 .apr-outcome-detail { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+
+/* --- Agents panel: section headings and Connected services (MCP) ---------
+   Reuses .agentchip, .txtoggle, .empty and .agent-version rather than
+   inventing a second look for the same things; only the layout below is new.
+   Every colour is a token -- see docs/yuri/design/GUIDE.md §1. */
+.sectitle {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   letter-spacing: 0.06em;
+   font-size: 12px;
+   color: var(--mut);
+   margin: 0 0 12px;
+}
+
+.mcp {
+   margin-top: 26px;
+   padding-top: 22px;
+   border-top: 1px solid var(--line);
+   min-width: 0;
+}
+
+.mcp-head {
+   display: flex;
+   align-items: baseline;
+   justify-content: space-between;
+   gap: 12px;
+   flex-wrap: wrap;
+}
+
+.mcp-head .sectitle {
+   margin-bottom: 0;
+}
+
+.mcp-blurb {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 14px;
+   max-width: 62ch;
+}
+
+.mcp-list {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.mcp-card {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 14px 16px;
+   min-width: 0;
+}
+
+.mcp-cardhead {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.mcp-name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 15px;
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+/* "Off" is not "Not working": a service the user turned off is a normal
+   state, and colouring it like a failure would say otherwise. */
+.agentchip.off {
+   color: var(--dim);
+   border-color: var(--line2);
+}
+
+.mcp-meta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 8px;
+}
+
+.mcp-tools {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--mut);
+   margin-top: 6px;
+   overflow-wrap: anywhere;
+}
+
+.mcp-note {
+   font-size: 12px;
+   color: var(--warn);
+   margin-top: 8px;
+}
+
+/* The failure reason, in full and selectable -- it is the only thing the
+   user can act on, so it is not truncated into a tooltip. It scrolls in its
+   own box rather than widening the panel (GUIDE §2). */
+.mcp-err,
+.mcp-verdict pre {
+   font-family: var(--mono);
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+   max-height: 160px;
+   overflow-y: auto;
+   margin: 8px 0 0;
+   padding: 8px 10px;
+   border-radius: 10px;
+   background: var(--panel);
+   color: var(--danger);
+}
+
+.mcp-configerr {
+   font-size: 12px;
+   color: var(--danger);
+   border: 1px solid var(--danger);
+   border-radius: 10px;
+   padding: 9px 11px;
+   margin-bottom: 14px;
+}
+
+.mcp-actions {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin-top: 12px;
+}
+
+/* --- the add form ------------------------------------------------------- */
+.mcp-form {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   margin-bottom: 14px;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.mcp-field {
+   display: flex;
+   flex-direction: column;
+   gap: 5px;
+   min-width: 0;
+}
+
+.mcp-field > span {
+   font-size: 12px;
+   color: var(--mut);
+}
+
+.mcp-field input,
+.mcp-field textarea {
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--ink);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 8px 10px;
+   width: 100%;
+   resize: vertical;
+}
+
+.mcp-field input:focus,
+.mcp-field textarea:focus {
+   outline: none;
+   border-color: var(--acc);
+}
+
+.mcp-tiers {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+}
+
+/* Each choice says what it means, not what it is called, so it needs room
+   for a line of explanation -- not a segmented pill. */
+.mcp-tier {
+   flex: 1 1 220px;
+   text-align: left;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 12px;
+   padding: 10px 12px;
+   color: var(--ink);
+   cursor: pointer;
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+}
+
+.mcp-tier:hover {
+   border-color: var(--line2);
+}
+
+.mcp-tier.on {
+   border-color: var(--acc);
+   background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+.mcp-tier strong {
+   font-size: 13px;
+   font-weight: 500;
+}
+
+.mcp-tier em {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--mut);
+}
+
+/* Three verdicts, three looks: connected, connected-but-useless, and
+   didn't start. Collapsing any two of them would hide the difference the
+   verdicts exist to draw. */
+.mcp-verdict {
+   border-radius: 10px;
+   min-width: 0;
+}
+
+.mcp-verdict.good pre {
+   color: var(--good);
+}
+
+.mcp-verdict.warn pre {
+   color: var(--warn);
+}
+
+.mcp-verdict.bad pre {
+   color: var(--danger);
+}
