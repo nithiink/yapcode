@@ -165,6 +165,24 @@ class WorkflowEngine:
 
     # --- create -----------------------------------------------------------
 
+    def live_for_mission(self, mission_id: str) -> Workflow | None:
+        """A mission's live workflow, or None. A mission can hold at most one
+        (enforced by migration 0003), so this is unambiguous."""
+        got = self.store.workflows.for_mission(mission_id, live_only=True)
+        return got[0] if got else None
+
+    def latest_for_mission(self, mission_id: str) -> Workflow | None:
+        """The newest workflow, live or not — what a timeline shows after the
+        work has finished, when there is no live one left."""
+        got = self.store.workflows.for_mission(mission_id)
+        return got[0] if got else None
+
+    def tasks_of(self, workflow_id: str) -> list[Task]:
+        return self.store.tasks.for_workflow(workflow_id)
+
+    def deps_of(self, workflow_id: str) -> dict[str, set[str]]:
+        return self.store.tasks.deps_for(workflow_id)
+
     async def create(self, mission: Mission, template_name: str, goal: str,
                      overrides: dict[str, dict] | None = None,
                      tasks: list[dict] | None = None) -> Workflow:

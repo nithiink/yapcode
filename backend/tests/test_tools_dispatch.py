@@ -405,10 +405,24 @@ class TheTierGateIsEnforcedNotJustDeclaredTests(ToolsDispatch):
             tier = d.get("tier", "safe")
             self.assertIn(tier, ("safe", "confirm"), d["name"])
 
-    def test_the_destructive_tool_is_the_confirm_tier_one(self):
+    def test_exactly_these_tools_ask_before_acting(self):
         # If this list grows, that is a decision someone should have to make
-        # deliberately — the tier is where irreversibility gets declared.
-        self.assertEqual(tools.confirm_tools(), ["cancel_mission"])
+        # deliberately — the tier is where irreversibility gets declared. Each
+        # entry needs a reason, and here they are:
+        #
+        #   cancel_mission — ends work and stops running agents.
+        #   start_mission  — spec §14.1: the plan is read back and agreed to
+        #                    before anything runs, because a misheard plan
+        #                    that runs unseen is the failure spoken authoring
+        #                    causes that the user cannot undo. The tier is the
+        #                    mechanism because dispatch_tool then ENFORCES the
+        #                    gate rather than trusting the handler.
+        #   skip_task      — a skipped step satisfies its dependents exactly
+        #                    as a completed one does, so skipping a test or a
+        #                    review means the mission finishes with that check
+        #                    never having run.
+        self.assertEqual(sorted(tools.confirm_tools()),
+                         ["cancel_mission", "skip_task", "start_mission"])
 
     def test_tier_of_defaults_to_safe_including_for_an_unknown_name(self):
         self.assertEqual(tools.tier_of("list_projects"), "safe")

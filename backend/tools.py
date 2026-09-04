@@ -531,6 +531,137 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    # --- the workflow tools (spec §14.1) ------------------------------------
+    #
+    # NOTHING here creates, edits or archives a specialist. A system prompt
+    # dictated through a speech recogniser is a persona nobody reviewed, and
+    # it would then run with tool access on the user's machine. Creation is
+    # UI/API only, deliberately, and that omission is asserted by a test
+    # rather than left to this comment.
+    {
+        "type": "function",
+        "name": "start_mission",
+        "category": "orchestration",
+        "tier": "confirm",
+        "description": (
+            "Plan a multi-agent mission and, once the user agrees, run it. Use this when the "
+            "work has several steps or needs more than one specialist — \"fix the login bug "
+            "and get it reviewed\", \"look into the slow query then patch it\". For a single "
+            "conversation with one agent, use start_session instead.\n"
+            "TWO CALLS, always. The first call BUILDS THE PLAN AND RUNS NOTHING: it returns "
+            "the steps and who would do each one. Read that plan back in one short sentence "
+            "(\"the researcher looks, then Claude fixes it, then a review — start?\") and WAIT. "
+            "Only when the user agrees, call it again with the confirm token from the first "
+            "call. A misheard plan that runs unseen is the one failure this tool exists to "
+            "prevent, so never skip the read-back, and never claim work started after the "
+            "first call."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "What the mission has to achieve, in the user's own words."},
+                "project": {"type": "string", "description": "The project folder to work in. Omit to use the one active project."},
+                "template": {"type": "string", "description": "Which plan shape to use. Omit and one is chosen for you; call list_templates if the user asks what shapes exist."},
+                "title": {"type": "string", "description": "A short name for the mission. Omit to derive one from the goal."},
+                "confirm": {"type": "string", "description": "The confirm token from the first call. Only pass it after the user has agreed to the plan out loud."},
+            },
+            "required": ["goal"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "describe_roster",
+        "category": "orchestration",
+        "description": (
+            "Who Yuri has to work with: the specialists, what each one is for, and which "
+            "engine runs it. Call this for \"who do you have?\", \"who could review this?\" or "
+            "before assigning work by name. You cannot create or change a specialist by "
+            "voice — if the user wants a new one, say they can add it in the Agents view."),
+        "parameters": {
+            "type": "object",
+            "properties": {"role": {"type": "string", "description": "Optional: only specialists for this role (researcher, developer, tester, reviewer, verifier, documenter)."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "workflow_status",
+        "category": "orchestration",
+        "description": (
+            "Where a mission's plan has got to: each step, who has it, and what is waiting. "
+            "Call this for \"how's it going?\" about a multi-step mission. mission_status is "
+            "the shorter answer about the mission itself; this one is the steps."),
+        "parameters": {
+            "type": "object",
+            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "assign_task",
+        "category": "orchestration",
+        "description": (
+            "Give one step of a mission to a named specialist — \"let Claude do the review\", "
+            "\"give the fix to the developer\". Only works before that step starts. Name the "
+            "step by a phrase from its title; if it is ambiguous the tool tells you which "
+            "matched — read those back and ask which, never guess."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "A phrase from the step's title, or its id."},
+                "specialist": {"type": "string", "description": "The specialist's name, as describe_roster reports it."},
+                "mission": {"type": "string", "description": "Mission title, id, or a phrase. Omit for the current one."},
+            },
+            "required": ["task", "specialist"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "retry_task",
+        "category": "orchestration",
+        "description": (
+            "Run a failed or stuck step again, after the user has decided to. Say what failed "
+            "first — the reason is on the step — because retrying without changing anything "
+            "usually fails the same way."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "A phrase from the step's title, or its id."},
+                "mission": {"type": "string", "description": "Mission title, id, or a phrase. Omit for the current one."},
+            },
+            "required": ["task"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "skip_task",
+        "category": "orchestration",
+        "tier": "confirm",
+        "description": (
+            "Drop a step and let the rest of the plan carry on. Needs the user's agreement: "
+            "call it once to hear what would be skipped, tell them exactly that, then call it "
+            "again with the confirm token once they agree. Skipping a test or a review means "
+            "the mission finishes without that check ever having run, so say so."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "A phrase from the step's title, or its id."},
+                "mission": {"type": "string", "description": "Mission title, id, or a phrase. Omit for the current one."},
+                "confirm": {"type": "string", "description": "The confirm token from the first call. Only pass it after the user has agreed out loud."},
+            },
+            "required": ["task"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_templates",
+        "category": "orchestration",
+        "description": (
+            "The plan shapes available for a mission, and the steps each one has. Call this "
+            "when the user asks what kinds of mission you can run, or when choosing a "
+            "template for start_mission."),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -615,6 +746,152 @@ async def _dispatch_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "message": text}
 
 
+# --- the workflow tools' helpers ------------------------------------------
+#
+# These live here rather than in WorkflowEngine for the same reason
+# `_require_session` does: they are recovery instructions written for the
+# voice model to READ, and the ambiguity rules are about spoken references,
+# not about task graphs.
+
+ERROR_SPEECH_MAX = 200
+# Words that carry no identifying information in a step title. Without this,
+# "run the tests" overlapped every title in the bug-fix template through
+# "the", and every spoken reference came back ambiguous.
+STOPWORDS: frozenset[str] = frozenset({
+    "the", "and", "for", "with", "into", "that", "this", "from", "step",
+    "task", "one", "its", "our", "any", "all", "out",
+})
+STEPS_SPEECH_MAX = 8
+DEFAULT_TEMPLATE = "bug-fix"
+
+
+def _live_workflow(m):
+    """The mission's live workflow, or a soft error saying there isn't one."""
+    w = container().workflow.live_for_mission(m.id)
+    if w is None:
+        raise ValueError(
+            f'"{clip_speech(m.title, TITLE_SPEECH_MAX)}" has no plan — it is a single '
+            "session, not a multi-step mission. Use the session tools for it, or start a "
+            "new mission with a plan.")
+    return w
+
+
+def _resolve_task(m, ref: str):
+    """Resolve a spoken step reference, refusing to guess.
+
+    Exact id, then a unique word-overlap match against the plan's titles.
+    Ambiguity raises and LISTS what matched, because picking one would run
+    the wrong step — the same rule missions.resolve() follows.
+    """
+    c = container()
+    w = _live_workflow(m)
+    tasks = c.workflow.tasks_of(w.id)
+    ref = " ".join((ref or "").split()).strip()
+    if not ref:
+        raise ValueError("which step? Name it, or call workflow_status and read the steps back.")
+    for t in tasks:
+        if t.id == ref:
+            return t
+    low = ref.lower()
+    # Narrowest match that works, in order, so a spoken title that IS a step
+    # resolves cleanly before the fuzzy pass ever runs.
+    exact = [t for t in tasks if t.title.lower() == low]
+    if len(exact) == 1:
+        return exact[0]
+    substring = [t for t in tasks if low in t.title.lower()]
+    if len(substring) == 1:
+        return substring[0]
+    # Only now, and only on words that carry meaning: "run the tests" shares
+    # "the" with every title in the bug-fix template, so an unfiltered overlap
+    # called every reference ambiguous.
+    words = {w_ for w_ in low.split() if len(w_) > 2 and w_ not in STOPWORDS}
+    hits = substring or [t for t in tasks
+                         if words and words & set(t.title.lower().split())]
+    if not hits:
+        titles = ", ".join(t.title for t in tasks)
+        raise ValueError(f"no step matches {ref!r}. The plan is: {titles}.")
+    if len(hits) > 1:
+        titles = ", ".join(t.title for t in hits)
+        raise ValueError(
+            f"{ref!r} matches several steps: {titles}. Read those back and ask which one, "
+            "then pass the exact title.")
+    return hits[0]
+
+
+def _workflow_speech(m) -> dict:
+    """A plan shaped for speaking."""
+    c = container()
+    w = _live_workflow(m)
+    tasks = c.workflow.tasks_of(w.id)
+    people = {s.id: s.name for s in c.roster.list(include_archived=True)}
+    steps = [{"step": clip_speech(t.title, TITLE_SPEECH_MAX),
+              "status": t.status,
+              "who": people.get(t.specialist_id or "") or None,
+              "problem": clip_speech(t.error, ERROR_SPEECH_MAX) or None}
+             for t in tasks[:STEPS_SPEECH_MAX]]
+    waiting = [x["step"] for x in steps if x["status"] in ("failed", "blocked")]
+    running = [x["step"] for x in steps if x["status"] in ("dispatched", "running", "verifying")]
+    return {"mission": clip_speech(m.title, TITLE_SPEECH_MAX), "status": w.status,
+            "steps": steps, "running": running, "needs_you": waiting,
+            "more_steps": max(0, len(tasks) - len(steps))}
+
+
+async def _start_mission(args: dict[str, Any]) -> dict[str, Any]:
+    """Plan first, run only on the second call (spec §14.1).
+
+    The gate is not politeness: a plan assembled from a misheard goal, run
+    unseen, is the one failure spoken authoring can cause that the user
+    cannot undo. So the first call builds a REAL workflow (born `draft`, which
+    dispatches nothing) and returns its steps to be read back; the second
+    releases it.
+    """
+    c = container()
+    goal = " ".join(str(args.get("goal") or "").split())
+    if not goal:
+        raise ValueError("what should the mission achieve? Ask the user, then call this again.")
+    template = str(args.get("template") or "").strip() or DEFAULT_TEMPLATE
+    if template not in c.workflow.templates:
+        known = ", ".join(sorted(c.workflow.templates))
+        raise ValueError(f"there is no {template!r} plan. The ones you have are: {known}.")
+
+    # Keyed on the goal, not on a mission id: the first call has not created
+    # anything yet, so the goal IS the identity of what is being confirmed —
+    # and that means a token armed for one goal cannot start a different one.
+    token = _confirm_gate("start_mission", f"{template}:{goal}", args.get("confirm"))
+    if token is not None:
+        tpl = c.workflow.templates[template]
+        people = {}
+        for task in tpl.tasks:
+            try:
+                people[task.id] = c.roster.resolve(task.role or "").name
+            except Exception:                               # noqa: BLE001
+                # A role nobody can fill is worth saying NOW, while the user is
+                # deciding, rather than as a failed task later.
+                people[task.id] = None
+        plan = [{"step": task.title, "who": people.get(task.id)} for task in tpl.tasks]
+        unfillable = [p["step"] for p in plan if not p["who"]]
+        return {"started": False, "confirm": token, "goal": goal, "template": template,
+                "plan": plan, "no_one_for": unfillable,
+                "message": (
+                    "NOTHING HAS STARTED. Read this plan back in one short sentence — who does "
+                    "what, in order — and wait for the user to agree. "
+                    + (f"Say that no one can do: {', '.join(unfillable)}. " if unfillable else "")
+                    + f"Only then call start_mission again with confirm={token}.")}
+
+    project = c.projects.resolve_or_create(str(args.get("project") or ""))
+    title = " ".join(str(args.get("title") or "").split()) or goal[:60]
+    m = c.missions.create(project, title, created_by="voice", goal=goal)
+    w = await c.workflow.create(m, template, goal)
+    await c.workflow.resume(w.id, by="voice")
+    started = await c.workflow.advance(w.id)
+    return {"started": True, "mission_id": m.id,
+            "title": clip_speech(m.title, TITLE_SPEECH_MAX), "template": template,
+            "steps": [t.title for t in c.workflow.tasks_of(w.id)][:STEPS_SPEECH_MAX],
+            "now_running": [clip_speech(t.title, TITLE_SPEECH_MAX) for t in started],
+            "message": (f'Mission "{clip_speech(m.title, TITLE_SPEECH_MAX)}" is running.'
+                        + (f" {started[0].title} has started." if started else ""))}
+
+
 async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     # Every voice tool call is evidence Yuri and the user were talking. Stamped
     # here, at the one place they all pass through, so "when did we last
@@ -624,18 +901,23 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     global _confirm_consulted
     _confirm_consulted = False
-    try:
-        return await _dispatch(name, args)
-    finally:
-        # The central half of the gate. A tool declaring tier="confirm" that
-        # returns without consulting _confirm_gate has run ungated, which is
-        # the whole failure this mechanism exists to prevent — and a silent
-        # version of it is worse than none, because the declaration reads as
-        # protection. Raise, loudly, rather than let it pass.
-        if tier_of(name) == "confirm" and not _confirm_consulted:
-            raise AssertionError(
-                f"{name} declares tier=\"confirm\" but did not consult "
-                "_confirm_gate — it ran without a confirmation")
+    out = await _dispatch(name, args)
+    # The central half of the gate. A tool declaring tier="confirm" that
+    # RETURNS without consulting _confirm_gate has run ungated, which is the
+    # whole failure this mechanism exists to prevent — and a silent version is
+    # worse than none, because the declaration reads as protection.
+    #
+    # On a normal return only, deliberately. This was a `finally`, so a
+    # confirm-tier tool that REFUSED to act — cancel_mission for a mission
+    # that does not exist, start_mission with no goal — had its soft
+    # ValueError replaced by this AssertionError, and the model was handed
+    # "the tool failed unexpectedly" instead of "which mission?". A tool that
+    # raised did not act, so there is nothing to have gated.
+    if tier_of(name) == "confirm" and not _confirm_consulted:
+        raise AssertionError(
+            f"{name} declares tier=\"confirm\" but did not consult "
+            "_confirm_gate — it ran without a confirmation")
+    return out
 
 
 async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -851,6 +1133,95 @@ async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
         title = clip_speech(m.title, TITLE_SPEECH_MAX)
         return {"mission_id": m.id, "title": title, "status": m.status, "cancelled": True,
                 "message": f'Mission "{title}" is cancelled.'}
+
+    # --- the workflow tools (spec §14.1) ------------------------------------
+
+    if name == "describe_roster":
+        c = container()
+        role = str(args.get("role") or "").strip().lower()
+        people = [s for s in c.roster.list() if not role or s.role == role]
+        if role and not people:
+            # Not an empty list: "nobody does that" and "there is no such
+            # role" need different things from the user.
+            known = ", ".join(sorted({s.role for s in c.roster.list()}))
+            raise ValueError(f"no specialist has the role {role!r}. The roles in use are: {known}.")
+        return {"specialists": [{"name": s.name, "role": s.role,
+                                 "engine": s.provider_id,
+                                 "what_for": clip_speech(s.description, TITLE_SPEECH_MAX) or None}
+                                for s in people],
+                "can_create_by_voice": False,
+                "message": ("Read these back by name and role. You cannot create or change a "
+                            "specialist by voice — if the user wants one, tell them they can "
+                            "add it in the Agents view.")}
+
+    if name == "list_templates":
+        c = container()
+        return {"templates": [{"name": t.name, "description": t.description,
+                               "steps": [task.title for task in t.tasks]}
+                              for t in sorted(c.workflow.templates.values(), key=lambda t: t.name)]}
+
+    if name == "start_mission":
+        return await _start_mission(args)
+
+    if name == "workflow_status":
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        return _workflow_speech(m)
+
+    if name == "assign_task":
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        t = _resolve_task(m, str(args.get("task") or ""))
+        who = str(args.get("specialist") or "").strip()
+        s = c.roster.by_name(who)
+        if s is None:
+            names = ", ".join(x.name for x in c.roster.list())
+            raise ValueError(f"there is no specialist called {who!r}. You have: {names}.")
+        try:
+            t = await c.workflow.assign(t.id, s.id, by="voice")
+        except Exception as exc:                            # noqa: BLE001
+            # NoSpecialist and the transition errors are all soft: the model
+            # reads the reason back, which already names the fix.
+            raise ValueError(str(exc)) from exc
+        return {"task": clip_speech(t.title, TITLE_SPEECH_MAX), "specialist": s.name,
+                "message": f'{s.name} will do "{clip_speech(t.title, TITLE_SPEECH_MAX)}".'}
+
+    if name == "retry_task":
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        t = _resolve_task(m, str(args.get("task") or ""))
+        was = t.error
+        try:
+            t = await c.workflow.retry(t.id, by="voice")
+        except Exception as exc:                            # noqa: BLE001
+            raise ValueError(str(exc)) from exc
+        await c.workflow.advance(t.workflow_id)
+        title = clip_speech(t.title, TITLE_SPEECH_MAX)
+        return {"task": title, "status": c.workflow.get_task(t.id).status,
+                "previous_error": clip_speech(was, ERROR_SPEECH_MAX) or None,
+                "message": f'"{title}" is running again.'}
+
+    if name == "skip_task":
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        t = _resolve_task(m, str(args.get("task") or ""))
+        token = _confirm_gate("skip_task", t.id, args.get("confirm"))
+        title = clip_speech(t.title, TITLE_SPEECH_MAX)
+        if token is not None:
+            checks = ", ".join(t.verification)
+            loses = (f" Nothing will check {checks} for this mission." if checks else "")
+            return {"task": title, "skipped": False, "confirm": token,
+                    "message": (f'This would drop "{title}" and let the rest of the plan '
+                                f"carry on.{loses} Nothing has been skipped yet — tell the "
+                                f"user exactly that, and only call skip_task again with "
+                                f"confirm={token} once they agree.")}
+        try:
+            t = await c.workflow.skip(t.id, by="voice")
+        except Exception as exc:                            # noqa: BLE001
+            raise ValueError(str(exc)) from exc
+        await c.workflow.advance(t.workflow_id)
+        return {"task": title, "skipped": True,
+                "message": f'"{title}" is skipped; the rest of the plan continues.'}
 
     if name == "web_search":
         # SearchUnavailable is a soft error: main.py hands its message to the
