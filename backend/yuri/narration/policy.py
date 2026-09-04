@@ -155,9 +155,14 @@ NARRATION_OWNER: dict[str, Owner] = {
     EventType.TASK_FAILED: "stream",
     EventType.TASK_BLOCKED: "stream",
     EventType.WORKFLOW_DEADLOCKED: "stream",
-    # Internal: `verifying` is the state, the verdict is the news. Task 9's
+    # Internal: `verifying` is the state, the verdict is the news.
     # verification.failed is what gets spoken.
     EventType.TASK_VERIFYING: "none",
+    # The sentence that saves the user time: it names WHICH check said no and
+    # what it saw, which nothing else on the bus knows — `task.failed` carries
+    # the same reason string, so the engine marks that one `derived` on this
+    # path and narration/service.py stays silent for it. One owner per FACT.
+    EventType.VERIFICATION_FAILED: "stream",
 }
 
 # Blocks on the user: never suppressed, whatever the mode. "Be quiet" means

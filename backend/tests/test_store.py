@@ -412,27 +412,46 @@ class MigrationConversionTests(unittest.TestCase):
             store.migrate()
         return store
 
+    def _old_rows(self, store, *, mission_status, step_status):
+        """Write the pre-Phase-7 shape with raw SQL, not through the repos.
+
+        This simulates a database written by an OLDER build, and today's
+        dataclasses carry columns that build did not have (Project.metadata
+        arrived in 0004). Inserting through the repos would write today's shape
+        into yesterday's table and fail on the column, testing the test rather
+        than the migration. Returns (project_id, mission_id, step_id).
+        """
+        con = store._conn.get()
+        pid, mid, sid = "p-old", "m-old", "s-old"
+        now = "2026-09-01T00:00:00Z"
+        con.execute("INSERT INTO projects (id, slug, name, root_path, kind, "
+                    "auto_approve_edits, created_at, updated_at) "
+                    "VALUES (?,?,?,?,'user',0,?,?)", (pid, "x", "X", "/tmp/x", now, now))
+        con.execute("INSERT INTO missions (id, title, project_id, status, priority, "
+                    "created_by, metadata, created_at, updated_at) "
+                    "VALUES (?,?,?,?,0,'voice','{}',?,?)",
+                    (mid, "old work", pid, mission_status, now, now))
+        con.execute("INSERT INTO mission_steps (id, mission_id, ordinal, title, status, result) "
+                    "VALUES (?,?,1,'work',?,'{}')", (sid, mid, step_status))
+        con.execute("UPDATE missions SET current_step = ? WHERE id = ?", (sid, mid))
+        con.commit()
+        return pid, mid, sid
+
     def test_an_old_mission_becomes_a_one_task_workflow(self):
         store = self._migrate_to(2)
-        p = Project(slug="x", name="X", root_path="/tmp/x")
-        store.projects.insert(p)
-        m = Mission(title="old work", project_id=p.id, status="completed")
-        store.missions.insert(m)
-        step = MissionStep(mission_id=m.id, ordinal=1, title="work", status="done")
-        store.missions.insert_step(step)
-        m.current_step = step.id
-        store.missions.update(m)
+        _, mission_id, step_id = self._old_rows(store, mission_status="completed",
+                                                step_status="done")
         store.close()
 
         store = SqliteStore(self.path)
         store.migrate()                     # now runs 0003
         try:
-            flows = store.workflows.for_mission(m.id)
+            flows = store.workflows.for_mission(mission_id)
             self.assertEqual(len(flows), 1)
             self.assertEqual((flows[0].template, flows[0].status), ("single", "completed"))
             tasks = store.tasks.for_workflow(flows[0].id)
             self.assertEqual([(t.title, t.status) for t in tasks], [("work", "completed")])
-            self.assertEqual(tasks[0].id, step.id,
+            self.assertEqual(tasks[0].id, step_id,
                              "the task must reuse the step's id — missions.current_step "
                              "still points at it")
             con = sqlite3.connect(self.path)
@@ -446,17 +465,13 @@ class MigrationConversionTests(unittest.TestCase):
 
     def test_a_live_old_mission_gets_a_running_workflow(self):
         store = self._migrate_to(2)
-        p = Project(slug="x", name="X", root_path="/tmp/x")
-        store.projects.insert(p)
-        m = Mission(title="live", project_id=p.id, status="running")
-        store.missions.insert(m)
-        store.missions.insert_step(MissionStep(mission_id=m.id, ordinal=1, title="work",
-                                              status="running"))
+        _, mission_id, _ = self._old_rows(store, mission_status="running",
+                                          step_status="running")
         store.close()
         store = SqliteStore(self.path)
         store.migrate()
         try:
-            flow = store.workflows.for_mission(m.id, live_only=True)[0]
+            flow = store.workflows.for_mission(mission_id, live_only=True)[0]
             self.assertEqual(flow.status, "running")
             self.assertEqual(store.tasks.for_workflow(flow.id)[0].status, "running")
         finally:

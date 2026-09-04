@@ -87,6 +87,21 @@ def build_router(require_auth: Callable) -> APIRouter:
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @r.put("/projects/{project_id}/verify")
+    async def set_project_verify(project_id: str, body: dict):
+        """Set the commands verification runs for this project.
+
+        Body: {"tests": "...", "typecheck": "..."} — either key may be omitted
+        or empty to unset it. Without this a project cannot answer tests_pass
+        at all, because verification refuses to guess a command.
+        """
+        try:
+            return container().projects.set_verify(project_id, body).to_dict()
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     # --- agents -------------------------------------------------------------
     @r.get("/agents")
     async def list_agents():

@@ -31,6 +31,18 @@ REASON_CAP = 160
 # workflow read back in full is not a sentence the user can hold.
 WORKFLOW_STEPS_CAP = 4
 
+# How each failed check is named aloud. The check id ("tests_pass") is not a
+# sentence, and "verification failed" with no subject sends the user looking
+# through all five — so the phrase says which one, and the detail that follows
+# says what it saw.
+VERIFICATION_PHRASES: dict[str, str] = {
+    "tests_pass": "The tests failed",
+    "typecheck_pass": "The typecheck failed",
+    "diff_scoped": "The change touched files outside what that step was meant to",
+    "review_approved": "The review didn't approve it",
+    "human_ok": "That step didn't get your approval",
+}
+
 
 def _clip(text: str, cap: int) -> str:
     text = " ".join((text or "").split())
@@ -148,7 +160,32 @@ class NarrationService:
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "that step"
             return f"{title} is done."
 
+        if t == "verification.failed":
+            # WHICH check, and WHY. The detail is the tail of the real output
+            # ("2 failed in test_billing.py"), which is the half of the
+            # sentence that stops the user from going to look for themselves.
+            failed = [x for x in (p.get("failed") or []) if isinstance(x, dict)]
+            first = failed[0] if failed else {}
+            phrase = VERIFICATION_PHRASES.get(str(first.get("check") or ""))
+            if phrase is None:
+                title = _clip(str(p.get("title") or ""), TITLE_CAP)
+                phrase = f"A check on {title} failed" if title else "A check failed"
+            detail = _clip(str(first.get("detail") or p.get("reason") or ""), REASON_CAP)
+            rest = len(failed) - 1
+            also = f" ({rest} other check also failed)" if rest == 1 else (
+                f" ({rest} other checks also failed)" if rest > 1 else "")
+            because = f" — {detail}" if detail else ""
+            # will_retry changes what the user is expected to DO, so it is the
+            # last thing said, exactly as in task.failed below.
+            after = " Trying again." if p.get("will_retry") else ""
+            return f"{phrase}{because}{also}.{after}"
+
         if t == "task.failed":
+            # One owner per FACT: on the verification path the engine marks
+            # this `derived`, because verification.failed just said the same
+            # reason with the failing check named — a strictly better sentence.
+            if p.get("derived"):
+                return None
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "a step"
             reason = _clip(str(p.get("reason") or ""), REASON_CAP)
             because = f" — {reason}" if reason else ""

@@ -15,6 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from yuri.domain.artifact import Artifact  # noqa: E402
 from yuri.domain.mission import Mission  # noqa: E402
 from yuri.domain.project import Project  # noqa: E402
 from yuri.domain.session import AgentSession  # noqa: E402
@@ -23,6 +24,7 @@ from yuri.home import Home  # noqa: E402
 from yuri.providers.fake import FakeAgentProvider  # noqa: E402
 from yuri.providers.registry import AgentRegistry  # noqa: E402
 from yuri.services.journal import Journal  # noqa: E402
+from yuri.narration.service import NarrationService  # noqa: E402
 from yuri.services.roster import RosterService  # noqa: E402
 from yuri.services.workflow import (IN_FLIGHT, MAX_MISSION_RUNTIME_S,  # noqa: E402
                                     MAX_PARALLEL_READONLY, MAX_SESSIONS_PER_MISSION,
@@ -45,7 +47,12 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.roster.seed()
         self.engine = WorkflowEngine(self.store, self.bus, Journal(self.home),
                                      self.roster, load_templates())
-        self.project = Project(slug="p", name="P", root_path="/tmp/p")
+        # A REAL directory: verification (spec §10) runs the project's
+        # configured commands in the mission's cwd, so a root that does not
+        # exist makes every command check `unavailable`.
+        self.root = os.path.join(self.tmp.name, "p")
+        os.makedirs(self.root, exist_ok=True)
+        self.project = Project(slug="p", name="P", root_path=self.root)
         self.store.projects.insert(self.project)
         self.dispatched: list[tuple[str, str]] = []
 
@@ -61,7 +68,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             # second, genuinely different agent run.
             s = AgentSession(project_id=self.project.id, agent_id=specialist.provider_id,
                              native_session_id=f"native-{len(self.dispatched)}",
-                             backend="fake", working_directory="/tmp/p",
+                             backend="fake", working_directory=self.root,
                              mission_id=self.mission.id)
             self.store.sessions.insert(s)
             self.dispatched.append((task.id, specialist.id))
@@ -74,6 +81,12 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.store.close()
         self.tmp.cleanup()
+
+    def _events(self):
+        out = []
+        while not self.q.empty():
+            out.append(self.q.get_nowait())
+        return out
 
     def _types(self):
         out = []
@@ -125,6 +138,14 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.dispatched), 2, "the next task did not start")
 
     async def test_the_whole_workflow_runs_to_completion_and_completes_the_mission(self):
+        # `bug-fix` declares `tests_pass` on its test task and
+        # `review_approved` on its review task, and since Task 9 those checks
+        # RUN — a task whose checks do not pass never reaches `completed`. The
+        # test therefore has to satisfy them; it used to assert a completion
+        # that happened with the suite unrun, which is the behaviour that was
+        # removed rather than a property worth keeping.
+        self.mission.metadata = {"verify": {"tests": "sh -c 'exit 0'"}}
+        self.store.missions.update(self.mission)
         w = await self._bugfix()
         await self.engine.resume(w.id)
         await self.engine.advance(w.id)
@@ -134,6 +155,10 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
             if not pending:
                 break
             for t in pending:
+                if "review_approved" in t.verification:
+                    self.store.artifacts.insert(Artifact(
+                        mission_id=self.mission.id, task_id=t.id, kind="review",
+                        title="review", body="Looks right.\nVERDICT: approved"))
                 await self.engine.on_task_finished(t.id, ok=True)
         self.assertEqual(self.store.workflows.get(w.id).status, "completed")
         self.assertEqual(self.store.missions.get(self.mission.id).status, "completed")
@@ -586,3 +611,92 @@ class BoundsBehaviourTests(EngineTests):
         self.assertEqual(self.store.workflows.get(w.id).status, "completed",
                          f"a {n}-task workflow parked; the session bound leaked into the engine")
         self.assertEqual(len(self.dispatched), n)
+
+
+class FailingChecksBlockTheWorkflowTests(EngineTests):
+    """The assertion this whole phase turns on.
+
+    Before Task 9 the engine entered `verifying`, published the declared check
+    names, and completed the task regardless — so a bug-fix workflow marked
+    its test task done with the suite failing, and handed that "success" to
+    the reviewer and then to the user. Everything below asserts the opposite,
+    at the workflow level rather than the check level.
+    """
+
+    async def _run(self, tests_cmd, *, approve=True, rounds=12):
+        self.mission.metadata = {"verify": {"tests": tests_cmd}}
+        self.store.missions.update(self.mission)
+        w = await self._bugfix()
+        await self.engine.resume(w.id)
+        await self.engine.advance(w.id)
+        for _ in range(rounds):
+            live = [t for t in self.store.tasks.for_workflow(w.id)
+                    if t.status in ("dispatched", "running", "verifying")]
+            if not live:
+                break
+            for t in live:
+                if approve and "review_approved" in t.verification:
+                    self.store.artifacts.insert(Artifact(
+                        mission_id=self.mission.id, task_id=t.id, kind="review",
+                        title="review", body="Fine.\nVERDICT: approved"))
+                await self.engine.on_task_finished(t.id, ok=True)
+        return w
+
+    def _task(self, w, title_fragment):
+        for t in self.store.tasks.for_workflow(w.id):
+            if title_fragment in t.title.lower() or title_fragment in (t.role or ""):
+                return t
+        raise AssertionError(f"no task matching {title_fragment!r}")
+
+    async def test_a_failing_suite_stops_the_mission_even_though_the_agent_said_done(self):
+        # on_task_finished(ok=True) IS the agent saying it succeeded. The
+        # orchestrator's job is to disbelieve it until a check agrees.
+        w = await self._run("sh -c 'echo 2 failed in test_billing.py >&2; exit 1'")
+
+        self.assertNotEqual(self.store.missions.get(self.mission.id).status, "completed",
+                            "the mission completed with a failing test suite")
+        self.assertEqual(self.store.workflows.get(w.id).status, "waiting_for_human")
+        tester = self._task(w, "tester")
+        self.assertEqual(tester.status, "blocked")
+        self.assertEqual(tester.attempts, tester.max_attempts,
+                         "the retry policy should have run before giving up")
+
+    async def test_the_review_never_runs_behind_a_failing_test_task(self):
+        # The real danger is not the wrong status, it is the next agent being
+        # handed work built on a failure nobody noticed.
+        w = await self._run("sh -c 'exit 1'")
+        self.assertEqual(self._task(w, "reviewer").status, "pending")
+
+    async def test_the_spoken_reason_names_which_check_failed_and_why(self):
+        await self._run("sh -c 'echo 2 failed in test_billing.py >&2; exit 1'")
+        said = [NarrationService().line_for(e, "normal") for e in self._events()]
+        said = [s for s in said if s]
+        joined = " ".join(said)
+        self.assertIn("test", joined.lower(), f"nothing spoken named the failure: {said}")
+        self.assertTrue(any("2 failed" in s or "billing" in s for s in said),
+                        f"the detail never reached the user: {said}")
+
+    async def test_an_unconfigured_project_blocks_rather_than_passing(self):
+        # No verify command at all: `unavailable`, which must fail the task.
+        # Reporting a pass for a check that never ran is the failure this
+        # phase must not ship.
+        self.mission.metadata = {}
+        self.store.missions.update(self.mission)
+        w = await self._bugfix()
+        await self.engine.resume(w.id)
+        await self.engine.advance(w.id)
+        for _ in range(12):
+            live = [t for t in self.store.tasks.for_workflow(w.id)
+                    if t.status in ("dispatched", "running", "verifying")]
+            if not live:
+                break
+            for t in live:
+                await self.engine.on_task_finished(t.id, ok=True)
+        self.assertNotEqual(self.store.missions.get(self.mission.id).status, "completed")
+        self.assertEqual(self._task(w, "tester").status, "blocked")
+
+    async def test_a_passing_suite_still_lets_the_whole_mission_finish(self):
+        # The complement: failing closed must not mean failing always.
+        w = await self._run("sh -c 'exit 0'")
+        self.assertEqual(self.store.workflows.get(w.id).status, "completed")
+        self.assertEqual(self.store.missions.get(self.mission.id).status, "completed")

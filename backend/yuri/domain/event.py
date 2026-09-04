@@ -45,6 +45,7 @@ class EventType:
     TASK_FAILED = "task.failed"
     TASK_BLOCKED = "task.blocked"
     TASK_VERIFYING = "task.verifying"
+    VERIFICATION_FAILED = "verification.failed"
 
 
 # type -> (severity, speakable)   (spec §6.1)
@@ -81,6 +82,10 @@ DEFAULTS: dict[str, tuple[str, bool]] = {
     EventType.TASK_FAILED: ("warning", True),
     EventType.TASK_BLOCKED: ("warning", True),
     EventType.TASK_VERIFYING: ("debug", False),
+    # `warning`, so it survives quiet mode: a task that did not verify is
+    # exactly the thing "be quiet" must not swallow — the alternative is a
+    # workflow that stops with the user never told which check said no.
+    EventType.VERIFICATION_FAILED: ("warning", True),
 }
 
 

@@ -39,6 +39,11 @@ from yuri.domain.specialist import Specialist
 from yuri.domain.task import Task
 from yuri.domain.workflow import Workflow
 from yuri.events.bus import EventBus
+# The checks themselves live outside the engine: the engine decides what
+# happens next, verify.py decides what a check MEANS. That split is why
+# "`unavailable` never passes" is one rule in one file rather than a default
+# the scheduler could soften.
+from yuri.services import verify
 from yuri.services.journal import Journal
 from yuri.services.roster import NoSpecialist, RosterService
 from yuri.store.base import Store
@@ -494,9 +499,20 @@ class WorkflowEngine:
         self._publish(EventType.TASK_VERIFYING, w, payload={
             "workflow_id": w.id, "task_id": t.id, "title": t.title,
             "checks": list(t.verification)})
-        # Task 9 runs the declared checks here and may fail the task instead.
-        # No checks declared = pass; a check that cannot RUN must never pass,
-        # which is why that verdict is its own task and not a default here.
+        # THE CHECKS ACTUALLY RUN. Until they did, every `verification` entry
+        # in every shipped template was decoration: a test task reported
+        # complete with the suite red, and the reviewer — and then the user —
+        # was handed that as success.
+        #
+        # No checks declared = pass (there was nothing to prove), but the task
+        # still came through `verifying` above. A check that could not RUN is
+        # `unavailable`, and `passed()` does not count that as a pass: a
+        # project with no test command cannot claim `tests_pass`.
+        results = await self._verify(t, w)
+        if not verify.passed(results):
+            self._verification_failed(t, w, results)
+            await self.advance(w.id)
+            return
         t.transition("completed")
         self.store.tasks.update(t)
         self._publish(EventType.TASK_COMPLETED, w, payload={
@@ -505,10 +521,70 @@ class WorkflowEngine:
         self.journal.append(f"task '{t.title}' completed")
         await self.advance(w.id)
 
+    # --- verification (spec §10) ------------------------------------------
+
+    async def _verify(self, t: Task, w: Workflow) -> list[verify.VerificationResult]:
+        """Run the task's declared checks and report every verdict.
+
+        The engine never judges: services/verify.py owns what a check means,
+        and this method only assembles what the checks are allowed to look at.
+        Keeping the two apart is what lets `unavailable` be a single rule in
+        one place instead of a default the scheduler could quietly soften.
+
+        This AWAITS the checks inline, so a task's verification holds up the
+        rest of this pass: `on_task_finished` is driven from the dispatcher's
+        consumer loop. That is why verify.py bounds every command with a
+        timeout — the bound is the whole of the protection, and a suite slower
+        than DEFAULT_TIMEOUT_S is reported as a failure rather than waited on.
+        """
+        if not t.verification:
+            return []
+        m = self.store.missions.get(w.mission_id)
+        project = self.store.projects.get(m.project_id) if m is not None else None
+        ctx = verify.CheckContext(
+            store=self.store, task=t, mission=m, project=project,
+            # The mission's cwd, which is the ONLY tree a check may run in: a
+            # test command resolved against the backend's own directory would
+            # verify the wrong repository and pass.
+            cwd=getattr(project, "root_path", None))
+        return await verify.run_checks(t.verification, ctx)
+
+    def _verification_failed(self, t: Task, w: Workflow,
+                             results: list[verify.VerificationResult]) -> None:
+        """Say which check said no and why, then route the task to `failed`
+        through the normal path so the retry policy applies unchanged.
+
+        Going through `_fail` rather than transitioning by hand is the point:
+        a verification failure is a task failure, and it gets the same second
+        attempt, the same `blocked` on exhaustion and the same deadlock report
+        as an agent that errored. A parallel failure path here would be a
+        second, weaker copy of the retry policy.
+        """
+        bad = verify.failures(results)
+        why = verify.reason(results)
+        self._publish(EventType.VERIFICATION_FAILED, w, payload={
+            "workflow_id": w.id, "task_id": t.id, "title": t.title,
+            "checks": list(t.verification),
+            "failed": [r.to_dict() for r in bad],
+            "reason": why[:ERROR_MAX],
+            "attempt": t.attempts, "max_attempts": t.max_attempts,
+            "will_retry": t.can_retry})
+        self.journal.append(
+            f"task '{t.title}' failed verification: {why}")
+        # `derived=True`: verification.failed above just said the same reason
+        # WITH the failing check named, so narrating task.failed too would tell
+        # the user the same thing twice (narration/policy.py's opening rule).
+        self._fail(t, w, why or "verification did not pass", derived=True)
+
     def _mark_failed(self, t: Task, w: Workflow, reason: str, *,
-                     will_retry: bool) -> None:
+                     will_retry: bool, derived: bool = False) -> None:
         """Land a task on `failed` with a reason the user can act on, and say
-        so. Applies no policy — the callers decide what happens next."""
+        so. Applies no policy — the callers decide what happens next.
+
+        `derived=True` marks a failure whose reason another carrier has ALREADY
+        spoken (today: verification.failed). It is the same marker
+        MissionService.set_status uses, read by narration/service.py, and it
+        exists because ownership is per FACT, not per event type."""
         reason = " ".join((reason or "").split())[:ERROR_MAX]
         if t.status == "ready":
             # The table offers no `ready → failed` edge, and must not grow one:
@@ -526,10 +602,11 @@ class WorkflowEngine:
             "workflow_id": w.id, "task_id": t.id, "title": t.title,
             "specialist_id": t.specialist_id, "attempt": t.attempts,
             "max_attempts": t.max_attempts, "reason": reason,
-            "will_retry": will_retry})
+            "will_retry": will_retry, "derived": derived})
         self.journal.append(f"task '{t.title}' failed: {reason}")
 
-    def _fail(self, t: Task, w: Workflow, reason: str, *, auto_retry: bool = True) -> None:
+    def _fail(self, t: Task, w: Workflow, reason: str, *, auto_retry: bool = True,
+              derived: bool = False) -> None:
         """Fail a task, then apply the retry policy. Exhausting the attempts
         lands on `blocked` and NOT on a failed workflow: `blocked` means "a
         human is needed", and the human retrying it is the entire reason the
@@ -543,7 +620,8 @@ class WorkflowEngine:
         Resting at `failed` is understood by both retry() and the deadlock
         report.
         """
-        self._mark_failed(t, w, reason, will_retry=auto_retry and t.can_retry)
+        self._mark_failed(t, w, reason, will_retry=auto_retry and t.can_retry,
+                          derived=derived)
         if t.can_retry:
             if auto_retry:
                 t.transition("ready")

@@ -26,7 +26,7 @@ from .base import (ApprovalRepo, ArtifactRepo, EventRepo, LiveSessionExists, Mis
 
 log = logging.getLogger("yuri.store.sqlite")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
 # Columns serialised as JSON in both directions by _to_row/_from_row. Register

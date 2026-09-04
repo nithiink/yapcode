@@ -83,6 +83,40 @@ class ProjectService:
                                         payload={"name": p.name, "root_path": root, "kind": kind}))
         return p
 
+    # The keys a project's verify config may carry — one per command-running
+    # check in services/verify.py. An unknown key is refused rather than
+    # stored: a typo'd "test" would sit in the row looking configured while
+    # tests_pass went on reporting `unavailable`, which is the confusing
+    # version of a correct refusal.
+    VERIFY_KEYS = ("tests", "typecheck")
+
+    def set_verify(self, project_id: str, config: dict) -> Project:
+        """Set how this project's tests and typecheck are run.
+
+        Verification refuses to claim a check it did not run, and refuses to
+        guess the command, so this is the only thing that makes tests_pass
+        answerable at all. Without it every bug-fix workflow blocks at its
+        test task — correctly, but permanently.
+        """
+        p = self.get(project_id)
+        clean: dict[str, str] = {}
+        for key, value in (config or {}).items():
+            if key not in self.VERIFY_KEYS:
+                raise ValueError(
+                    f"unknown verify key: {key!r}; expected one of {list(self.VERIFY_KEYS)}")
+            text = " ".join(str(value).split())
+            if not text:
+                continue          # empty means "unset this one", not "run nothing"
+            clean[key] = text
+        meta = dict(p.metadata or {})
+        if clean:
+            meta["verify"] = clean
+        else:
+            meta.pop("verify", None)
+        p.metadata = meta
+        self.store.projects.update(p)
+        return p
+
     def list(self) -> dict:
         discovered = session_manager.list_projects()
         registered = {p.root_path: p for p in self.store.projects.list()}

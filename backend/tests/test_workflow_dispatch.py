@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import config  # noqa: E402
 from yuri import app as yapp  # noqa: E402
+from yuri.domain.artifact import Artifact  # noqa: E402
 from yuri.domain.session import AgentSession  # noqa: E402
 from yuri.providers.base import ProviderEvent  # noqa: E402
 from yuri.providers.fake import FakeAgentProvider  # noqa: E402
@@ -108,6 +109,14 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
     # --- the whole thing --------------------------------------------------
 
     async def test_a_four_task_mission_runs_to_completion(self):
+        # Verification is real (spec §10): `bug-fix` declares `tests_pass` on
+        # its test task and `review_approved` on its review task, and a task
+        # whose checks do not PASS never reaches `completed`. So this test now
+        # has to make them pass — configure the test command, and let the
+        # reviewer state a verdict. Before Task 9 the same run "completed"
+        # with neither, which is the lie that task removed.
+        self.mission.metadata = {"verify": {"tests": "sh -c 'exit 0'"}}
+        self.c.store.missions.update(self.mission)
         w = await self._plan()
         started = await self.c.workflow.advance(w.id)
         await self._pump()
@@ -135,6 +144,10 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(("send_message", live[0].native_session_id),
                           [(c[0], c[1]) for c in self.fake.calls if c[0] == "send_message"])
             handle = self._handle_of(task)
+            if "review_approved" in task.verification:
+                self.c.store.artifacts.insert(Artifact(
+                    mission_id=self.mission.id, task_id=task.id, kind="review",
+                    title="review", body="Looks right.\nVERDICT: approved"))
             await self._finish_turn(task, f"finished {title}")
 
             done = self.c.store.tasks.get(task.id)

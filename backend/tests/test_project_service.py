@@ -92,3 +92,59 @@ class ProjectServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VerifyConfigTests(ProjectServiceTests):
+    """Where a project's verification commands live.
+
+    Without this, `tests_pass` has no command to run, verification reports
+    `unavailable`, and `unavailable` fails the task — so every bug-fix,
+    feature and refactor workflow blocks at its test step. Correctly, but
+    permanently, which is its own kind of broken.
+    """
+
+    def _project(self):
+        return self.svc.register(os.path.join(self.root, "alpha"))
+
+    def test_a_command_round_trips_onto_the_project(self):
+        p = self._project()
+        out = self.svc.set_verify(p.id, {"tests": "pytest -q", "typecheck": "mypy ."})
+        self.assertEqual(out.metadata["verify"],
+                         {"tests": "pytest -q", "typecheck": "mypy ."})
+        self.assertEqual(self.svc.get(p.id).metadata["verify"]["tests"], "pytest -q")
+
+    def test_an_unknown_key_is_refused_rather_than_stored(self):
+        # A typo'd "test" would sit in the row looking configured while
+        # tests_pass went on reporting `unavailable` — the confusing version
+        # of a correct refusal.
+        p = self._project()
+        with self.assertRaises(ValueError) as ctx:
+            self.svc.set_verify(p.id, {"test": "pytest"})
+        self.assertIn("test", str(ctx.exception))
+        self.assertIn("tests", str(ctx.exception), "the message should name what IS valid")
+        self.assertEqual(self.svc.get(p.id).metadata, {})
+
+    def test_an_empty_value_unsets_that_command(self):
+        p = self._project()
+        self.svc.set_verify(p.id, {"tests": "pytest -q", "typecheck": "mypy ."})
+        self.svc.set_verify(p.id, {"tests": "pytest -q", "typecheck": "  "})
+        self.assertEqual(self.svc.get(p.id).metadata["verify"], {"tests": "pytest -q"})
+
+    def test_clearing_everything_removes_the_key_entirely(self):
+        p = self._project()
+        self.svc.set_verify(p.id, {"tests": "pytest -q"})
+        self.svc.set_verify(p.id, {})
+        self.assertNotIn("verify", self.svc.get(p.id).metadata)
+
+    def test_other_metadata_is_not_clobbered(self):
+        p = self._project()
+        p.metadata = {"keep": "me"}
+        self.store.projects.update(p)
+        self.svc.set_verify(p.id, {"tests": "pytest -q"})
+        meta = self.svc.get(p.id).metadata
+        self.assertEqual(meta["keep"], "me")
+        self.assertIn("verify", meta)
+
+    def test_an_unknown_project_is_a_keyerror(self):
+        with self.assertRaises(KeyError):
+            self.svc.set_verify("nope", {"tests": "pytest"})

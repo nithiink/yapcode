@@ -1,0 +1,16 @@
+-- Phase 7: where a project's verification commands live.
+--
+-- Verification (spec §10) refuses to claim `tests_pass` unless it actually ran
+-- the project's test command, and the command must be configured rather than
+-- guessed — inferring `pytest` from a tests/ directory is exactly the
+-- confident guess the check exists to prevent.
+--
+-- The config belongs on the PROJECT: "how do you run this repo's tests" is a
+-- property of the repo, not of one mission. Without this column the only
+-- source was mission.metadata, which nothing sets, so every tests_pass
+-- resolved `unavailable` and every bug-fix, feature and refactor workflow
+-- blocked at its test task. Correct, but permanently.
+--
+-- `metadata` is already in sqlite.py's _JSON_COLS, so it round-trips as JSON
+-- both ways with no further registration.
+ALTER TABLE projects ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';

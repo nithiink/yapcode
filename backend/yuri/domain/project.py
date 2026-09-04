@@ -26,6 +26,11 @@ class Project:
     default_agent: str | None = None
     auto_approve_edits: bool = False
     repo_url: str | None = None
+    # Free-form per-project config. Today's only key is `verify`, holding the
+    # commands verification runs: {"verify": {"tests": "...", "typecheck": "..."}}.
+    # A dict rather than columns because the set of checks is meant to grow,
+    # and `metadata` is already in sqlite.py's _JSON_COLS.
+    metadata: dict = field(default_factory=dict)
     created_at: str = field(default_factory=utcnow)
     updated_at: str = field(default_factory=utcnow)
 
