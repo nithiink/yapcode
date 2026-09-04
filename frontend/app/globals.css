@@ -3667,3 +3667,13 @@ a.miss-row {
    letter-spacing: 0;
    font-variant-numeric: tabular-nums;
 }
+/* A resolved approval's outcome, where its Allow/Deny used to be. Rendering
+   the buttons for something already decided offered a click that could only
+   return 409 — see lib/approvals.ts's outcomeOf. The space is more useful
+   saying what happened than holding a control that cannot work. */
+.apr-outcome { display: flex; align-items: baseline; gap: 9px; padding: 7px 0 1px; }
+.apr-outcome-label { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+                     color: var(--dim); }
+.apr-outcome.good .apr-outcome-label { color: var(--good); }
+.apr-outcome.danger .apr-outcome-label { color: var(--danger); }
+.apr-outcome-detail { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }

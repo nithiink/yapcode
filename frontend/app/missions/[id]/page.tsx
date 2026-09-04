@@ -63,11 +63,24 @@ export default function MissionDetailPage() {
   // Refresh on this mission's own events rather than a timer — the same
   // onYuriEvent subscription every other view uses (see app/page.tsx,
   // app/approvals/page.tsx). Scoped to this mission_id so another mission's
-  // status change elsewhere doesn't refetch a detail nobody is looking at.
+  // change elsewhere doesn't refetch a detail nobody is looking at.
+  //
+  // `approval.` matters as much as `mission.`: answering by voice publishes
+  // approval.resolved and nothing else, so listening only for mission.* left
+  // this page showing an answered approval as still waiting, with live
+  // Allow/Deny buttons that could then only 409. Both events carry
+  // mission_id (yuri/services/approvals.py).
+  //
+  // `task.` too, since a Phase 7 workflow moves tasks without necessarily
+  // moving the mission's own status.
   useEffect(
     () =>
       onYuriEvent((ev) => {
-        if (ev.type.startsWith("mission.") && ev.mission_id === id) void load();
+        if (ev.mission_id !== id) return;
+        if (ev.type.startsWith("mission.") || ev.type.startsWith("approval.") ||
+            ev.type.startsWith("task.")) {
+          void load();
+        }
       }),
     [onYuriEvent, load, id],
   );

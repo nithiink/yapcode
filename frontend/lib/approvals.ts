@@ -42,3 +42,52 @@ export function waitedFor(a: Approval, now: number = Date.now()): string {
   const hours = Math.floor(mins / 60);
   return `waiting ${hours}h`;
 }
+
+/** What became of an approval, or `null` while it is still waiting.
+ *
+ *  The card used to render Allow/Deny for every approval it was handed,
+ *  including resolved ones — its own comment admitted as much. Pressing those
+ *  bought a 409 from the backend and a "someone answered it first" toast, so
+ *  they were controls that could only fail. The rule the mission Delete button
+ *  already follows applies here: a control that would fail must not be
+ *  rendered. Better still, a resolved approval has everything needed to say
+ *  what actually happened, so the space becomes an answer instead of a
+ *  disabled button.
+ */
+export function outcomeOf(a: Approval, now: number = Date.now()): {
+  label: string; cls: string; detail: string;
+} | null {
+  if (a.status === "pending") return null;
+
+  const label = {
+    allowed: "Allowed",
+    denied: "Denied",
+    // Not a decision anyone made — say so, or "Expired" reads like a verdict.
+    expired: "Expired unanswered",
+    // A mode switch (acceptEdits/auto) approves everything it covers, so the
+    // prompt was retired rather than answered.
+    superseded: "Covered by a mode change",
+  }[a.status];
+
+  const by = a.resolved_by && a.resolved_by !== "mode_switch"
+    ? { voice: "by voice", ui: "in the UI", api: "over the API" }[a.resolved_by] ?? ""
+    : "";
+  const when = a.resolved_at ? agoOf(a.resolved_at, now) : "";
+  const cls = a.status === "allowed" ? "good" : a.status === "denied" ? "danger" : "dim";
+
+  return { label, cls, detail: [by, when].filter(Boolean).join(" · ") };
+}
+
+/** "just now" / "4m ago" / "2h ago". Empty for an unparseable timestamp — a
+ *  wrong time is worse than none. */
+export function agoOf(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "";
+  const secs = Math.max(0, Math.floor((now - at) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${Math.max(1, mins)}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}

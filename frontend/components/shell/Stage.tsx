@@ -59,7 +59,7 @@ export function Stage({ children }: { children: React.ReactNode }) {
         aria-label="Back to Yuri"
         tabIndex={engaged ? 0 : -1}
       >
-        <span>Home</span>
+        <span>Yuri</span>
       </button>
 
       <Dock onEngage={() => setTouched(true)} />
