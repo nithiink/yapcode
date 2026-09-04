@@ -154,6 +154,23 @@ async def lifespan(_: FastAPI):
                          [s.get("name") or s["handle"][:8] for s in restored])
         except Exception:
             log.exception("CLI session rehydration failed (continuing without it)")
+        try:
+            # AFTER the rehydrate, and that order is the whole design (spec
+            # §13): reconcile decides a task's fate from whether its session
+            # came back, so running it first would call every session lost and
+            # re-run work that is still in flight.
+            recon = await c.workflow.reconcile()
+            if recon["workflows"]:
+                log.info(
+                    "reconciled %d workflow(s): %d task(s) kept, %d never started, "
+                    "%d lost their agent, %d re-verified",
+                    recon["workflows"], len(recon["kept"]), len(recon["restarted"]),
+                    len(recon["lost"]), len(recon["reverified"]))
+        except Exception:
+            # A mission that cannot be recovered must not stop the backend
+            # from serving. The tasks stay as they were, which the UI shows,
+            # and the user can retry by hand.
+            log.exception("workflow reconciliation failed (continuing without it)")
     yield
     # Reverse order: Yuri's shutdown publishes/bridges its last events, so the
     # debug writer has to outlive it.

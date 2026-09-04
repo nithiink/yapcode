@@ -91,6 +91,13 @@ DONE: tuple[str, ...] = ("completed", "skipped", "cancelled")
 # `pending` and surfaces as a deadlock naming the cancelled task instead.
 log = logging.getLogger("yuri.workflow")
 
+# Why a task failed on recovery. It has to name the RESTART: "the agent
+# reported an error" would send the user to the task and its instruction,
+# when what happened was that this process went away and took the agent's
+# session with it.
+RESTART_LOST_REASON = ("the agent's session did not survive a backend restart, so this "
+                       "task's work was lost; it is being run again")
+
 SATISFIES: tuple[str, ...] = ("completed", "skipped")
 # Statuses a finish report may arrive for: the engine asked, and is waiting.
 # A report for anything else (a task reset to `ready` after a failure, one
@@ -568,6 +575,97 @@ class WorkflowEngine:
             handoff.ingest_result(self.store, t, text, handoff.files_from_events(self.store, t))
         except Exception:                                  # noqa: BLE001
             log.exception("ingesting the result of task %s failed", t.id)
+
+    # --- recovery after a restart (spec §13) -------------------------------
+
+    async def reconcile(self) -> dict:
+        """Put every live workflow's tasks back in step with reality, then
+        resume the work. Called from startup, after sessions rehydrate.
+
+        The four cases exist because the remedies differ, and collapsing any
+        two of them loses something:
+
+          * `dispatched` with NO session never started — the provider call did
+            not get far enough to record one. It goes back to `ready`, not to
+            `failed`: charging an attempt for work that never ran would spend
+            the retry budget on nothing.
+          * a session that came back is still live and may still report.
+            Leaving it alone is the point; re-dispatching would duplicate work
+            genuinely in flight.
+          * a session that did NOT come back can never report again, so the
+            task would sit `running` forever waiting for an event that cannot
+            arrive. It fails with a reason that names the RESTART, because
+            "the agent failed" sends the user looking at the task instead.
+          * `verifying` lost its verdict with the process. The checks are
+            declared and side-effect-free by construction, so re-running them
+            is safe — and it is the only way to learn the verdict. Assuming
+            either outcome would be a lie.
+
+        Returns what it did, per case, because startup logs it: a recovery
+        that says nothing leaves the user guessing why a mission moved on its
+        own.
+        """
+        out: dict[str, list[str] | int] = {
+            "workflows": 0, "restarted": [], "lost": [], "kept": [], "reverified": []}
+        for w in self.store.workflows.live():
+            out["workflows"] = int(out["workflows"]) + 1
+            advanceable = w.status == "running"
+            for t in self.store.tasks.for_workflow(w.id):
+                if t.status not in IN_FLIGHT:
+                    continue
+                await self._reconcile_task(t, w, out)
+            # A paused or waiting_for_human workflow has its TASKS corrected
+            # above but is deliberately not resumed: releasing the work is the
+            # user's decision, not a side effect of a restart.
+            if advanceable:
+                await self.advance(w.id)
+        return out
+
+    async def _reconcile_task(self, t: Task, w: Workflow, out: dict) -> None:
+        session = self.store.sessions.get(t.session_id) if t.session_id else None
+        # A dangling session_id is not evidence the agent is alive: the row
+        # could have been reaped. Treated exactly like no session at all.
+        alive = session is not None and session.status != "lost"
+
+        if t.status == "verifying":
+            out["reverified"].append(t.id)
+            # Straight back through the same path a finished turn takes, so
+            # there is one implementation of what a verdict means.
+            results = await self._verify(t, w)
+            if not verify.passed(results):
+                self._verification_failed(t, w, results)
+                return
+            t.transition("completed")
+            t.ended_at = utcnow()
+            self.store.tasks.update(t)
+            self._publish(EventType.TASK_COMPLETED, w, payload={
+                "workflow_id": w.id, "task_id": t.id, "title": t.title,
+                "specialist_id": t.specialist_id, "attempts": t.attempts})
+            return
+
+        if alive:
+            out["kept"].append(t.id)
+            return
+
+        if t.status == "dispatched":
+            # It never started. `ready` is the honest state, and the attempt
+            # is given back for the same reason.
+            out["restarted"].append(t.id)
+            t.attempts = max(0, t.attempts - 1)
+            t.error = None
+            t.session_id = None
+            t.ended_at = None
+            t.transition("ready")
+            self.store.tasks.update(t)
+            self.journal.append(f"task '{t.title}' never started before the restart; queued again")
+            return
+
+        # `running` or `waiting_approval` with an agent that is gone.
+        out["lost"].append(t.id)
+        # auto_retry, and no advance() here: reconcile() advances once per
+        # workflow at the end, and advancing per task would dispatch inside a
+        # loop that is still correcting other tasks' states.
+        self._fail(t, w, RESTART_LOST_REASON, auto_retry=True)
 
     # --- verification (spec §10) ------------------------------------------
 
