@@ -3,7 +3,8 @@
 **Date:** 2026-09-04
 **Base:** `feat/yuri-phase-7` at `0994a99`
 **Predecessor:** `2026-09-04-yuri-personality-design.md` — this fills the seam that spec deliberately left open
-**Touches:** `backend/tools.py`, new `backend/yuri/own/`, `frontend/lib/persona.ts`
+**Touches:** `backend/tools.py`, new `backend/yuri/own/`, `frontend/lib/persona.ts`, `frontend/lib/instructions.ts`
+**Borrows from:** `~/projects/project-yuri` — the declared permission tier (§3.6) and the derived capability map (§4). Both were surveyed at `c11aed3`; where this spec departs from that implementation, it says why.
 
 ---
 
@@ -182,16 +183,101 @@ The line is *irreversibility*, not *reaching outside the browser*.
 
 ---
 
+### 3.6 A declared permission tier, enforced in one place
+
+Adopted from `~/projects/project-yuri`, which declares `permissionTier`
+(`safe | approval | sensitive`) on every one of its ~35 tools
+(`packages/tool-system/src/registry.ts:5-17`). Making the confirmation posture
+a **property of the tool** rather than logic scattered per tool is the right
+call, and this spec takes it.
+
+It also takes the lesson from how that repo implements it, which is that **it
+does not**. The tier is checked nowhere; the entire gate is a `console.log`
+reminding the daemon that Yuri *should* have asked
+(`apps/daemon/src/agents/tool-agent.ts:728-732`), and
+`ToolRegistry.getByPermission()` has zero callers. The only real effect is
+`" (asks first)"` appended to a line in the system prompt. So the gate is a
+sentence the model is asked to obey — which is exactly the mechanism that
+failed here on 2026-09-04, when `cancel_mission`'s description said "confirm
+with the user first" and Yuri cancelled an unrelated mission two seconds
+after an unrelated one was cancelled from the UI.
+
+The asymmetry there is worth recording too, because it is the failure mode of
+gating by intuition rather than by rule: `run_shell_command` has a real
+allowlist with genuinely good anti-chaining (splits on `&& || ; |` and
+requires every segment allowed, `apps/daemon/src/tools/shell.ts:33-49`) —
+while `write_file` and `execute_applescript` are `Sensitive`, meaning
+unrestricted. **`execute_applescript` therefore defeats the shell allowlist
+outright** via `do shell script`. One policed door, an unlocked window beside
+it.
+
+#### The design here
+
+Each entry in `TOOL_DEFINITIONS` declares a tier:
+
+```python
+"tier": "safe"      # runs immediately. The default; most tools.
+"tier": "confirm"   # first call arms and reports; only a second call with the
+                    # token runs it.
+```
+
+`dispatch_tool` reads it and applies the gate **once, centrally**, before the
+handler — which generalises the arm-then-confirm mechanism `cancel_mission`
+already has into a property any tool can declare. `cancel_mission` becomes
+the first *user* of a general gate rather than a hand-wired special case, and
+its bespoke `_arm_cancel`/`_cancel_is_confirmed` pair collapses into it.
+
+Two rules the generalisation must keep:
+
+- **The arm is keyed on the tool AND its resolved target.** `cancel_mission`'s
+  token is bound to one mission id precisely so a token armed for one cannot
+  cancel another — there is a test for that exact shape. A generic gate keyed
+  only on the tool name would lose it, which would be a regression dressed as
+  a refactor.
+- **Single use, consumed on a wrong guess**, so a token cannot be
+  brute-forced against a still-valid arm.
+
+None of the tools in this spec is `confirm`. That is §3.5's point restated:
+the line is irreversibility, not reaching outside the browser. The tier exists
+so that when something irreversible does arrive, the gate is already there and
+declared rather than argued about again.
+
+---
+
 ## 4. Surfaces
 
 **Tools** (`backend/tools.py`, implementations in `backend/yuri/own/`):
 `web_search`, `open_app`, `music`, `set_volume`, `notify`.
 
-**Her persona** gains the honest list. The current text — "Talk, remember
-things, keep a journal, and run the coding agents. That's the honest list
-today" — is updated, and the point of the sentence is preserved: it must stay
-an accurate list, because a persona that claims capabilities she lacks is the
-same lie in the other direction.
+**Her persona stops carrying a hand-written list at all.** The current text —
+"Talk, remember things, keep a journal, and run the coding agents. That's the
+honest list today" — is honest right now and goes stale the moment this spec
+lands. It is replaced by a **derived capability map**, the second idea taken
+from project-yuri (`apps/daemon/src/system-instruction.ts:148-195`), whose own
+comment states the reason: so she *"never claims a tool she doesn't have"*.
+
+Both voice transports already `fetch("/api/tools")` for the definitions they
+hand the model (`lib/realtime.ts:106`, `lib/gemini.ts:163`). The map is built
+from **that same payload**, in `lib/instructions.ts`, so the prose describing
+her abilities and the function declarations enabling them cannot disagree —
+they are one list rendered twice. That is stronger than deriving both from a
+shared registry in one process, because there is no second source to drift.
+
+Rendering rules, each with a reason:
+- **Grouped by category** (`orchestration`, `own`, `macos`), so she can tell
+  "things I do to your machine" from "things I do to your code".
+- **First sentence of each description only.** The personality work moved
+  1,517 words of guidance onto those descriptions; rendering them in full
+  would put it straight back into the prompt and undo that. The full text
+  still reaches the model through the function declarations — the map only has
+  to be scannable.
+- **`confirm`-tier tools are marked** as asking first, derived from the tier
+  rather than written out, so the marking cannot drift from the enforcement.
+- **Empty means empty.** If the fetch fails, the block is omitted rather than
+  rendered as a guess. `yuriContextBlock` already has this contract and there
+  is a test for it.
+
+`TOOL_DEFINITIONS` gains a `category` alongside `tier`.
 
 **Config** (`backend/config.py`): `YURI_ALLOWED_APPS` (comma-separated, empty
 = none). No new key for search — `GEMINI_API_KEY` is already read.
@@ -216,6 +302,17 @@ building a worse version of the one macOS ships.
   `os.system`, and **no f-string or `%` or `.format` reaching an
   `osascript -e`** — the injection rule, enforced mechanically.
 - The `-1743` branch returns the actionable message.
+- **The tier gate**: a `safe` tool runs on the first call; a `confirm` tool
+  does not, arms, and runs on a second call with the token; a token armed for
+  one target cannot act on another; a wrong guess burns the arm; a stale arm
+  expires. These are `cancel_mission`'s existing eight tests, re-pointed at
+  the general gate — if the refactor loses one, it says which.
+- **The capability map**: every tool in the payload appears exactly once; a
+  `confirm` tool is marked; only the first sentence of a description is
+  rendered; a failed fetch renders nothing rather than a guess; and — the one
+  that matters — **every name in the map exists in the payload, and every
+  name in the payload appears in the map.** A map that can omit a tool is a
+  map that makes her deny an ability she has.
 
 **Live, and recorded in `docs/yuri/own-tools-verification.md`:**
 One real search, and one real `music` call — which is the only way to see the
