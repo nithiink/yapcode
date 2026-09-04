@@ -3914,3 +3914,214 @@ a.miss-row {
 .mcp-verdict.bad pre {
    color: var(--danger);
 }
+
+/* --- Agents panel: the roster (Your agents) -------------------------------
+   Shares .mcp-field/.mcp-tier/.mcp-actions with the Connected services form
+   rather than growing a second set of inputs that look nearly the same. */
+.roster,
+.engines {
+   min-width: 0;
+}
+
+.engines {
+   margin-top: 26px;
+   padding-top: 22px;
+   border-top: 1px solid var(--line);
+}
+
+.sp-list {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.sp-card {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 14px 16px;
+   min-width: 0;
+}
+
+.sp-head {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+/* The agent's own colour, which also marks its steps on the timeline, so the
+   two views are recognisably the same agent. */
+.sp-dot {
+   width: 10px;
+   height: 10px;
+   border-radius: 50%;
+   flex: none;
+}
+
+.sp-name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 15px;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.sp-role {
+   flex: 1;
+   font-size: 12px;
+   color: var(--dim);
+}
+
+.sp-blurb {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 0;
+   max-width: 62ch;
+}
+
+.sp-meta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 8px;
+}
+
+.sp-caps {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+   margin-top: 9px;
+}
+
+.sp-cap {
+   font-size: 11px;
+   color: var(--mut);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 2px 8px;
+}
+
+/* Collapsed by default: the persona is the longest field on the card and the
+   least often needed, but hiding it entirely would make it unreviewable. */
+.sp-prompt {
+   margin-top: 10px;
+   font-size: 12px;
+}
+
+.sp-prompt summary {
+   color: var(--mut);
+   cursor: pointer;
+}
+
+.sp-prompt p {
+   color: var(--mut);
+   background: var(--panel);
+   border-radius: 10px;
+   padding: 9px 11px;
+   margin: 8px 0 0;
+   white-space: pre-wrap;
+   max-width: 70ch;
+}
+
+.sp-actions {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin-top: 12px;
+}
+
+/* --- the roster form ---------------------------------------------------- */
+.sp-form {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   margin-bottom: 14px;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.sp-roles {
+   display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+   gap: 8px;
+}
+
+.sp-row {
+   display: flex;
+   gap: 14px;
+   flex-wrap: wrap;
+}
+
+.sp-row > .mcp-field {
+   flex: 1 1 180px;
+}
+
+.sp-capgrid {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+}
+
+.sp-captoggle {
+   font-size: 12px;
+   color: var(--mut);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 5px 11px;
+   cursor: pointer;
+}
+
+.sp-captoggle:hover {
+   border-color: var(--line2);
+}
+
+.sp-captoggle.on {
+   color: var(--acc);
+   border-color: var(--acc);
+   background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+.sp-colors {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+}
+
+.sp-swatch {
+   width: 26px;
+   height: 26px;
+   border-radius: 8px;
+   border: 2px solid transparent;
+   cursor: pointer;
+}
+
+.sp-swatch.on {
+   border-color: var(--ink);
+}
+
+.sp-form select {
+   font-size: 12px;
+   color: var(--ink);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 8px 10px;
+}
+
+/* What the backend will actually store, so the slug is never a surprise. */
+.sp-slug,
+.sp-hint {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--dim);
+}
+
+.sp-err {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--danger);
+}
