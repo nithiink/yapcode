@@ -15,11 +15,12 @@ import { Timeline } from "@/components/conversation/Timeline";
 import { MarkdownLite } from "@/components/conversation/MarkdownLite";
 import { VoiceSettings } from "./VoiceSettings";
 import { splitPlan } from "@/lib/timeline";
-import { activeHandle, agentHue, dockTabs, liveDot } from "@/lib/dock.ts";
+import { activeHandle, agentHue, dockTabs, liveDot, FALLBACK_HUE } from "@/lib/dock.ts";
 import { sessionLabel, sessionStatus } from "@/lib/sessions";
+import { composerState } from "@/lib/compose";
 
 export function Dock({ onEngage }: { onEngage: () => void }) {
-  const { timeline, pending, sessions, answerPrompt, callTool } = useYuri();
+  const { timeline, pending, sessions, answerPrompt, say, connected, vstate, provider } = useYuri();
 
   const [picked, setPicked] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -57,16 +58,24 @@ export function Dock({ onEngage }: { onEngage: () => void }) {
     return () => window.removeEventListener("resize", updateFades);
   }, [updateFades]);
 
-  // A decided prompt must not leave a stale error under the composer.
-  useEffect(() => setSendError(null), [active]);
+  // Reconnecting (or switching provider) must not leave a stale error under
+  // the composer explaining a condition that no longer holds.
+  useEffect(() => setSendError(null), [connected, provider]);
+
+  // The composer talks to YURI, not to the selected session. The thread above
+  // it renders her conversation, so anything else typed here would land in a
+  // conversation the user cannot see — which is exactly the bug this replaced.
+  // To message one agent session directly, /sessions has a per-session
+  // composer where its reply is actually visible.
+  const comp = composerState({ provider, connected, vstate, sending, draft });
 
   const send = async () => {
+    if (!comp.canSend) return;
     const text = draft.trim();
-    if (!text || !current || sending) return;
     setSending(true);
     setSendError(null);
     try {
-      await callTool("tell_claude", { session_id: current.handle, message: text });
+      await say(text);
       setDraft("");
     } catch (e) {
       // Keep the draft: losing what the user typed to a failed send is worse
@@ -81,7 +90,14 @@ export function Dock({ onEngage }: { onEngage: () => void }) {
 
   return (
     <section className="dock" aria-label="Session conversation">
-      <div className="dtabs" role="tablist" aria-label="Sessions">
+      {/* The tabs no longer choose who the composer talks to (that is always
+          Yuri now) — they choose which session's status line shows below, and
+          nothing else. Kept rather than deleted because that line is the one
+          place the dock says what an agent is doing right now; a strip of
+          several sessions with only the first one's status readable would be
+          worse than no strip. The aria-label says so out loud so the control
+          is not silently repurposed. */}
+      <div className="dtabs" role="tablist" aria-label="Sessions — pick one to see its status">
         {tabs.length === 0 ? (
           <span className="dtab-empty">No sessions yet</span>
         ) : (
@@ -125,7 +141,9 @@ export function Dock({ onEngage }: { onEngage: () => void }) {
         >
           {timeline.length === 0 ? (
             <div className="dthread-empty">
-              Nothing said yet. Connect voice, or type below.
+              {/* Both routes into this thread need the voice connection —
+                  typing goes to Yuri over the same session speaking does. */}
+              Nothing said yet. Connect voice, then talk or type below.
             </div>
           ) : (
             <Timeline items={timeline} />
@@ -178,22 +196,21 @@ export function Dock({ onEngage }: { onEngage: () => void }) {
           void send();
         }}
       >
-        <span
-          className="chip"
-          style={{ background: agentHue(current?.agent_id) }}
-          aria-hidden="true"
-        />
+        {/* Yuri's accent, fixed: the chip used to carry the selected session's
+            hue because the text went there. It goes to her now, so a per-session
+            colour here would be a lie about the destination. */}
+        <span className="chip" style={{ background: FALLBACK_HUE }} aria-hidden="true" />
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onFocus={onEngage}
-          disabled={!current || sending}
-          placeholder={
-            current ? `Message ${sessionLabel(current).toLowerCase()}…` : "Start a session first"
-          }
-          aria-label={current ? `Message ${sessionLabel(current)}` : "No session to message"}
+          disabled={comp.disabled}
+          placeholder={comp.placeholder}
+          title={comp.reason ?? undefined}
+          aria-label={comp.reason ?? "Message Yuri"}
+          aria-disabled={comp.disabled}
         />
-        <button className="send" type="submit" disabled={!current || sending || !draft.trim()} aria-label="Send">
+        <button className="send" type="submit" disabled={!comp.canSend} aria-label="Send">
           <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
         </button>
       </form>

@@ -371,6 +371,24 @@ export class GeminiSession implements VoiceSession {
     this.lastSend = Date.now();
   }
 
+  sendText(text: string): void {
+    // Unlike injectUpdate there is no buffer-and-flush-later here: a typed turn
+    // the user is waiting on must not be delivered minutes late after a
+    // reconnect. Failing loudly lets the composer keep the draft and say so.
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      throw new Error("Voice isn't connected — reconnect and try again.");
+    }
+    // Same wire shape injectUpdate uses, because on this transport a complete
+    // user turn IS how you both add content and ask for a reply — turnComplete
+    // is Gemini's response.create.
+    this.ws.send(
+      JSON.stringify({
+        clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true },
+      }),
+    );
+    this.lastSend = Date.now();
+  }
+
   // --- keepalive ----------------------------------------------------------
   private startKeepalive(): void {
     this.stopKeepalive();

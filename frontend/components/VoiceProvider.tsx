@@ -57,9 +57,11 @@ import {
   type NarrationMode,
   type SpokenGate,
 } from "@/lib/narration";
+import { nextUnanswered, pollVerdict, type ToolEnvelope } from "@/lib/polling";
 import { type TimelineItem } from "@/lib/timeline";
 import { type Sess } from "@/lib/sessions";
 import { MODEL_OPTIONS, connectionParams, PROVIDER_LABEL } from "@/lib/voiceui";
+import { canTypeToProvider } from "@/lib/compose";
 import type { DebugEvent } from "./ActivityFeed";
 
 export type Pending = { sessionId: string; kind: string; text: string; options: string[] } | null;
@@ -114,6 +116,11 @@ export type YuriContext = {
   // conversation
   timeline: TimelineItem[];
   pending: Pending; // the live prompt card, or null
+  // Type instead of speak. The text enters THIS conversation as the user's own
+  // turn (it shows up in `timeline` like a spoken one) and Yuri answers it in
+  // the same thread. Rejects — rather than swallowing the text — when voice is
+  // not connected or the transport can't carry a typed turn.
+  say: (text: string) => Promise<void>;
 
   // shared data the nav badges and every view read
   sessions: Sess[];
@@ -313,15 +320,23 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   // Shared tool dispatch: every /api/tools/execute call in this file (and any
   // view) goes through here so the fetch shape lives in exactly one place.
-  const callTool = useCallback(async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+  // The full {ok, error, result} envelope. `callTool` below returns only
+  // `.result`, which means a soft error ({ok:false}) reaches its caller as
+  // `undefined` with the reason thrown away — the poll loop read exactly that
+  // as "still working" and asked a dead session the same question every 1.5s
+  // forever. Anything that needs to tell an error from a result uses this.
+  const execTool = useCallback(async (name: string, args: Record<string, unknown>): Promise<ToolEnvelope> => {
     const r = await fetch("/api/tools/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, arguments: args }),
     });
-    const data = await r.json();
-    return data?.result;
+    return (await r.json()) as ToolEnvelope;
   }, []);
+
+  const callTool = useCallback(async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    return (await execTool(name, args))?.result;
+  }, [execTool]);
 
   // A background Claude turn reached a result — surface any prompt in the UI and
   // tell the voice model to narrate it (works even mid-conversation).
@@ -359,20 +374,36 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   const pollSession = (sessionId: string) => {
     if (!sessionId || pollTimers.current.has(sessionId)) return;
-    // Keep polling until the backend reports idle. On any non-working,
-    // non-idle response, surface it and KEEP polling so we drain queued results
-    // (poll_status returns one buffered result per call, FIFO).
+    // Keep polling until the backend reports idle, draining queued results as
+    // they come (poll_status hands back one buffered result per call, FIFO).
+    //
+    // Every exit condition lives in lib/polling.ts so it can be tested: a
+    // session the backend has forgotten stops the loop immediately, and a
+    // genuinely transient failure is retried but bounded. This used to treat
+    // every unusable response as "keep going", which produced 329 log events
+    // for one stopped session and would have produced them indefinitely.
+    let unanswered = 0;
     const timer = setInterval(async () => {
+      let env: ToolEnvelope;
       try {
-        const res: any = await callTool("poll_session", { session_id: sessionId });
-        if (!res || res.status === "working") return;     // keep polling
-        if (res.status === "idle") {                       // queue drained, stop
-          stopPolling(sessionId);
-          return;
-        }
-        handleClaudeResult(res);                           // drain & keep polling
-      } catch {
-        /* transient; keep polling */
+        env = await execTool("poll_session", { session_id: sessionId });
+      } catch (e) {
+        // The request itself failed (backend down, network). Same bound.
+        env = { ok: false, error: (e as Error)?.message || "the request failed" };
+      }
+      const verdict = pollVerdict(env, unanswered);
+      unanswered = nextUnanswered(env, unanswered);
+      if (verdict.action === "wait") return;
+      if (verdict.action === "handle") {
+        handleClaudeResult(env?.result);
+        return;
+      }
+      stopPolling(sessionId);
+      // `idle` is the ordinary exit and says nothing; anything else is a
+      // reason the user may need, and one line beats an endless stream.
+      if (verdict.reason !== "idle") {
+        logDebug("poll", `stopped polling: ${verdict.reason}`, { session: sessionId },
+                 "backend", "voice");
       }
     }, 1500);
     pollTimers.current.set(sessionId, timer);
@@ -1085,6 +1116,33 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     setPending(null);
   };
 
+  // Type instead of speak. Deliberately routed through the SAME voice session
+  // and the SAME timeline as a spoken turn, because the dock shows exactly one
+  // conversation: its composer used to call tell_claude, so typed text reached
+  // an agent session while the panel above kept showing Yuri's transcript, and
+  // the user saw nothing happen. Messaging an agent directly still exists —
+  // it's the per-session composer on /sessions, where the reply is visible.
+  const say = async (text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    if (!canTypeToProvider(provider)) {
+      throw new Error(`${PROVIDER_LABEL[provider]} voice can't take typed messages.`);
+    }
+    const s = sessionRef.current;
+    if (!s) throw new Error("Voice isn't connected — connect first, then type.");
+    // Send BEFORE rendering: sendText throws when the transport is down, and a
+    // turn that never left must not appear in the thread as though it had.
+    s.sendText(t);
+    // Render it exactly the way a spoken turn arrives, through the same event
+    // path — neither transport echoes a typed turn back as a transcript
+    // (OpenAI input transcription is off; Gemini only transcribes audio), so
+    // without this the user's own message would never appear at all.
+    onEvent({ type: "transcript", role: "user", text: t, final: true });
+    // She is about to answer; show it immediately rather than waiting for the
+    // transport's first state event, which can be a second away.
+    setVstate("thinking");
+  };
+
   const toggleMute = () => {
     const next = !muted;
     setMuted(next);
@@ -1171,6 +1229,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
       timeline,
       pending,
+      say,
 
       sessions,
       approvals,
@@ -1215,6 +1274,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       setModel,
       timeline,
       pending,
+      say,
       sessions,
       approvals,
       missions,

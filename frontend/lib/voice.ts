@@ -68,6 +68,13 @@ export interface VoiceSession {
   // a transport that queues updates must never drop one. See
   // lib/narration.ts's PendingInjection, and the backend's ALWAYS_SPEAK.
   injectUpdate(text: string, opts?: { blocking?: boolean }): void;
+  // Send a typed message as the USER's own turn — the silent equivalent of
+  // saying it out loud, so the model must both see it and answer it. Distinct
+  // from injectUpdate, which speaks as the system about something that
+  // happened elsewhere. Throws if the transport can't carry it right now:
+  // the composer keeps the user's draft and shows the failure rather than
+  // pretending the text went somewhere.
+  sendText(text: string): void;
   // Mute/unmute the microphone (the agent stops hearing the user).
   setMuted(muted: boolean): void;
 }

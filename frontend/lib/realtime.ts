@@ -221,6 +221,31 @@ export class RealtimeSession implements VoiceSession {
     }
   }
 
+  sendText(text: string): void {
+    if (!this.dc || this.dc.readyState !== "open") {
+      // Loud, not silent: the composer surfaces this to the user. A typed turn
+      // that vanishes is the exact bug this path exists to avoid.
+      throw new Error("Voice isn't connected — reconnect and try again.");
+    }
+    // Role "user", not "system" (injectUpdate's role): this IS the user
+    // speaking, just typed, so it must land in the conversation as their turn
+    // and be answered like one.
+    this.send({
+      type: "conversation.item.create",
+      item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+    });
+    // Creating the item is not enough on this protocol — nothing is generated
+    // until a response is explicitly requested. If one is already in flight,
+    // queue it as blocking: the user is waiting on an answer, so the queue
+    // bound must never evict it (same guarantee a permission ask gets).
+    if (this.responseActive) {
+      enqueueInjection(this.pendingInjections, { text, blocking: true });
+    } else {
+      this.responseActive = true;
+      this.send({ type: "response.create" });
+    }
+  }
+
   private drainPendingInjections(): void {
     if (this.pendingInjections.length === 0 || !this.dc || this.dc.readyState !== "open") return;
     // Narrate exactly ONE queued update per response. Each queued item is
