@@ -1,7 +1,8 @@
 // Run: npm test (node --test)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { INSTRUCTIONS, yuriContextBlock } from "./instructions.ts";
+import { INSTRUCTIONS, capabilityBlock, yuriContextBlock } from "./instructions.ts";
+import { type ToolDef } from "./voice.ts";
 import { CONDUCT } from "./operating.ts";
 
 test("INSTRUCTIONS is who she is, then how she conducts herself", () => {
@@ -123,4 +124,110 @@ test("the context block carries the remembered narration mode", () => {
     const out = yuriContextBlock({ ...base, narration_mode: bad });
     assert.ok(!out.includes("NARRATION MODE"), String(bad));
   }
+});
+
+const tool = (name: string, over: Partial<ToolDef> = {}): ToolDef => ({
+  type: "function", name, description: `Does ${name}. Second sentence that should not appear.`,
+  category: "orchestration", ...over,
+});
+
+test("the capability map renders every tool exactly once", () => {
+  // THE test that matters. A map that can omit a tool is a map that makes her
+  // deny an ability she has; one that can invent a name makes her claim one she
+  // hasn't. Both directions.
+  const tools = [
+    tool("start_session"), tool("tell_claude"),
+    tool("remember", { category: "herself" }),
+    tool("web_search", { category: "own" }),
+    tool("open_app", { category: "macos" }),
+    tool("mystery", { category: "not-a-real-category" }),
+    tool("uncategorised", { category: undefined }),
+  ];
+  const out = capabilityBlock(tools);
+  for (const t of tools) {
+    const hits = out.split("\n").filter((l) => l.startsWith(`- ${t.name}`));
+    assert.equal(hits.length, 1, `${t.name} appears ${hits.length} times`);
+  }
+  // And nothing else looks like a tool line.
+  const listed = out.split("\n").filter((l) => l.startsWith("- ")).length;
+  assert.equal(listed, tools.length, "the map has lines for tools that were not given");
+});
+
+test("an unknown category still renders, under Other", () => {
+  // Silently dropping an unrecognised category is how a tool goes missing.
+  const out = capabilityBlock([tool("mystery", { category: "wat" })]);
+  assert.match(out, /Other:/);
+  assert.match(out, /- mystery/);
+});
+
+test("only the first sentence of a description is rendered", () => {
+  // The personality work moved ~1,500 words onto these descriptions. Rendering
+  // them in full would put all of it back into the system prompt.
+  const out = capabilityBlock([tool("start_session")]);
+  assert.match(out, /Does start_session\./);
+  assert.ok(!out.includes("Second sentence"), "the whole description leaked into the map");
+});
+
+test("a very long first sentence is truncated, visibly", () => {
+  const out = capabilityBlock([tool("x", { description: "a".repeat(400) + "." })]);
+  const line = out.split("\n").find((l) => l.startsWith("- x"))!;
+  assert.ok(line.length < 180, `line is ${line.length} chars`);
+  assert.match(line, /…$/, "truncation must be marked, not silent");
+});
+
+test("a confirm-tier tool is marked, and the marking comes from the tier", () => {
+  const gated = capabilityBlock([tool("cancel_mission", { tier: "confirm" })]);
+  assert.match(gated, /asks first/);
+  // Derived, never written out — so it cannot drift from what the gate enforces.
+  assert.ok(!capabilityBlock([tool("cancel_mission", { tier: "safe" })]).includes("asks first"));
+  assert.ok(!capabilityBlock([tool("cancel_mission")]).includes("asks first"));
+});
+
+test("no tools renders nothing at all", () => {
+  // A failed fetch must not read as "you can do nothing", and must certainly
+  // not read as a heading she should fill in herself.
+  assert.equal(capabilityBlock([]), "");
+  assert.equal(capabilityBlock(undefined as unknown as ToolDef[]), "");
+});
+
+test("the map tells her the list is the truth, not her memory of it", () => {
+  const out = capabilityBlock([tool("start_session")]);
+  assert.match(out, /Never claim an ability that is not on it/);
+});
+
+test("the persona defers to the generated list rather than naming abilities", () => {
+  // The old text was a hand-written list, honest when written and stale the
+  // moment a tool was added.
+  assert.ok(!/Talk, remember things, keep a journal/.test(INSTRUCTIONS));
+  assert.match(INSTRUCTIONS, /generated from the ones you actually have/);
+});
+
+test("an abbreviation does not end the sentence", () => {
+  // set_mode's real description truncated to "…when the user asks (e.g." — the
+  // line said nothing at all. Found by rendering the actual tool list rather
+  // than by a test, which is why this one exists.
+  const out = capabilityBlock([tool("set_mode", {
+    description: "Change a session's permission mode when the user asks (e.g. 'plan mode'). Second sentence.",
+  })]);
+  const line = out.split("\n").find((l) => l.startsWith("- set_mode"))!;
+  assert.match(line, /'plan mode'\)\./);
+  assert.ok(!line.endsWith("(e.g."), "truncated at an abbreviation");
+  assert.ok(!line.includes("Second sentence"));
+});
+
+test("abbreviations do not swallow the whole description either", () => {
+  // The suppression must only apply when the abbreviation is immediately
+  // before the candidate break — otherwise one "e.g." anywhere disables
+  // sentence detection for the rest of the text.
+  const out = capabilityBlock([tool("x", {
+    description: "First (e.g. this) sentence ends here. A second one follows. And a third.",
+  })]);
+  const line = out.split("\n").find((l) => l.startsWith("- x"))!;
+  assert.match(line, /sentence ends here\./);
+  assert.ok(!line.includes("A second one"));
+});
+
+test("a description with no sentence end at all still renders", () => {
+  const out = capabilityBlock([tool("x", { description: "no full stop here" })]);
+  assert.match(out, /- x — no full stop here/);
 });

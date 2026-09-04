@@ -3,6 +3,7 @@
 import { PERSONA } from "./persona.ts";
 import { CONDUCT } from "./operating.ts";
 import { isNarrationMode, type NarrationMode } from "./narration.ts";
+import { type ToolDef } from "./voice.ts";
 
 export const INSTRUCTIONS = PERSONA + "\n\n" + CONDUCT;
 
@@ -72,4 +73,94 @@ export function yuriContextBlock(ctx: YuriContext | null | undefined): string {
   // conversation starter.
   if (missions.length) lines.push("", `WORK RUNNING RIGHT NOW:\n${missions.join("\n")}`);
   return lines.join("\n");
+}
+
+// Display order and headings for the capability map. A category absent from
+// here still renders, under "Other" — the map must never silently drop a tool,
+// because a tool she cannot see is an ability she will deny having.
+const CATEGORY_LABELS: [string, string][] = [
+  ["herself", "Things you do yourself"],
+  ["own", "Things you can find out or do directly"],
+  ["macos", "Things you can do to this computer"],
+  ["orchestration", "Running the coding agents"],
+];
+
+/** The first sentence of a tool description, capped.
+ *
+ *  Only the first sentence, deliberately: the personality work moved ~1,500
+ *  words of per-tool guidance onto these descriptions, and rendering them in
+ *  full here would put all of it straight back into the system prompt and
+ *  undo that. The full text still reaches the model through the function
+ *  declarations — this map only has to be scannable. */
+// Periods that are not sentence ends. Without these, `set_mode`'s description
+// truncated to "…when the user asks (e.g." — the abbreviation's full stop read
+// as the end of the sentence, and the resulting line said nothing at all.
+const NOT_A_SENTENCE_END = /(?:\be\.g|\bi\.e|\betc|\bvs|\bapprox|\bmin|\bmax|\bDr|\bMr|\bMs|\bSt|\bNo)\.$/i;
+
+function firstSentence(text: string, max = 130): string {
+  const flat = (text || "").replace(/\s+/g, " ").trim();
+  let one = flat;
+  // Walk candidate sentence ends and take the first that is not an
+  // abbreviation. Anchored to the END of the candidate so "e.g." only
+  // suppresses the break when it is the thing immediately before it.
+  const re = /[.!?](?=\s|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(flat)) !== null) {
+    const candidate = flat.slice(0, m.index + 1);
+    if (!NOT_A_SENTENCE_END.test(candidate)) {
+      one = candidate;
+      break;
+    }
+  }
+  return one.length > max ? one.slice(0, max - 1).trimEnd() + "…" : one;
+}
+
+/** What she can actually do right now, derived from the tools she was given.
+ *
+ *  Her persona used to carry a hand-written list ("Talk, remember things, keep
+ *  a journal, and run the coding agents") which was honest when written and
+ *  went stale the moment a tool was added. This is built from the SAME payload
+ *  both transports hand the model (`fetch("/api/tools")` in realtime.ts and
+ *  gemini.ts), so the prose describing her abilities and the declarations
+ *  enabling them are one list rendered twice — there is no second source to
+ *  drift.
+ *
+ *  Returns "" for an empty list rather than a heading with nothing under it: a
+ *  failed fetch must not read as "you can do nothing", and it must certainly
+ *  not read as a list she should invent entries for.
+ */
+export function capabilityBlock(tools: ToolDef[]): string {
+  if (!tools || tools.length === 0) return "";
+
+  const byCategory = new Map<string, ToolDef[]>();
+  for (const t of tools) {
+    const key = t.category || "other";
+    byCategory.set(key, [...(byCategory.get(key) || []), t]);
+  }
+
+  const line = (t: ToolDef) => {
+    // Derived from the tier, never written out, so the marking cannot drift
+    // from what the gate actually enforces.
+    const asks = t.tier === "confirm" ? " (asks first — you get one chance to read it back)" : "";
+    const what = firstSentence(t.description || "");
+    return `- ${t.name}${asks}${what ? ` — ${what}` : ""}`;
+  };
+
+  const out: string[] = [
+    "",
+    "",
+    "WHAT YOU CAN DO RIGHT NOW:",
+    "This list is generated from the tools you actually have. Never claim an ability that is not on it, and never apologise for one that is.",
+  ];
+
+  for (const [key, label] of CATEGORY_LABELS) {
+    const list = byCategory.get(key);
+    if (!list?.length) continue;
+    out.push("", `${label}:`, ...list.map(line));
+    byCategory.delete(key);
+  }
+  // Anything with an unrecognised category still gets rendered.
+  const rest = [...byCategory.values()].flat();
+  if (rest.length) out.push("", "Other:", ...rest.map(line));
+  return out.join("\n");
 }

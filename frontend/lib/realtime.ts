@@ -264,7 +264,12 @@ export class RealtimeSession implements VoiceSession {
     const session: Record<string, unknown> = {
       type: "realtime",
       instructions: this.opts.instructions,
-      tools: this.tools,
+      // Our own fields (tier, category) are unknown properties to the
+      // Realtime API — the confirmation gate reads one and the capability map
+      // reads the other, and neither belongs in a function schema.
+      tools: this.tools.map((t) => ({
+        type: t.type, name: t.name, description: t.description, parameters: t.parameters,
+      })),
       tool_choice: "auto",
       // Lock output to audio. Left unset, the model sometimes emits a text-only
       // message item within a response (e.g. an audio preamble item followed by

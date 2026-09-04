@@ -37,6 +37,7 @@ import {
 } from "@/lib/voice";
 import {
   INSTRUCTIONS,
+  capabilityBlock,
   yuriContextBlock,
   // Aliased: lib/instructions.ts already exports a type named `YuriContext`
   // (the connect-time snapshot of home/memory/journal/missions/agents) which
@@ -60,6 +61,7 @@ import {
 import { nextUnanswered, pollVerdict, type ToolEnvelope } from "@/lib/polling";
 import { type TimelineItem } from "@/lib/timeline";
 import { type Sess } from "@/lib/sessions";
+import { type ToolDef } from "@/lib/voice";
 import { MODEL_OPTIONS, connectionParams, PROVIDER_LABEL } from "@/lib/voiceui";
 import { canTypeToProvider } from "@/lib/compose";
 import type { DebugEvent } from "./ActivityFeed";
@@ -1050,10 +1052,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     } catch {
       logDebug("error", "yuri context unavailable at connect", undefined, "voice", "backend");
     }
+    // The tools she is about to be given, fetched here so the capability map in
+    // her instructions is built from the SAME payload the transport hands the
+    // model — one list rendered twice, with no second source to drift. The
+    // transports fetch it again for the declarations themselves; that costs one
+    // extra request against localhost and buys the guarantee.
+    let toolDefs: ToolDef[] = [];
+    try {
+      const r = await fetch("/api/tools", { headers: authHeaders() });
+      if (r.ok) toolDefs = (await r.json()).tools || [];
+    } catch {
+      // Empty renders no map at all rather than a wrong one. She then falls
+      // back to describing herself from the persona, which says her tools are
+      // listed below — honest about not knowing beats inventing a list.
+      logDebug("error", "tool list unavailable at connect", undefined, "voice", "backend");
+    }
+
     const params = connectionParams(provider, model);
     const opts: RealtimeOptions = {
       ...params,
-      instructions: INSTRUCTIONS + dynamicContext(snapshot) + yuriContextBlock(yuriCtx),
+      instructions: INSTRUCTIONS + dynamicContext(snapshot) + yuriContextBlock(yuriCtx)
+                    + capabilityBlock(toolDefs),
       backend,
       onEvent,
       onDebug: (msg) => logDebug("info", `transport: ${msg}`, undefined, "voice", "backend"),

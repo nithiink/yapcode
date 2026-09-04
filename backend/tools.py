@@ -46,46 +46,101 @@ _last_start: dict[str, Any] | None = None
 # inside the window, goes through. A model that calls twice blindly does not
 # have the token, and one that invents a token is refused — the arm lives here,
 # not in anything the model can assert.
-CANCEL_CONFIRM_SECS = 120.0
-_pending_cancel: dict[str, Any] | None = None
+# --- the confirmation gate -------------------------------------------------
+#
+# A tool declares `"tier": "confirm"` and the gate below is what makes that
+# declaration mean something. Borrowed from ~/projects/project-yuri, which
+# declares a permissionTier on all ~35 of its tools — and enforces it nowhere:
+# the whole gate there is a console.log reminding the daemon that the model
+# SHOULD have asked (apps/daemon/src/agents/tool-agent.ts:728-732), so the
+# protection is a sentence in a prompt. That is the exact mechanism that
+# failed here on 2026-09-04, when cancel_mission's description said "confirm
+# with the user first" and Yuri cancelled a mission nobody had named.
+#
+# ON PLACEMENT, honestly: this is not a central interceptor and cannot be.
+# The arm has to be keyed on the tool's RESOLVED TARGET — a token armed for
+# one mission must not cancel another — and only the tool knows how to resolve
+# a spoken reference into an id. So the mechanism is shared and the call site
+# is inside the tool, after resolution. What IS central is the enforcement
+# that the call happened at all: `_confirm_consulted` is set by the gate and
+# checked by dispatch_tool, so a confirm-tier tool that forgets to consult it
+# raises instead of quietly running ungated.
+CONFIRM_SECS = 120.0
+_pending_confirm: dict[str, Any] | None = None
+_confirm_consulted: bool = False
 
 
-def _arm_cancel(mission_id: str) -> str:
-    global _pending_cancel
-    token = secrets.token_hex(3)
-    _pending_cancel = {"ts": time.monotonic(), "mission_id": mission_id, "token": token}
-    return token
+def _confirm_gate(tool: str, target: str, token: str | None) -> str | None:
+    """Consult the gate for `tool` acting on `target`.
+
+    Returns None when the caller may proceed, or a fresh token to read back to
+    the user when it may not. Single use: the pending arm is consumed whether
+    or not it matched, so a wrong guess cannot be retried against a still-live
+    arm.
+    """
+    global _pending_confirm, _confirm_consulted
+    _confirm_consulted = True
+    pending, _pending_confirm = _pending_confirm, None
+
+    if (token and pending
+            and time.monotonic() - pending["ts"] <= CONFIRM_SECS
+            and pending["tool"] == tool
+            and pending["target"] == target
+            and secrets.compare_digest(str(pending["token"]), str(token))):
+        return None
+
+    fresh = secrets.token_hex(3)
+    _pending_confirm = {"ts": time.monotonic(), "tool": tool,
+                        "target": target, "token": fresh}
+    return fresh
 
 
-def _cancel_is_confirmed(mission_id: str, token: str | None) -> bool:
-    """True iff `token` is the live arm for exactly this mission. Single use:
-    consumed whether or not it matched, so a wrong guess cannot be retried
-    against a still-valid arm."""
-    global _pending_cancel
-    pending, _pending_cancel = _pending_cancel, None
-    if not pending or not token:
-        return False
-    if time.monotonic() - pending["ts"] > CANCEL_CONFIRM_SECS:
-        return False
-    return pending["mission_id"] == mission_id and secrets.compare_digest(
-        str(pending["token"]), str(token))
+# The keys a realtime provider's function schema actually accepts. `tier` and
+# `category` are OURS — the gate reads one and the capability map reads the
+# other — and both are unknown properties to the API. Azure bakes tools in at
+# mint time and OpenAI takes them in session.update; either would be sending
+# fields it did not ask for, so every path to a provider strips them here.
+# Gemini is unaffected (frontend/lib/gemini.ts maps name/description/parameters
+# explicitly), but it goes through the same helper so there is one answer.
+_MODEL_KEYS = ("type", "name", "description", "parameters")
+
+
+def tools_for_model() -> list[dict[str, Any]]:
+    """TOOL_DEFINITIONS with our own bookkeeping fields removed."""
+    return [{k: v for k, v in d.items() if k in _MODEL_KEYS} for d in TOOL_DEFINITIONS]
+
+
+def tier_of(name: str) -> str:
+    """A tool's declared tier. Absent means "safe" — the common case, and the
+    right default for a field being added to 23 existing tools."""
+    for d in TOOL_DEFINITIONS:
+        if d.get("name") == name:
+            return str(d.get("tier") or "safe")
+    return "safe"
+
+
+def confirm_tools() -> list[str]:
+    return [str(d["name"]) for d in TOOL_DEFINITIONS if (d.get("tier") or "safe") == "confirm"]
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "list_projects",
+        "category": "orchestration",
         "description": "List the project directories available to work in (allowed roots and their subfolders). Call this when the user names a folder vaguely or you don't know the absolute path — then pick or confirm one of these instead of asking the user for a full path.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
         "type": "function",
         "name": "list_sessions",
+        "category": "orchestration",
         "description": "List the Claude Code sessions currently running on this machine, with their human-readable name, project directory, and status. Each session also reports its work pipeline: `running` (a turn is executing right now), `queued` (how many follow-up turns are waiting behind the current one), and `pending` (finished turns not yet narrated). Use these to answer 'is it still working?' or 'what's queued on the billing session?'. Use the names here to refer to sessions in other calls. A session whose status is needs_permission or needs_choice includes the full pending prompt under `prompt` (for plan approvals this contains the entire plan) — use it to tell the user what's being asked, then respond with answer_prompt. Sessions open when you connected are listed in your context, but that list goes stale — call this for live status or when time has passed. IN QUIET MODE there is no update when a session merely finishes (only problems, permissions and questions arrive), so do not say \"I'll let you know\" and then wait for something that will not come: acknowledge, then call this or read_session when you or the user want to know where the work got to.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
         "type": "function",
         "name": "start_session",
+        "category": "orchestration",
         "description": "Start a new interactive Claude Code session in a project directory. Returns the session's name and id — you can refer to it by either in later calls. The project_path may be a folder name (e.g. 'Development' or a project name) — it's resolved against the allowed roots. If the user is vague about location, omit it to use the default root, or call list_projects first. CALL THIS ONCE per session the user asked for. If you asked them for details (project, name) and the answer arrives after you already called this, do NOT call it again — apply the answer to the session you just made (rename_session for a name, set_mode for a mode). Only call it again when the user explicitly wants an additional separate session, and pass another=true if that is within a few seconds of the last one. If a session is already running for what they want, reuse it with tell_claude instead. NAME IT: every session has a short human-readable name (\"jarvis\", \"billing fix\"); if the user names the work, pass a fitting name, and always refer to sessions by name rather than by id. PROJECT PATH: never repeatedly ask for an absolute path. Pass a plain folder name (\"Development\", a project name) and it is resolved against the allowed roots; if the user is vague (\"anywhere\", \"my dev folder\") omit project_path to use the default root, or call list_projects and pick the likeliest. Only if resolution fails, read back the names from list_projects and ask them to choose. AGENTS: more than one coding agent may be available; the AGENTS list in your context says which were online at connect and there is no tool to re-check, so answer from it and say it was accurate then. Claude Code is the default. \"Use OpenCode\" means passing agent=\"opencode\". Never silently switch agents: if the one they asked for was offline, say so and offer the one that is up.",
         "parameters": {
             "type": "object",
@@ -128,6 +183,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "rename_session",
+        "category": "orchestration",
         "description": "Give a Claude session a new human-readable name (or rename one) so it's easy to identify and refer to. Use when the user says things like 'call this one jarvis', 'rename the billing session', or 'name it X'. The name must be unique among active sessions. You can pass a name anywhere a session_id is expected, so a renamed session stays addressable by its new name.",
         "parameters": {
             "type": "object",
@@ -141,6 +197,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "list_slash_commands",
+        "category": "orchestration",
         "description": "List the slash commands available in a Claude session — built-ins (/init, /review, /clear, /model, /compact, …), user skills and plugin skills (e.g. /kb-query, /search-chat-history, /frontend-design), and any project-local commands. Call this when the user asks 'what commands are available?' or you need to find the right command for a request. If you pass session_id, the result also includes that session's project-local commands.",
         "parameters": {
             "type": "object",
@@ -153,6 +210,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "run_slash_command",
+        "category": "orchestration",
         "description": "Invoke a Claude Code slash command in a session — a skill or built-in like /init, /review, /security-review, /verify, /compact, /clear, or any user/plugin/project command. Use when the user asks for something that maps cleanly to a command, e.g. 'initialize this project' (/init), 'review the diff' (/review), 'do a security review' (/security-review), 'compact the context' (/compact), 'call /kb-query about X'. For freeform engineering work prefer tell_claude. Use list_slash_commands first if unsure what's available. Returns immediately with status 'working'; you'll be told the result automatically. Prefer this over freeform tell_claude when the request maps cleanly to a command — \"initialize this project\" (init), \"review the diff\" (review), \"do a security review\", \"compact the context\", \"verify this change works\", or a user/plugin command like /kb-query. Pass the command WITHOUT the leading slash. If you are unsure what exists, call list_slash_commands first.",
         "parameters": {
             "type": "object",
@@ -167,6 +225,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "tell_claude",
+        "category": "orchestration",
         "description": "Send a message/instruction to a Claude session. Returns immediately with status 'working' — Claude runs in the background, which can take minutes. Do NOT wait silently: give a brief spoken acknowledgement ('On it, I'll let you know') and stay available to chat. You will be told automatically when Claude finishes, asks a question, or needs permission — do not call this again to check progress. Reuse an existing session with this rather than starting a second one for the same work.",
         "parameters": {
             "type": "object",
@@ -180,6 +239,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "answer_prompt",
+        "category": "orchestration",
         "description": "Answer a pending permission or question prompt from Claude (after you were told Claude needs permission or is asking a question). For permissions pass 'allow' or 'deny'. For questions pass the chosen option text. Call it at most ONCE per prompt — it fails if the prompt was already answered or resolved by a mode switch (that's fine, don't retry). If the user wants to allow AND switch to auto/acceptEdits, call only set_mode — it approves the covered pending prompt itself. Returns 'working' immediately; Claude resumes in the background and you'll be told the result automatically. Before calling for a permission request, TELL the user what the agent wants (\"Claude wants to run rm hello.txt — approve?\") and wait for their answer. Never answer on their behalf.",
         "parameters": {
             "type": "object",
@@ -196,6 +256,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "interrupt_session",
+        "category": "orchestration",
         "description": "Stop Claude mid-task in a session (like pressing Escape). Use when the user says 'stop' or 'cancel'. If they are done with the session entirely (\"close it\", \"end that session\"), use close_session instead.",
         "parameters": {
             "type": "object",
@@ -208,6 +269,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "set_mode",
+        "category": "orchestration",
         "description": "Change a Claude session's permission mode when the user asks (e.g. 'switch to plan mode', 'turn on auto', 'accept edits', 'go back to normal'). Modes: 'default' (Claude asks before risky actions and you relay allow/deny by voice), 'plan' (Claude only plans, makes NO edits or commands), 'acceptEdits' (file edits auto-apply, other risky actions still asked), 'auto' (Claude runs everything without asking — no voice approval). Returns the mode now in effect. If a permission prompt is pending and the new mode would auto-approve that tool (auto: anything; acceptEdits: file edits), the prompt is approved automatically and the session continues — the result message says which happened, so relay it. So when the user asks to allow a prompt AND switch modes, call ONLY set_mode (no answer_prompt); only answer_prompt separately if the result says the prompt is still pending. If a permission prompt is pending AND they want to allow it and switch to auto/acceptEdits (\"allow that and switch to auto\"), call ONLY this — it auto-approves the covered prompt; do NOT also call answer_prompt, unless this tool's result says the prompt is still pending. In auto/acceptEdits you get fewer permission prompts by design; that is expected, not a fault. If you are unsure what is on screen, call peek_screen.",
         "parameters": {
             "type": "object",
@@ -221,6 +283,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "close_session",
+        "category": "orchestration",
         "description": "Permanently end and close a Claude session — kills its terminal/process and frees it. Use when the user says they're done with a session, says 'close it' / 'end the session' / 'shut it down', or wants to clean up. This is different from interrupt_session (which only stops the current task but keeps the session open). The session_id becomes unusable afterward.",
         "parameters": {
             "type": "object",
@@ -231,6 +294,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "read_session",
+        "category": "orchestration",
         "description": "Re-read the latest accumulated text from a Claude session (e.g. if the user asks 'what did it say again?').",
         "parameters": {
             "type": "object",
@@ -241,6 +305,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "peek_screen",
+        "category": "orchestration",
         "description": "Look at what's currently on the Claude session's terminal screen right now — the live view, including menus, prompts, spinners, and in-progress output. Use this when you're unsure what state the session is in, the user asks 'what's on the screen?' or 'what is it doing?', or a prompt/answer didn't go through as expected. This is a visual snapshot (older output may have scrolled off); for the full conversation use read_session instead. A session may be driven by the user typing in their own terminal at the same time as you — you are not necessarily the only input. If a reply seems out of sync, or you are unsure what just happened, call this or read_session to see the current state rather than talking over them mid-action.",
         "parameters": {
             "type": "object",
@@ -251,6 +316,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "get_handoff",
+        "category": "orchestration",
         "description": "Get the terminal command(s) to take a Claude session over by keyboard. Returns two options: attach_command (`tmux attach …`) to co-drive the SAME live session — the user types while you keep talking, both at once — and resume_command (`claude --resume …`) to take it over solo in a separate terminal. Offer attach_command when the user wants to type alongside voice; resume_command when they want to leave voice and continue by keyboard only.",
         "parameters": {
             "type": "object",
@@ -261,6 +327,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "send_keys",
+        "category": "orchestration",
         "description": (
             "ESCAPE HATCH — send raw keystrokes straight to a Claude session's terminal. "
             "Use only when the dedicated tools (tell_claude, answer_prompt, "
@@ -299,6 +366,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "mute",
+        "category": "herself",
         "description": (
             "Mute your own microphone in the user interface so you stop listening to "
             "the user. Call this ONLY when the user asks you to stop LISTENING — "
@@ -314,6 +382,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "remember",
+        "category": "herself",
         "description": "Store a durable fact in Yuri's memory (~/Yuri/memory). Use it when the user states a preference, corrects you, or says 'remember this'. Pass project to file it under that project's notes instead of the user's. One sentence; add project when it is about a specific project. Do not ask permission to remember ordinary preferences — do it and say so briefly (\"Noted.\").",
         "parameters": {
             "type": "object",
@@ -327,6 +396,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "set_narration",
+        "category": "herself",
         "description": "Change how much you narrate. 'quiet' = only problems and things needing the user's answer; 'normal' = meaningful progress; 'verbose' = every tool and cost update too. Call this when the user says 'be quiet', 'stop narrating', 'less', 'tell me everything', or 'go back to normal'. 'Be quiet' means talk less, NOT stop listening — never call mute for it. The setting is remembered. \"Be quiet\", \"stop narrating\", \"less\" → quiet. \"Tell me everything\", \"more detail\" → verbose. \"Normal\" → normal. It is remembered between conversations, so if it is already quiet do not apologise for being quiet — that is what they asked for.",
         "parameters": {
             "type": "object",
@@ -337,6 +407,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "list_missions",
+        "category": "orchestration",
         "description": "List Yuri's missions — the units of work. Call this when the user asks what's running, what you're working on, or what happened. Omit status for the active ones; pass a status to filter (running, waiting_for_approval, paused, completed, failed, cancelled). Only the most recently updated missions are returned. Prefer this over list_sessions: a mission is the unit of work and a session is one agent inside it, and missions are what the user means. Refer to them by title.",
         "parameters": {
             "type": "object",
@@ -347,6 +418,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "mission_status",
+        "category": "orchestration",
         "description": "Details of one mission: its goal, status, which agents are on it, its sessions and any pending approval. Omit mission to mean the one active mission.",
         "parameters": {
             "type": "object",
@@ -357,6 +429,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "pause_mission",
+        "category": "orchestration",
         "description": "Pause a mission, interrupting any agent currently working on it. Use this for 'pause that', 'hold on', or 'stop the payment one'. Omit mission to mean the one active mission. Resume it later with resume_mission.",
         "parameters": {
             "type": "object",
@@ -367,6 +440,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "resume_mission",
+        "category": "orchestration",
         "description": "Resume a paused mission. Omit mission to mean the one active mission. Resuming does not itself give the agent new instructions — use tell_claude for that.",
         "parameters": {
             "type": "object",
@@ -377,6 +451,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "cancel_mission",
+        # Irreversible-ish: it ends work and stops running agents. The tier is
+        # what wires the gate; see _confirm_gate.
+        "tier": "confirm",
+        "category": "orchestration",
         "description": ("Cancel a mission and stop its agents. This ends the work. It takes TWO "
                         "calls: call it once WITHOUT confirm to find out exactly what would be "
                         "cancelled, read that back to the user and wait for them to agree, then "
@@ -443,6 +521,24 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     # speak" cannot silently go stale — see yuri/app.py's SETTINGS_LAST_SPOKE
     # for why this rather than a disconnect hook.
     stamp_last_spoke()
+
+    global _confirm_consulted
+    _confirm_consulted = False
+    try:
+        return await _dispatch(name, args)
+    finally:
+        # The central half of the gate. A tool declaring tier="confirm" that
+        # returns without consulting _confirm_gate has run ungated, which is
+        # the whole failure this mechanism exists to prevent — and a silent
+        # version of it is worse than none, because the declaration reads as
+        # protection. Raise, loudly, rather than let it pass.
+        if tier_of(name) == "confirm" and not _confirm_consulted:
+            raise AssertionError(
+                f"{name} declares tier=\"confirm\" but did not consult "
+                "_confirm_gate — it ran without a confirmation")
+
+
+async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     if name == "list_projects":
         return container().projects.list()
@@ -634,9 +730,9 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "cancel_mission":
         c = container()
         m = c.missions.resolve(args.get("mission", ""))
-        if not _cancel_is_confirmed(m.id, args.get("confirm")):
+        token = _confirm_gate("cancel_mission", m.id, args.get("confirm"))
+        if token is not None:
             live = c.missions.live_sessions(m.id)
-            token = _arm_cancel(m.id)
             title = clip_speech(m.title, TITLE_SPEECH_MAX)
             agents = (f" and stop {len(live)} running agent"
                       f"{'s' if len(live) != 1 else ''}") if live else ""

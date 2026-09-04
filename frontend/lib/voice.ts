@@ -10,6 +10,12 @@ export type ToolDef = {
   name: string;
   description?: string;
   parameters?: Record<string, unknown>;
+  // Ours, not the API's — both are stripped before the definitions reach a
+  // provider (see realtime.ts's session.update and the backend's
+  // tools_for_model). `tier` drives the confirmation gate; `category` groups
+  // the capability map in lib/instructions.ts.
+  tier?: "safe" | "confirm";
+  category?: string;
 };
 
 export type VoiceState =

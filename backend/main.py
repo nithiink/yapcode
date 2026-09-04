@@ -35,7 +35,7 @@ import config
 import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
 from tmux_runner import validate_session_id
-from tools import TOOL_DEFINITIONS, dispatch_tool
+from tools import TOOL_DEFINITIONS, dispatch_tool, tools_for_model
 from yuri import app as yuri_app
 from yuri.api.routes import build_router
 from yuri.providers.base import ProviderUnavailable
@@ -344,7 +344,7 @@ def _mint_config(
         # stays minimal.
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
-            "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
+            "tools": tools_for_model(), "tool_choice": "auto",
             # Lock output to audio so the model never emits a text-only message
             # item that goes unspoken. Azure binds config at mint time and
             # ignores the client session.update, so it MUST be set here (the

@@ -295,10 +295,10 @@ class CancelMissionNeedsConfirmingTests(ToolsDispatch):
 
     def setUp(self):
         super().setUp()
-        tools._pending_cancel = None
+        tools._pending_confirm = None
 
     def tearDown(self):
-        tools._pending_cancel = None
+        tools._pending_confirm = None
         super().tearDown()
 
     async def _mission(self, title="billing fix"):
@@ -366,7 +366,7 @@ class CancelMissionNeedsConfirmingTests(ToolsDispatch):
         import tools as tools_mod
         mid = await self._mission()
         armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
-        tools_mod._pending_cancel["ts"] -= tools_mod.CANCEL_CONFIRM_SECS + 1
+        tools_mod._pending_confirm["ts"] -= tools_mod.CONFIRM_SECS + 1
         out = await tools.dispatch_tool("cancel_mission",
                                                             {"mission": "billing fix", "confirm": armed["confirm"]})
         self.assertIs(out["cancelled"], False)
@@ -379,3 +379,91 @@ class CancelMissionNeedsConfirmingTests(ToolsDispatch):
         out = await tools.dispatch_tool("pause_mission", {"mission": "billing fix"})
         self.assertEqual(self.c.missions.get(mid).status, "paused")
         self.assertNotIn("confirm", out)
+
+
+class TheTierGateIsEnforcedNotJustDeclaredTests(ToolsDispatch):
+    """`tier` has to mean something.
+
+    Borrowed from project-yuri, which declares a permissionTier on all ~35 of
+    its tools and enforces it nowhere: the whole gate there is a console.log
+    reminding the daemon that the model *should* have asked
+    (apps/daemon/src/agents/tool-agent.ts:728-732). A declaration that reads as
+    protection and isn't is worse than no declaration, and it is the exact
+    mechanism that let Yuri cancel a mission nobody named.
+    """
+
+    def setUp(self):
+        super().setUp()
+        tools._pending_confirm = None
+
+    def tearDown(self):
+        tools._pending_confirm = None
+        super().tearDown()
+
+    def test_every_tool_declares_a_known_tier(self):
+        for d in tools.TOOL_DEFINITIONS:
+            tier = d.get("tier", "safe")
+            self.assertIn(tier, ("safe", "confirm"), d["name"])
+
+    def test_the_destructive_tool_is_the_confirm_tier_one(self):
+        # If this list grows, that is a decision someone should have to make
+        # deliberately — the tier is where irreversibility gets declared.
+        self.assertEqual(tools.confirm_tools(), ["cancel_mission"])
+
+    def test_tier_of_defaults_to_safe_including_for_an_unknown_name(self):
+        self.assertEqual(tools.tier_of("list_projects"), "safe")
+        self.assertEqual(tools.tier_of("no_such_tool"), "safe")
+
+    async def test_a_confirm_tool_that_skips_the_gate_raises(self):
+        """The central half. A confirm-tier tool whose handler forgets to
+        consult the gate must fail loudly, not run ungated — a silent version
+        of this bug is the one that ships."""
+        original = tools.TOOL_DEFINITIONS
+
+        async def ungated(name, args):
+            return {"ok": "ran without asking anyone"}
+
+        with mock.patch.object(tools, "_dispatch", ungated):
+            with self.assertRaises(AssertionError) as ctx:
+                await tools.dispatch_tool("cancel_mission", {})
+        self.assertIn("cancel_mission", str(ctx.exception))
+        self.assertIn("confirm", str(ctx.exception))
+        self.assertIs(tools.TOOL_DEFINITIONS, original)
+
+    async def test_a_safe_tool_needs_no_gate_and_is_not_flagged(self):
+        # The enforcement must not turn every tool into a two-step.
+        out = await tools.dispatch_tool("list_projects", {})
+        self.assertIsInstance(out, dict)
+
+    async def test_the_gate_is_reset_per_call_so_one_consult_cannot_cover_two(self):
+        # Without the per-call reset, a confirm tool consulted once would leave
+        # the flag set and the NEXT ungated call would pass the check.
+        mid = await self._mission("billing fix")
+        await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+
+        async def ungated(name, args):
+            return {"ok": True}
+
+        with mock.patch.object(tools, "_dispatch", ungated):
+            with self.assertRaises(AssertionError):
+                await tools.dispatch_tool("cancel_mission", {})
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def test_an_arm_for_one_tool_cannot_be_spent_on_another(self):
+        # The gate is keyed on (tool, target). Keying it on the target alone
+        # would let a token armed by one tool authorise a different one.
+        mid = await self._mission("billing fix")
+        armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        # The gate returns None to mean "proceed" and a fresh token to mean
+        # "refused, read this back". A token armed by cancel_mission must not
+        # authorise a different tool acting on the same target.
+        refused = tools._confirm_gate("some_other_tool", mid, armed["confirm"])
+        self.assertIsNotNone(refused,
+                             "a token armed by cancel_mission authorised another tool")
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def _mission(self, title="billing fix"):
+        tools._last_start = None
+        out = await tools.dispatch_tool("start_session",
+                                        {"project_path": "proj", "name": title})
+        return out["mission_id"]
