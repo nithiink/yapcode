@@ -15,6 +15,7 @@ import { ViewError } from "@/components/ViewError";
 import LiveTerminal from "@/components/LiveTerminal";
 import { Icon } from "@/components/ui/Icon";
 import { CopyBtn } from "@/components/ui/CopyBtn";
+import { Portal } from "@/components/ui/Portal";
 import { sessionLabel } from "@/lib/sessions";
 import { ypost, ApiError } from "@/lib/api";
 
@@ -315,17 +316,19 @@ export default function Page() {
       )}
 
       {fullscreen && openSession && (
-        <div className="tx-overlay" onClick={() => setFullscreen(false)}>
-          <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="tx-modal-head">
-              <span>Claude session transcript</span>
-              <button className="txtoggle" onClick={() => setFullscreen(false)}>
-                Close <Icon name="close" size={13} />
-              </button>
+        <Portal>
+          <div className="tx-overlay" onClick={() => setFullscreen(false)}>
+            <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="tx-modal-head">
+                <span>Claude session transcript</span>
+                <button className="txtoggle" onClick={() => setFullscreen(false)}>
+                  Close <Icon name="close" size={13} />
+                </button>
+              </div>
+              <div className="tx-modal-body">{renderTimeline(transcript)}</div>
             </div>
-            <div className="tx-modal-body">{renderTimeline(transcript)}</div>
           </div>
-        </div>
+        </Portal>
       )}
 
       {liveFullscreen &&
@@ -342,65 +345,67 @@ export default function Page() {
           const attachLoading = !!handoffLoading[liveSession];
           const liveName = liveSess ? sessionLabel(liveSess) : "Live Claude CLI";
           return (
-            <div
-              className="tx-overlay"
-              onClick={() => {
-                setLiveFullscreen(false);
-                setAttachOpen(false);
-              }}
-            >
-              <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="tx-modal-head">
-                  <span>{liveName}</span>
-                  <div className="tx-head-actions">
-                    {canAttach && (
+            <Portal>
+              <div
+                className="tx-overlay"
+                onClick={() => {
+                  setLiveFullscreen(false);
+                  setAttachOpen(false);
+                }}
+              >
+                <div className="tx-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="tx-modal-head">
+                    <span>{liveName}</span>
+                    <div className="tx-head-actions">
+                      {canAttach && (
+                        <button
+                          className="attachbtn"
+                          title="Attach to this session in your own terminal"
+                          aria-expanded={attachOpen}
+                          onClick={() => {
+                            const next = !attachOpen;
+                            setAttachOpen(next);
+                            if (next) void fetchHandoff(liveSession);
+                          }}
+                        >
+                          <Icon name="keyboard" size={16} strokeWidth={1.75} />
+                          Attach in your terminal
+                        </button>
+                      )}
                       <button
-                        className="attachbtn"
-                        title="Attach to this session in your own terminal"
-                        aria-expanded={attachOpen}
+                        className="txtoggle"
                         onClick={() => {
-                          const next = !attachOpen;
-                          setAttachOpen(next);
-                          if (next) void fetchHandoff(liveSession);
+                          setLiveFullscreen(false);
+                          setAttachOpen(false);
                         }}
                       >
-                        <Icon name="keyboard" size={16} strokeWidth={1.75} />
-                        Attach in your terminal
+                        Close <Icon name="close" size={13} />
                       </button>
-                    )}
-                    <button
-                      className="txtoggle"
-                      onClick={() => {
-                        setLiveFullscreen(false);
-                        setAttachOpen(false);
-                      }}
-                    >
-                      Close <Icon name="close" size={13} />
-                    </button>
-                  </div>
-                </div>
-                {attachOpen && canAttach && (
-                  <div className="attach-pop">
-                    <div className="ap-title">Open in your terminal</div>
-                    <div className="ap-why">
-                      Attach to this session&apos;s tmux in your own terminal for a full native session — keyboard
-                      shortcuts, copy-paste, and scrollback.
                     </div>
-                    {attachLoading ? (
-                      <div className="cmdfield">Asking the backend for its pane…</div>
-                    ) : attachCmd ? (
-                      <div className="cmdfield">
-                        <code>{attachCmd}</code>
-                        <CopyBtn text={attachCmd} />
-                      </div>
-                    ) : null /* fetched and no live pane — never a guessed command */}
                   </div>
-                )}
-                <div className="tx-modal-body term">
-                  <LiveTerminal handle={liveSession} />
+                  {attachOpen && canAttach && (
+                    <div className="attach-pop">
+                      <div className="ap-title">Open in your terminal</div>
+                      <div className="ap-why">
+                        Attach to this session&apos;s tmux in your own terminal for a full native session — keyboard
+                        shortcuts, copy-paste, and scrollback.
+                      </div>
+                      {attachLoading ? (
+                        <div className="cmdfield">Asking the backend for its pane…</div>
+                      ) : attachCmd ? (
+                        <div className="cmdfield">
+                          <code>{attachCmd}</code>
+                          <CopyBtn text={attachCmd} />
+                        </div>
+                      ) : null /* fetched and no live pane — never a guessed command */}
+                    </div>
+                  )}
+                  <div className="tx-modal-body term">
+                    <LiveTerminal handle={liveSession} />
+                  </div>
                 </div>
               </div>
-            </div>
+            </Portal>
           );
         })()}
     </div>

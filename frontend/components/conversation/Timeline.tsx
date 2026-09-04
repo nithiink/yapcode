@@ -27,7 +27,7 @@ function renderConversation(
     if (item.kind === "turn") {
       nodes.push(
         <div key={`turn-${i}`} className={`bubble ${item.role}`}>
-          <div className="who">{item.role === "user" ? "You" : "Assistant"}</div>
+          <div className="who">{item.role === "user" ? "You" : "Yuri"}</div>
           {item.text}
         </div>,
       );

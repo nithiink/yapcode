@@ -116,6 +116,17 @@ export default function Page() {
           Add project
         </button>
       </form>
+      {/* This does not create a folder -- resolve_project_path (backend) requires
+          the path to already exist under an allowed root and rejects it otherwise.
+          The rows below already list every such folder with its own Register
+          button; typing the path here instead is only worth it to set the name at
+          the same moment you register, which is why the field order is path then
+          name. Say that plainly rather than let the form imply it makes folders. */}
+      <p className="togglehint">
+        The folder must already exist under an allowed project root. Registering
+        doesn&apos;t create it — it names it and lets you set its agent and
+        verification commands.
+      </p>
       {createError && <div className="apr-error">{createError}</div>}
 
       {loadError ? (
