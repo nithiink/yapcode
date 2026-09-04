@@ -70,16 +70,33 @@ export function sphere(n: number): [number, number, number][] {
  *  costing the user time; making `working` pulse too would spend the signal on
  *  the state they are happy to leave alone. Hue stays hers in every state — a
  *  provider colour on the orb would make her look like a session. */
+/** Yuri's colour on the canvas.
+ *
+ *  Brighter than the `--acc` token (#dd8a6a) the rest of the UI uses, and
+ *  deliberately so: the orb is ~1500 translucent 1px squares with per-point
+ *  depth attenuation, so the same hex that reads as warm terracotta on a solid
+ *  button reads as muddy brown in a point cloud. The token stays the accent
+ *  for chrome; this is what that accent has to become to survive the renderer.
+ */
+export const ORB_HUE = "#f0a079";
+/** The waiting pulse runs a touch warmer, so "something needs you" is a
+ *  temperature change and not only a brightness one — brightness alone is
+ *  what the pulse is already spending. */
+export const ORB_HUE_WAITING = "#f4a074";
+
 export function look(state: OrbState, t: number): {
   hue: string; alpha: number; spin: number; jitter: number; scale: number;
 } {
   const spin = state === "working" ? 0.0125 : state === "speaking" ? 0.0075 : 0.0028;
   if (state === "waiting") {
-    return { hue: "#d9906a", alpha: 0.62 + Math.sin(t * 0.045) * 0.3, spin, jitter: 0, scale: 1 };
+    return { hue: ORB_HUE_WAITING, alpha: 0.78 + Math.sin(t * 0.045) * 0.22, spin, jitter: 0, scale: 1 };
   }
   return {
-    hue: "#dd8a6a",
-    alpha: state === "idle" ? 0.52 : 0.92,
+    hue: ORB_HUE,
+    // Idle is still visibly quieter than working — she should look at rest,
+    // not switched off. The old 0.52 crossed that line once the depth floor
+    // in Orb.tsx took the far side down to a sixth of it.
+    alpha: state === "idle" ? 0.72 : 1,
     spin,
     jitter: state === "working" ? 0.012 : 0,
     scale: state === "speaking" ? 1 + Math.sin(t * 0.075) * 0.032 : 1,

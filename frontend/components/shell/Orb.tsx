@@ -94,7 +94,11 @@ export function Orb({ engaged }: { engaged: boolean }) {
         // Depth keys both brightness and size: that pairing is what makes a
         // flat scatter of squares read as a sphere.
         const depth = (z2 + 1) / 2;
-        const a = alpha * (0.16 + depth * 0.84);
+        // The far side keeps a real floor rather than fading to almost
+        // nothing: at 0.16 the back of the sphere was a sixth of an already
+        // sub-1 alpha, which is what made her read as dim rather than distant.
+        // The near/far ratio still carries the depth cue.
+        const a = alpha * (0.3 + depth * 0.7);
         const px = 0.55 + depth * 1.05;
         cx.fillStyle = `rgba(${cr},${cg},${cb},${a.toFixed(3)})`;
         cx.fillRect(sx, sy, px, px);

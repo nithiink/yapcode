@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { CORNER, DOCK_W, look, orbState, pointCount, sphere, step, target } from "./orb.ts";
+import { CORNER, DOCK_W, ORB_HUE, ORB_HUE_WAITING, look, orbState, pointCount, sphere, step, target } from "./orb.ts";
 
 test("centre target scales with the viewport, the corner does not", () => {
   const small = target(1000, 800, true);
@@ -67,9 +67,13 @@ test("only waiting pulses, and every state keeps her own hue", () => {
   assert.ok(look("speaking", 0).scale !== look("speaking", 20).scale);
   assert.equal(look("speaking", 0).alpha, look("speaking", 40).alpha);
 
-  for (const s of ["idle", "working", "waiting", "speaking"] as const) {
-    assert.match(look(s, 3).hue, /^#d[d9]/, `${s} is not Yuri's colour`);
+  // Her colour, not a colour that happens to start with the right two hex
+  // digits — the old regex here broke the moment the orb was brightened, which
+  // is a test pinning an implementation detail rather than the rule.
+  for (const s of ["idle", "working", "speaking"] as const) {
+    assert.equal(look(s, 3).hue, ORB_HUE, `${s} is not Yuri's colour`);
   }
+  assert.equal(look("waiting", 3).hue, ORB_HUE_WAITING);
 });
 
 test("working spins faster than idle", () => {
@@ -120,4 +124,25 @@ test("a wide stage keeps the design's proportions exactly", () => {
 
 test("she shrinks rather than overflowing when the stage is tight", () => {
   assert.ok(target(950, 560, false).r < target(1920, 1080, false).r);
+});
+
+test("she is brighter on the canvas than the flat accent token", () => {
+  // The orb is ~1500 translucent squares with depth attenuation, so the hex
+  // that reads as terracotta on a solid button reads as brown here. If someone
+  // "fixes" the inconsistency by setting ORB_HUE back to --acc, this fails.
+  const lum = (hex: string) => {
+    const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const f = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  };
+  const ACCENT_TOKEN = "#dd8a6a";           // --acc in app/globals.css
+  assert.ok(lum(ORB_HUE) > lum(ACCENT_TOKEN) * 1.15,
+    `ORB_HUE ${ORB_HUE} is not meaningfully brighter than the token`);
+});
+
+test("idle still reads as at rest, not as switched off", () => {
+  const idle = look("idle", 0).alpha;
+  const working = look("working", 0).alpha;
+  assert.ok(idle < working, "idle must stay quieter than working");
+  assert.ok(idle > 0.6, `idle alpha ${idle} is dim enough to look broken`);
 });
