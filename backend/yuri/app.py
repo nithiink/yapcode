@@ -140,7 +140,11 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         missions = MissionService(store, bus, journal)
         sessions = SessionService(store, bus, journal, registry, projects, approvals, missions,
                                   default_agent=default_agent, router=router,
-                                  narration=narration, mode_reader=narration_mode)
+                                  narration=narration, mode_reader=narration_mode,
+                                  # A plain path, not the Home object: materialiser_for()
+                                  # joins it straight into OpenCode's config dir and stays
+                                  # testable with a tempdir string instead of needing a Home.
+                                  home=home.path)
         missions.stop_sessions = sessions.stop_many
         missions.interrupt_sessions = sessions.interrupt_many
         for p in registry.all():

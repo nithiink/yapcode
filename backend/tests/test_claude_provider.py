@@ -21,11 +21,18 @@ class _StubRunner:
         self.calls = []
         self._n = 0
 
-    async def start(self, cwd, model=None, mode="default"):
+    # Accepts the persona kwargs because BOTH real runners now do (the CLI via
+    # --agents/--agent, the SDK via ClaudeAgentOptions(agents=...)). A stub
+    # that refused them would be modelling a runner that no longer exists, and
+    # the provider deliberately raises rather than dropping a requested
+    # persona — so refusing here would only test the refusal path.
+    async def start(self, cwd, model=None, mode="default",
+                    agent_slug=None, agents_json=None):
         self._n += 1
         h = f"{self.backend}-{self._n}-00000000"
         self.sessions[h] = {"handle": h, "session_id": h, "cwd": cwd, "model": model or "opus",
-                            "mode": mode, "status": "idle", "cost_usd": 0.0}
+                            "mode": mode, "status": "idle", "cost_usd": 0.0,
+                            "agent_slug": agent_slug, "agents_json": agents_json}
         return h
 
     async def resume(self, session_id, cwd, model=None, mode="default", name=None):

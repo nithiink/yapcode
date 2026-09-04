@@ -93,3 +93,35 @@ class AgentProviderContract(unittest.IsolatedAsyncioTestCase):
         raise NotImplementedError(
             "this provider declares supports_events=True, so the contract test "
             "needs _fire_event to trigger one")
+
+    async def test_persona_fields_reach_the_provider(self):
+        """Spec §5.2: a specialist's persona reaches a provider one of two ways,
+        chosen by `capabilities().supports_personas` -- never both.
+
+        True (Claude Code, OpenCode): SessionOptions.agent_slug is the
+        provider's own native mechanism (`--agent <slug>` / {"agent": slug}),
+        and create_session must not merely swallow it -- list_native()'s
+        "agent" key is the generic, cross-provider place every provider here
+        surfaces what it actually forwarded, so a materialiser bug that
+        silently drops the slug shows up here instead of only in production.
+
+        False (FakeAgentProvider): there is no native mechanism, so
+        SessionOptions.prepend carries the persona's prompt instead --
+        SessionService prepends it to the first message (not tested here,
+        that's provider-neutral and belongs to SessionService's own tests).
+        The only thing a provider itself owes in this case is to accept the
+        field without raising.
+        """
+        caps = self.p.capabilities()
+        if caps.supports_personas:
+            h = await self.p.create_session(self.ctx, SessionOptions(agent_slug="test-persona"))
+            try:
+                listed = {s["handle"]: s for s in self.p.list_native()}
+                self.assertEqual(
+                    listed[h].get("agent"), "test-persona",
+                    "supports_personas=True but agent_slug was not recorded/forwarded")
+            finally:
+                await self.p.stop(h)
+        else:
+            h = await self.p.create_session(self.ctx, SessionOptions(prepend="You are a reviewer."))
+            await self.p.stop(h)

@@ -155,6 +155,10 @@ class _TmuxSession:
         self.model = model
         self.name: str | None = None        # human-readable name (persisted in meta)
         self.mode = "default"               # permission mode (Shift+Tab cycle)
+        # A specialist's persona (spec §5.2): agents_json defines it inline at
+        # launch, agent_slug selects it. Both None for a plain session.
+        self.agent_slug: str | None = None
+        self.agents_json: str | None = None
         self.pane = f"vc_{handle[:8]}"
         self.ctrl = os.path.join(CTRL_ROOT, handle)
         self.transcript_path: str | None = None
@@ -256,10 +260,19 @@ class TmuxClaudeRunner(ClaudeRunner):
         self._write_mode(s)
 
         chrome = "--chrome " if ENABLE_CHROME else ""
+        # `--agents <json>` carries a whole persona (description/prompt/tools/
+        # model) as ONE shell word. shlex.quote is not optional here: this repo
+        # has already shipped a shell-escaping bug from interpolating untrusted
+        # text into this same one-string command line (see 5149db7), and a
+        # specialist's system_prompt is exactly that -- user-authored text that
+        # can contain quotes, `;`, or `$(...)`.
+        agents_flag = f"--agents {shlex.quote(s.agents_json)} " if s.agents_json else ""
+        agent_flag = f"--agent {shlex.quote(s.agent_slug)} " if s.agent_slug else ""
         inner = (
             f"VC_CTRL={shlex.quote(s.ctrl)} "
             f"claude {claude_id_arg} --model {shlex.quote(s.model)} "
             f"--permission-mode {shlex.quote(s.mode)} "
+            f"{agents_flag}{agent_flag}"
             f"{chrome}--settings {shlex.quote(os.path.join(s.ctrl, 'settings.json'))}"
         )
         rc, out = await self._tmux(
@@ -279,11 +292,14 @@ class TmuxClaudeRunner(ClaudeRunner):
         s._tail = asyncio.create_task(self._tail_events(s))
         await self._await_ready(s)
 
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str:
         cwd = self._preflight(cwd)
         handle = str(uuid4())
         s = _TmuxSession(handle, cwd, model or self._default_model)
         s.mode = normalize_mode(mode)
+        s.agent_slug = agent_slug
+        s.agents_json = agents_json
         await self._spawn(s, f"--session-id {handle}")
         log.info("tmux session %s started in %s (chrome=%s)", handle, cwd, ENABLE_CHROME)
         return handle

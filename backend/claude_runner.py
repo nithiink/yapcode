@@ -14,6 +14,7 @@ callback can block and be resolved from a different coroutine without deadlock.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -118,7 +119,8 @@ class ClaudeRunner(ABC):
             logging.getLogger("yapcode.runner").exception("on_event observer failed")
 
     @abstractmethod
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str: ...
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str: ...
     @abstractmethod
     async def advance(self, handle: str, message: str) -> AdvanceResult: ...
     @abstractmethod
@@ -188,6 +190,31 @@ class _Session:
         self._pending_results: list[AdvanceResult] = []
 
 
+def _agents_for_sdk(agents_json: str) -> dict[str, Any] | None:
+    """Turn the materialiser's `--agents` JSON into the SDK's AgentDefinition
+    map. Both carry the same fields, so this is a shape change rather than a
+    translation — but AgentDefinition REQUIRES description and prompt, and one
+    missing either raises inside the SDK at connect time, where the error names
+    neither the specialist nor the field. Drop such a definition here instead;
+    ClaudeCodeProvider decides whether a persona-less start is acceptable.
+    """
+    try:
+        raw = json.loads(agents_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    for name, d in raw.items():
+        if not isinstance(d, dict) or not d.get("description") or not d.get("prompt"):
+            continue
+        out[name] = sdk.AgentDefinition(
+            description=str(d["description"]), prompt=str(d["prompt"]),
+            **({"tools": list(d["tools"])} if d.get("tools") else {}),
+            **({"model": str(d["model"])} if d.get("model") else {}))
+    return out or None
+
+
 class SDKClaudeRunner(ClaudeRunner):
     def __init__(self, default_model: str | None = None):
         self._default_model = default_model or os.getenv("CLAUDE_MODEL", "opus")
@@ -197,7 +224,8 @@ class SDKClaudeRunner(ClaudeRunner):
 
     # --- lifecycle --------------------------------------------------------
 
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str:
         # Re-assert the directory sandbox at the sink so a session can't start outside
         # ALLOWED_PROJECT_ROOTS even if a caller bypasses resolve_project_path.
         cwd = config.resolve_within_roots(cwd)
@@ -208,12 +236,20 @@ class SDKClaudeRunner(ClaudeRunner):
         async def _cb(tool_name: str, tool_input: dict[str, Any], context: Any):
             return await self._can_use_tool(s, tool_name, tool_input, context)
 
+        # A specialist's persona, when one was requested. The SDK takes the same
+        # two things the CLI does — a map of agent definitions and the name of
+        # the one to run — so an SDK-backed session carries a persona exactly
+        # as a CLI-backed one does. Forwarding this was once skipped behind a
+        # signature check, which silently produced persona-less sessions while
+        # list_native() still reported the persona as applied.
+        agents = _agents_for_sdk(agents_json) if agents_json else None
         opts = sdk.ClaudeAgentOptions(
             model=s.model,
             cwd=cwd,
             permission_mode=s.mode,      # risky tools route to can_use_tool in default/plan
             can_use_tool=_cb,
             session_id=handle,           # ask SDK to use our id (verify; we also capture)
+            **({"agents": agents} if agents else {}),
         )
         client = sdk.ClaudeSDKClient(opts)
         await client.connect()

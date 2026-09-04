@@ -42,6 +42,7 @@ from permissions import mode_covers
 from yuri.domain.event import EventType, YuriEvent
 from yuri.domain.mission import InvalidTransition
 from yuri.domain.session import LIVE_STATUSES, AgentSession
+from yuri.domain.specialist import Specialist
 from yuri.events.bus import EventBus
 from yuri.narration.policy import DEFAULT_MODE, Mode
 from yuri.narration.service import NarrationService
@@ -49,6 +50,7 @@ from yuri.providers.base import AgentProvider, ProjectContext, ProviderEvent, Se
 from yuri.providers.registry import AgentRegistry
 from yuri.services.approvals import ApprovalService
 from yuri.services.journal import Journal
+from yuri.services.materialise import materialiser_for
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
 from yuri.services.router import AgentRouter
@@ -66,7 +68,8 @@ class SessionService:
                  projects: ProjectService, approvals: ApprovalService, missions: MissionService,
                  default_agent: str = "claude-code", router: AgentRouter | None = None,
                  narration: NarrationService | None = None,
-                 mode_reader: Callable[[], Mode] | None = None):
+                 mode_reader: Callable[[], Mode] | None = None,
+                 home: str | None = None):
         self.store = store
         self.bus = bus
         self.journal = journal
@@ -80,6 +83,17 @@ class SessionService:
         # The mode lives in the store, which yuri.app reads — importing app here
         # would be a cycle, so the container injects a reader instead.
         self._mode_reader = mode_reader or (lambda: DEFAULT_MODE)
+        # Where materialiser_for() writes OpenCode's agent definitions
+        # (~/.config/opencode/agent/<slug>.md). A plain path, not a Home
+        # object, so tests can point it at a tempdir; None only when nothing
+        # was passed in, and start() only ever needs it when a specialist is.
+        self.home = home
+        # native handle -> the specialist prompt still owed to it. Only ever
+        # populated for a provider with no native persona mechanism (see
+        # materialise.py's PrependMaterialiser): send() pops and prepends it
+        # to the FIRST message, and never touches it again, so a specialist's
+        # job description can't leak onto every later turn of the session.
+        self._pending_prepend: dict[str, str] = {}
 
     # --- lookup ---------------------------------------------------------------
 
@@ -296,29 +310,60 @@ class SessionService:
 
     async def start(self, project_ref: str, backend: str = "cli", mode: str = "default",
                     model: str | None = None, name: str | None = None, created_by: str = "voice",
-                    agent_id: str | None = None) -> dict:
+                    agent_id: str | None = None, specialist: Specialist | None = None) -> dict:
         project = self.projects.resolve_or_create(project_ref)
-        agent = self.router.select(project, agent_id)
+        # A specialist names its own provider; an explicit agent_id still wins
+        # (the caller asked for it by hand), but absent that, route to the
+        # provider the specialist was actually built for rather than whatever
+        # this project/process defaults to.
+        agent = self.router.select(project, agent_id or (specialist.provider_id if specialist else None))
         sess_name = self._pick_name(name, project.root_path)
         mission = self.missions.create(project, sess_name, created_by=created_by, agent_id=agent.id)
+        # A specialist's own model/permission_mode were set ON IT deliberately
+        # -- the user picked them when authoring this specialist, and that
+        # outranks whatever default this particular start() call happened to
+        # carry. model=None means "the specialist has no opinion"; permission_mode
+        # has no such "unset" state (it always carries at least the dataclass
+        # default "default"), so a specialist -- once handed to start() at all
+        # -- always decides the mode outright.
+        if specialist is not None:
+            model = specialist.model or model
+            mode = specialist.permission_mode
         mode = normalize_mode(mode)
+        agent_slug = agents_json = prepend = None
         try:
-            handle = await agent.create_session(ProjectContext(project.id, project.root_path),
-                                                SessionOptions(backend=backend, mode=mode, model=model,
-                                                               name=sess_name))
+            if specialist is not None:
+                # ensure() is called again here (not only at specialist
+                # create/update) because a config file it wrote can be deleted
+                # or hand-edited behind Yuri's back -- see materialise.py's
+                # module docstring. A failure here must reach the caller
+                # exactly as raised: silently falling back to a persona-less
+                # session would start the WRONG agent while claiming success.
+                materialiser = materialiser_for(agent, self.home)
+                materialised = await materialiser.ensure(specialist)
+                agent_slug = materialised.get("agent")
+                agents_json = materialised.get("agents_json")
+                prepend = materialised.get("prepend")
+            handle = await agent.create_session(
+                ProjectContext(project.id, project.root_path),
+                SessionOptions(backend=backend, mode=mode, model=model, name=sess_name,
+                               agent_slug=agent_slug, agents_json=agents_json, prepend=prepend))
         except Exception as exc:
             # Never leave a `running` mission with no session behind. The
             # bookkeeping is best-effort: a failure in it must not mask the
             # provider's own exception, which is what the caller needs to hear.
             try:
-                self.missions.set_status(mission, "failed", by="system",
-                                         reason=f"{agent.name} unavailable: {exc}")
+                reason = (f"{specialist.name} could not be materialised: {exc}"
+                          if specialist is not None else f"{agent.name} unavailable: {exc}")
+                self.missions.set_status(mission, "failed", by="system", reason=reason)
                 self.bus.publish(YuriEvent.make(EventType.AGENT_ERROR, mission_id=mission.id,
                                                 agent_id=agent.id, project_id=project.id,
                                                 payload={"message": str(exc)}))
             except Exception:
                 log.exception("failed to record the mission failure for %s", mission.id)
             raise
+        if prepend:
+            self._pending_prepend[handle] = prepend
         backend_tag = agent.backend_of(handle) or backend
         row = AgentSession(project_id=project.id, agent_id=agent.id, native_session_id=handle,
                            backend=backend_tag, working_directory=project.root_path,
@@ -469,7 +514,17 @@ class SessionService:
         if row is not None and row.mission_id:
             self.missions.set_goal_if_empty(self.missions.get(row.mission_id), message)
         p = self._provider_for(handle)
-        p.send_message(handle, message)
+        # A specialist on a provider with no native persona mechanism gets its
+        # prompt prepended to the FIRST message instead (materialise.py's
+        # PrependMaterialiser; spec §5.2). Popping (not peeking) is what makes
+        # "first" true: a second send() to the same handle must never repeat
+        # it, or every later turn would be re-told the same job description.
+        # The mission goal and the published event above/below still show the
+        # user's own words -- the prepended text is what the AGENT receives,
+        # not what Yuri claims was asked.
+        pending = self._pending_prepend.pop(handle, None)
+        to_send = f"{pending}\n\n{message}" if pending else message
+        p.send_message(handle, to_send)
         # send_message can rewind the read cursor (OpenCode sets it to
         # admittedSeq-1); _touch below is what writes it down.
         self._merge_marks(p, handle, row)
@@ -597,6 +652,11 @@ class SessionService:
     async def stop(self, ref: str) -> dict:
         handle = self.resolve(ref)
         await self._provider_for(handle).stop(handle)
+        # A session closed before its first send() never claims its prepend;
+        # left behind, a native handle could in principle be reused (a
+        # provider that recycles ids) and a stranger session would inherit
+        # someone else's specialist prompt.
+        self._pending_prepend.pop(handle, None)
         row = self.row_for(handle)
         self._touch(row, "stopped")
         self.bus.publish(self._ev(EventType.SESSION_STOPPED, row, handle, {}))

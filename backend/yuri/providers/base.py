@@ -90,6 +90,14 @@ class SessionOptions:
     mode: str = "default"
     model: str | None = None
     name: str | None = None
+    # The three fields below are how a Specialist's persona (spec §5.2)
+    # actually reaches a provider. SessionService fills them in from whatever
+    # SpecialistMaterialiser.ensure() returned for the chosen specialist --
+    # never more than one is set at once, since a given provider only ever
+    # has one of these mechanisms.
+    agent_slug: str | None = None    # --agent <slug> / {"agent": slug} (Claude + OpenCode)
+    agents_json: str | None = None   # claude --agents <json> (Claude Code only; inline, launch-time)
+    prepend: str | None = None       # no native persona mechanism: text for the first message instead
 
 
 @dataclass(frozen=True)

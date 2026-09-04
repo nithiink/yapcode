@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import logging
 import time
 from typing import Any, Callable
 
 from claude_runner import ClaudeRunner
-from .base import (AgentCapabilities, AgentHealth, AgentProvider, Observer, ProjectContext,
+from .base import (ProviderUnavailable, AgentCapabilities, AgentHealth, AgentProvider, Observer, ProjectContext,
                    ProviderEvent, SessionOptions)
 
 log = logging.getLogger("yuri.providers.claude")
@@ -59,6 +60,13 @@ class ClaudeCodeProvider(AgentProvider):
         self._factory = runner_factory or default_runner_factory
         self._runners: dict[str, ClaudeRunner] = {}
         self._owner: dict[str, str] = {}      # native handle -> backend
+        # native handle -> the agent_slug the session is ACTUALLY running with.
+        # Written only after a start that carried the persona through, never
+        # speculatively: a start that could not apply one raises, so a handle
+        # present here is a promise that list_native()'s "agent" is true. The
+        # earlier version recorded it regardless of what the runner did, which
+        # made the provider report a persona it had silently dropped.
+        self._agent_of: dict[str, str] = {}
         self._observer: Observer | None = None
         self._health: tuple[float, AgentHealth] | None = None
 
@@ -125,8 +133,36 @@ class ClaudeCodeProvider(AgentProvider):
 
     async def create_session(self, project: ProjectContext, opts: SessionOptions) -> str:
         backend = opts.backend if opts.backend in BACKENDS else "cli"
-        handle = await self.runner(backend).start(project.root_path, opts.model, opts.mode)
+        runner = self.runner(backend)
+        # Both real runners carry a persona: the CLI through `--agents`/`--agent`
+        # and the SDK through ClaudeAgentOptions(agents=...). Older test doubles
+        # stub ClaudeRunner without the parameters, so a persona-less start
+        # (agent_slug is None, the common case) still calls the three-argument
+        # form and those doubles keep working untouched.
+        #
+        # What this must NEVER do is drop a requested persona and carry on. A
+        # user who asked for the Reviewer and silently got a default agent has
+        # been lied to, and `list_native()` reporting the slug anyway made the
+        # lie legible — the system would claim a persona it had not applied.
+        # So: forward it, and let a runner that genuinely cannot take it raise.
+        wants_persona = opts.agent_slug is not None or opts.agents_json is not None
+        if wants_persona:
+            try:
+                handle = await runner.start(project.root_path, opts.model, opts.mode,
+                                            agent_slug=opts.agent_slug,
+                                            agents_json=opts.agents_json)
+            except TypeError as exc:
+                raise ProviderUnavailable(
+                    f"the {backend} backend cannot run a specialist "
+                    f"({opts.agent_slug or 'persona'}): its runner does not accept one. "
+                    "Start this session on the other backend, or clear the specialist."
+                ) from exc
+        else:
+            handle = await runner.start(project.root_path, opts.model, opts.mode)
         self.register(handle, backend)
+        # Recorded only on the path that actually applied it.
+        if opts.agent_slug is not None:
+            self._agent_of[handle] = opts.agent_slug
         return handle
 
     async def resume(self, native_session_id: str, project: ProjectContext,
@@ -151,6 +187,7 @@ class ClaudeCodeProvider(AgentProvider):
     async def stop(self, handle: str) -> None:
         await self.runner_for(handle).close(handle)
         self._owner.pop(handle, None)
+        self._agent_of.pop(handle, None)
 
     async def set_mode(self, handle: str, mode: str) -> str:
         return await self.runner_for(handle).set_mode(handle, mode)
@@ -180,7 +217,11 @@ class ClaudeCodeProvider(AgentProvider):
         # triggers one would mutate the dict mid-iteration.
         for backend, r in list(self._runners.items()):
             for s in r.list():
-                out.append({**s, "backend": backend})
+                entry = {**s, "backend": backend}
+                agent = self._agent_of.get(s["handle"])
+                if agent:
+                    entry["agent"] = agent
+                out.append(entry)
         return out
 
     async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
@@ -242,6 +283,7 @@ class ClaudeCodeProvider(AgentProvider):
             r.on_event = None
         self._runners.clear()
         self._owner.clear()
+        self._agent_of.clear()
 
     # --- runner events -> ProviderEvent ---------------------------------------
 
