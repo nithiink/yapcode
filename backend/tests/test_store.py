@@ -1,3 +1,4 @@
+import inspect
 import os
 import sqlite3
 import sys
@@ -476,3 +477,69 @@ class MigrationConversionTests(unittest.TestCase):
             self.assertEqual(store.tasks.for_workflow(flow.id)[0].status, "running")
         finally:
             store.close()
+
+
+class EveryReferenceToAMissionIsHandledTests(unittest.TestCase):
+    """A new table pointing at missions(id) must not silently break delete.
+
+    This has now happened once: migration 0003 added workflows, tasks and
+    artifacts, and SqliteMissions.delete — written in 0001 — knew nothing
+    about them, so from Phase 7 onwards deleting any mission that had a plan
+    answered IntegrityError → HTTP 500. Reported from a real run, on a
+    mission the user could see and could not remove.
+
+    Reading the schema rather than a hand-kept list, so the next table is
+    caught by adding it, not by remembering to update a test.
+
+    What this checks precisely: that `delete` MENTIONS every table that
+    references the rows it removes. That is the failure that happened — three
+    tables nobody thought about — and it is verified to fire against the
+    original pre-fix body, which named only mission_steps and missions. It
+    does NOT check that the handling is correct; test_mission_service's
+    MissionDeleteTests do that behaviourally, with real rows.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = SqliteStore(os.path.join(self.tmp.name, "y.db"))
+        self.store.migrate()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(self.store.close)
+
+    def _tables(self) -> list[str]:
+        con = self.store._conn.get()
+        return [r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+
+    def test_delete_mentions_every_table_that_references_a_mission(self):
+        con = self.store._conn.get()
+        # `sessions` is the one deliberate exception: its mission_id is
+        # nullable and MissionService detaches it, because a session row
+        # records an agent run that really happened.
+        detached = {"sessions"}
+        source = inspect.getsource(type(self.store.missions).delete)
+        missing = []
+        for table in self._tables():
+            refs = [r for r in con.execute(f"PRAGMA foreign_key_list({table})")
+                    if r["table"] == "missions"]
+            if not refs or table in detached:
+                continue
+            if table not in source:
+                missing.append(table)
+        self.assertEqual(missing, [],
+                         f"these tables reference missions(id) but SqliteMissions.delete "
+                         f"never mentions them, so deleting a mission that has any row in "
+                         f"them will raise IntegrityError: {missing}")
+
+    def test_delete_mentions_every_table_that_references_a_task(self):
+        # Same failure one level down: a table hanging off tasks blocks the
+        # DELETE FROM tasks inside the same transaction.
+        con = self.store._conn.get()
+        source = inspect.getsource(type(self.store.missions).delete)
+        missing = [
+            table for table in self._tables()
+            if any(r["table"] == "tasks" for r in con.execute(f"PRAGMA foreign_key_list({table})"))
+            and table not in source
+        ]
+        self.assertEqual(missing, [], f"these reference tasks(id) and would block the "
+                                      f"cascade: {missing}")

@@ -5,6 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from yuri.domain.artifact import Artifact  # noqa: E402
 from yuri.domain.event import EventType, YuriEvent  # noqa: E402
 from yuri.domain.mission import InvalidTransition  # noqa: E402
 from yuri.domain.project import Project  # noqa: E402
@@ -248,3 +249,80 @@ class MissionDeleteTests(MissionServiceTests):
     async def test_delete_of_an_unknown_mission_raises_keyerror(self):
         with self.assertRaises(KeyError):
             await self.svc.delete("nope", by="ui")
+
+    # --- what Phase 7 added under a mission -------------------------------
+    #
+    # delete() was written before workflows existed. Migration 0003 added
+    # three tables pointing at missions(id) with NOT NULL columns, so from
+    # Phase 7 onwards deleting any mission that had a plan answered
+    # sqlite3.IntegrityError -> HTTP 500. Reported from a real run.
+
+    def _plan(self, mission_id):
+        """A workflow, two dependent tasks and an artifact — everything 0003
+        hangs off a mission."""
+        w = Workflow(mission_id=mission_id, status="draft")
+        self.store.workflows.insert(w)
+        a = Task(workflow_id=w.id, ordinal=0, title="look", role="researcher")
+        b = Task(workflow_id=w.id, ordinal=1, title="do", role="developer")
+        self.store.tasks.insert(a)
+        self.store.tasks.insert(b)
+        self.store.tasks.add_dep(b.id, a.id)
+        art = Artifact(mission_id=mission_id, task_id=a.id, kind="finding",
+                       title="what I found", body="the cause")
+        self.store.artifacts.insert(art)
+        return w, a, b, art
+
+    async def test_a_mission_with_a_plan_can_be_deleted_at_all(self):
+        m = self.svc.create(self.project, "planned", created_by="voice")
+        self._plan(m.id)
+        await self.svc.delete(m.id, by="ui")
+        self.assertIsNone(self.store.missions.get(m.id))
+
+    async def test_deleting_a_mission_takes_its_plan_with_it(self):
+        # Not detached, like a session row: a workflow's mission_id is NOT
+        # NULL, and a task graph means nothing without the mission it was
+        # planning. Leaving the rows would also make the next delete fail.
+        m = self.svc.create(self.project, "planned", created_by="voice")
+        w, a, b, art = self._plan(m.id)
+        await self.svc.delete(m.id, by="ui")
+        self.assertIsNone(self.store.workflows.get(w.id))
+        self.assertEqual(self.store.tasks.for_workflow(w.id), [])
+        self.assertEqual(self.store.tasks.deps_for(w.id), {})
+        self.assertIsNone(self.store.artifacts.get(art.id))
+
+    async def test_another_missions_plan_is_untouched(self):
+        keep = self.svc.create(self.project, "keep", created_by="voice")
+        kept_w, kept_a, _, kept_art = self._plan(keep.id)
+        drop = self.svc.create(self.project, "drop", created_by="voice")
+        self._plan(drop.id)
+        await self.svc.delete(drop.id, by="ui")
+        self.assertIsNotNone(self.store.workflows.get(kept_w.id))
+        self.assertEqual(len(self.store.tasks.for_workflow(kept_w.id)), 2)
+        self.assertIsNotNone(self.store.artifacts.get(kept_art.id))
+
+    async def test_a_tasks_session_row_survives_the_delete(self):
+        # Same rule as a mission's own sessions: the row records an agent run
+        # that really happened, so it is detached, never destroyed.
+        m = self.svc.create(self.project, "planned", created_by="voice")
+        w, a, _, _ = self._plan(m.id)
+        s = self._session(m.id, status="stopped", handle="h-task")
+        a.session_id = s.id
+        self.store.tasks.update(a)
+        await self.svc.delete(m.id, by="ui")
+        row = self.store.sessions.get(s.id)
+        self.assertIsNotNone(row, "deleting a mission destroyed a real session's record")
+        self.assertIsNone(row.mission_id)
+
+    async def test_a_failed_delete_leaves_the_mission_whole(self):
+        # One transaction: a delete that removed the tasks and then failed
+        # would leave a mission whose plan is half gone and whose next delete
+        # attempt fails for a different reason.
+        m = self.svc.create(self.project, "planned", created_by="voice")
+        w, a, b, art = self._plan(m.id)
+        self._session(m.id, status="running", handle="h-live")
+        with self.assertRaises(MissionInUse):
+            await self.svc.delete(m.id, by="ui")
+        self.assertIsNotNone(self.store.missions.get(m.id))
+        self.assertIsNotNone(self.store.workflows.get(w.id))
+        self.assertEqual(len(self.store.tasks.for_workflow(w.id)), 2)
+        self.assertIsNotNone(self.store.artifacts.get(art.id))

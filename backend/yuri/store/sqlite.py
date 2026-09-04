@@ -186,10 +186,44 @@ class SqliteMissions(_Base, MissionRepo):
         self._c.get().execute(sql, args)
 
     def delete(self, id):
-        # Steps first: they are owned by the mission and meaningless without
-        # it. One transaction, so a failure cannot leave orphaned steps.
+        """Remove a mission and everything owned by it.
+
+        Owned means: the row's mission_id is NOT NULL, so it cannot outlive
+        the mission even in principle, and it means nothing on its own — a
+        task graph with no mission is not history, it is a dangling plan.
+        Contrast `sessions`, whose mission_id is nullable and which
+        MissionService detaches instead, because a session row records an
+        agent run that really happened.
+
+        Children first, deepest first, in ONE transaction. Migration 0003
+        added workflows/tasks/artifacts pointing at missions(id) and this
+        method was not updated, so from Phase 7 onwards deleting any mission
+        that had a plan raised IntegrityError and the API answered 500. A
+        partial delete would be worse than the 500: the next attempt would
+        fail somewhere else, with the mission half gone.
+        """
+        # This mission's tasks, named once and reused: every clause below has
+        # to clear EVERY reference to them, not just the expected one, or the
+        # `DELETE FROM tasks` fails on a foreign key and the whole thing
+        # rolls back into another 500.
+        mine = """SELECT t.id FROM tasks t JOIN workflows w ON t.workflow_id = w.id
+                  WHERE w.mission_id = ?"""
         con = self._c.get()
         with con:
+            # Both columns of task_deps reference tasks(id), so both sides of
+            # an edge count as a reference.
+            con.execute(f"DELETE FROM task_deps WHERE task_id IN ({mine}) "
+                        f"OR depends_on IN ({mine})", (id, id))
+            # Artifacts before tasks, since artifacts.task_id references
+            # tasks(id) — by mission (the NOT NULL column) and by task, which
+            # are the same set unless something has gone wrong upstream.
+            con.execute(f"DELETE FROM artifacts WHERE mission_id = ? OR task_id IN ({mine})",
+                        (id, id))
+            con.execute(
+                """DELETE FROM tasks WHERE workflow_id IN
+                     (SELECT id FROM workflows WHERE mission_id = ?)""", (id,))
+            con.execute("DELETE FROM workflows WHERE mission_id = ?", (id,))
+            # Drained by 0003, kept because an older database may still hold rows.
             con.execute("DELETE FROM mission_steps WHERE mission_id = ?", (id,))
             con.execute("DELETE FROM missions WHERE id = ?", (id,))
 
