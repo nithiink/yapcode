@@ -160,6 +160,19 @@ class NarrationService:
             title = _clip(str(p.get("title") or ""), TITLE_CAP) or "that step"
             return f"{title} is done."
 
+        if t == "handoff.passed":
+            # Names both ends, because the fact worth hearing is that the
+            # findings MOVED — "passing what the researcher found to Claude".
+            to_who = _clip(str(p.get("to_specialist") or ""), SESSION_NAME_CAP)
+            title = _clip(str(p.get("from_title") or ""), TITLE_CAP)
+            n = p.get("findings")
+            if not to_who and not title:
+                return None
+            what = f"what {title} found" if title else "the findings so far"
+            if isinstance(n, int) and n > 1:
+                what += f" ({n} notes)"
+            return f"Passing {what} to {to_who}." if to_who else f"Passing on {what}."
+
         if t == "verification.failed":
             # WHICH check, and WHY. The detail is the tail of the real output
             # ("2 failed in test_billing.py"), which is the half of the

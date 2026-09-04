@@ -45,6 +45,7 @@ from yuri.events.bus import EventBus
 # "`unavailable` never passes" is one rule in one file rather than a default
 # the scheduler could soften.
 from yuri.services import handoff, verify
+from yuri.services.handoff import Handoff
 from yuri.services.journal import Journal
 from yuri.services.roster import NoSpecialist, RosterService
 from yuri.store.base import Store
@@ -425,7 +426,7 @@ class WorkflowEngine:
         # retry's brief, and clearing it first made a retry the same
         # instruction sent twice — which fails the same way. Caught by
         # test_a_retrys_brief_says_why_the_last_attempt_did_not_stand.
-        instruction = self._instruction(t, deps or set())
+        instruction, carried = self._instruction(t, deps or set())
         t.error = None
         try:
             session_id = await self.dispatch(t, specialist, instruction)
@@ -451,9 +452,21 @@ class WorkflowEngine:
             "agent_id": specialist.provider_id, "read_only": t.read_only,
             "attempt": t.attempts, "session_id": t.session_id})
         self.journal.append(f"task '{t.title}' → {specialist.name} (attempt {t.attempts})")
+        if carried and carried.previous:
+            # AFTER task.dispatched, and only when findings actually moved: an
+            # event announcing a handoff that carried nothing would be telling
+            # the user about the absence of news. This is the only audible sign
+            # that one agent's work reached the next, which is otherwise
+            # unobservable from outside.
+            newest = carried.previous[-1]
+            self._publish(EventType.HANDOFF_PASSED, w, payload={
+                "workflow_id": w.id, "task_id": t.id,
+                "to_specialist": specialist.name, "to_title": t.title,
+                "from_title": carried.authors.get(newest.task_id or "", ""),
+                "findings": len(carried.previous)})
         return True
 
-    def _instruction(self, t: Task, deps: set[str]) -> str:
+    def _instruction(self, t: Task, deps: set[str]) -> tuple[str, Handoff | None]:
         """What the specialist is told: the constructed handoff (spec §9).
 
         Built from the artifacts of `deps` and nothing else — never a
@@ -466,10 +479,11 @@ class WorkflowEngine:
         dead workflow.
         """
         try:
-            return handoff.build_handoff(self.store, t, deps).render()
+            brief = handoff.build_handoff(self.store, t, deps)
+            return brief.render(), brief
         except Exception:                                  # noqa: BLE001
             log.exception("building the handoff for task %s failed", t.id)
-            return t.instruction or t.title
+            return (t.instruction or t.title), None
 
     # --- the engine's own event sink --------------------------------------
 

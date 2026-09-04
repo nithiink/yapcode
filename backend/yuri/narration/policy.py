@@ -163,6 +163,12 @@ NARRATION_OWNER: dict[str, Owner] = {
     # the same reason string, so the engine marks that one `derived` on this
     # path and narration/service.py stays silent for it. One owner per FACT.
     EventType.VERIFICATION_FAILED: "stream",
+    # "passing the findings to Claude" — texture, and the same judgement
+    # task.completed got: worth hearing when the user asked for everything,
+    # noise otherwise. It is also the only audible sign that one agent's work
+    # actually reached the next, which is the part of a multi-agent mission a
+    # user has no other way to observe.
+    EventType.HANDOFF_PASSED: "stream_verbose",
 }
 
 # Blocks on the user: never suppressed, whatever the mode. "Be quiet" means

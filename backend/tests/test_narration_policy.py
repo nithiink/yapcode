@@ -189,6 +189,8 @@ class EveryOwnerCanActuallySpeakTests(unittest.TestCase):
                 "specialist": "Reviewer", "role": "reviewer", "attempt": 1,
                 "reason": "two tests failed", "will_retry": True, "attempts": 2,
                 "blocking": ["review"], "blocking_count": 1,
+                "from_title": "investigate the bug", "to_specialist": "Claude",
+                "findings": 2,
                 "tasks": [{"id": "t1", "title": "investigate", "role": "researcher"},
                           {"id": "t2", "title": "fix", "role": "developer"}],
             })

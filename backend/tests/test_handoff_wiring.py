@@ -217,3 +217,58 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         done = self.store.tasks.get(t.id)
         self.assertIn(done.status, ("failed", "blocked"))
         self.assertTrue(done.ended_at)
+
+
+class HandoffEventTests(Wiring):
+    """`handoff.passed` (spec §11) — the only audible sign that one agent's
+    work reached the next."""
+
+    def _handoffs(self) -> list:
+        return [e for e in self._drain() if e.type == "handoff.passed"]
+
+    def _drain(self) -> list:
+        out = []
+        while not self.q.empty():
+            out.append(self.q.get_nowait())
+        return out
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.q = self.bus.subscribe()
+
+    async def test_no_event_when_the_handoff_carried_nothing(self):
+        # An event announcing a handoff that carried nothing would be telling
+        # the user about the absence of news.
+        await self.engine.advance(self.w.id)
+        self.assertEqual(self._handoffs(), [])
+
+    async def test_an_event_when_findings_actually_moved(self):
+        await self.engine.advance(self.w.id)
+        self._drain()
+        await self._run("investigate", "the visited set is never cleared")
+        [ev] = self._handoffs()
+        self.assertEqual(ev.payload["from_title"], "Investigate the bug")
+        self.assertEqual(ev.payload["to_title"], "Fix the bug")
+        self.assertEqual(ev.payload["findings"], 1)
+        self.assertTrue(ev.payload["to_specialist"])
+
+    async def test_it_says_a_sentence_naming_both_ends(self):
+        from yuri.narration.service import NarrationService
+        await self.engine.advance(self.w.id)
+        self._drain()
+        await self._run("investigate", "found it")
+        [ev] = self._handoffs()
+        line = NarrationService().line_for(ev, "verbose")
+        self.assertIn("Investigate the bug", line)
+        self.assertIn("Passing", line)
+
+    async def test_it_is_silent_unless_the_user_asked_for_everything(self):
+        # A stream_verbose owner speaks in `verbose` and nowhere else:
+        # texture, not news.
+        from yuri.narration.service import NarrationService
+        await self.engine.advance(self.w.id)
+        self._drain()
+        await self._run("investigate", "found it")
+        [ev] = self._handoffs()
+        for mode in ("normal", "quiet"):
+            self.assertIsNone(NarrationService().line_for(ev, mode), mode)

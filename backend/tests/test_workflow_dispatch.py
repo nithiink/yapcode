@@ -156,8 +156,16 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
             # dispatched → running → verifying → completed. `running` is never
             # persisted on the happy path (on_task_finished walks straight
             # through it), so the event trail is what pins the shape.
-            self.assertEqual(self._events_for(task.id),
-                             ["task.dispatched", "task.verifying", "task.completed"])
+            #
+            # Every task but the first also emits `handoff.passed` right after
+            # it is dispatched: it received the previous task's findings, and
+            # that hop is the only observable sign one agent's work reached
+            # the next. The FIRST task must not emit it — there was nothing to
+            # pass — which is what makes this assertion worth its specificity.
+            expected = ["task.dispatched", "task.verifying", "task.completed"]
+            if i > 0:
+                expected.insert(1, "handoff.passed")
+            self.assertEqual(self._events_for(task.id), expected)
             # Reaped: a finished task's agent is stopped, so the next task's
             # session is a new one rather than a fifth idle process.
             self.assertNotIn(handle, self.fake.sessions,

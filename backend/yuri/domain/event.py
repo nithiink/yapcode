@@ -46,6 +46,7 @@ class EventType:
     TASK_BLOCKED = "task.blocked"
     TASK_VERIFYING = "task.verifying"
     VERIFICATION_FAILED = "verification.failed"
+    HANDOFF_PASSED = "handoff.passed"
 
 
 # type -> (severity, speakable)   (spec §6.1)
@@ -86,6 +87,9 @@ DEFAULTS: dict[str, tuple[str, bool]] = {
     # exactly the thing "be quiet" must not swallow — the alternative is a
     # workflow that stops with the user never told which check said no.
     EventType.VERIFICATION_FAILED: ("warning", True),
+    # `False`, like task.completed: it is texture in a long workflow, spoken
+    # only when the user asked for everything (stream_verbose).
+    EventType.HANDOFF_PASSED: ("info", False),
 }
 
 
