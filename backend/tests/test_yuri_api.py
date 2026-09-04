@@ -82,7 +82,9 @@ class YuriApi(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(resp.status_code, 401, f"{method} {path} -> {resp.status_code}")
                 tested += 1
         # Guards against a broken/empty enumeration silently passing the loop.
-        self.assertGreaterEqual(tested, 15)
+        # Raised with Phase 7's twelve endpoints and MCP's six: the floor is
+        # only useful if it tracks the real count.
+        self.assertGreaterEqual(tested, 40)
 
     # --- projects ---------------------------------------------------------
 

@@ -124,9 +124,23 @@ class RosterService:
         # or collide an id/slug it does not own.
         for locked in ("id", "slug", "builtin", "created_at", "updated_at"):
             fields.pop(locked, None)
+        # Named required fields, checked here rather than left to
+        # Specialist(**fields): a missing one raised TypeError, which every
+        # caller has to special-case (the API returned 500 for a body with no
+        # role). ValueError is what the rest of this service raises, so one
+        # handler covers all of it.
+        missing = [f for f in ("name", "role") if not str(fields.get(f) or "").strip()]
+        if missing:
+            raise ValueError(f"a specialist needs a {' and a '.join(missing)}")
         provider_id = fields.get("provider_id")
         if provider_id is not None:
             self._check_provider(provider_id)
+        else:
+            # A specialist with no provider cannot be dispatched to at all, so
+            # it gets the same fallback seeding uses rather than being rejected
+            # — the user's choice is which AGENT does the work, and picking a
+            # runtime for them is a better default than a form error.
+            fields["provider_id"] = self._fallback_provider()
         # Construct first: Specialist.__post_init__ validates role/capabilities
         # and derives the slug, so the DuplicateSpecialist check below runs
         # against the name that will actually be stored.

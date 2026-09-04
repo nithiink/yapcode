@@ -21,11 +21,16 @@ from fastapi.responses import StreamingResponse
 
 from yuri.app import container, last_spoke_at, narration_mode, set_narration_mode
 from yuri.domain.mission import InvalidTransition
+from yuri.domain.specialist import ROLE_PREFERENCE, ROLES, TASK_CAPABILITIES
+from yuri.domain.task import InvalidTaskTransition
+from yuri.domain.workflow import InvalidWorkflowTransition
 from yuri.mcp import config as mcp_config
 from yuri.mcp.manager import FAILED_VERDICT, probe
 from yuri.services.missions import MissionInUse
+from yuri.services.roster import NoSpecialist, SpecialistInUse
 from yuri.narration.policy import MODES
-from .schemas import McpEnabled, McpServerBody, NarrationUpdate, ProjectCreate
+from .schemas import (AssignBody, McpEnabled, McpServerBody, NarrationUpdate,
+                      ProjectCreate, SpecialistBody, WorkflowBody)
 
 ACTIVE = ("running", "waiting_for_approval", "paused", "queued")
 
@@ -222,6 +227,202 @@ def build_router(require_auth: Callable) -> APIRouter:
     @r.post("/approvals/{approval_id}/deny")
     async def deny(approval_id: str, request: Request):
         return await _decide(approval_id, "denied", request)
+
+    # --- the roster (spec §14.2) --------------------------------------------
+    #
+    # The RESOURCE is `specialists` even though the UI calls them agents:
+    # /yuri/agents is already the provider list, and reusing that path would
+    # break the Agents view and the registry it reads.
+    @r.get("/specialists")
+    async def list_specialists(include_archived: bool = False):
+        return {"specialists": [s.to_dict()
+                                for s in container().roster.list(include_archived)]}
+
+    @r.post("/specialists", status_code=201)
+    async def create_specialist(body: SpecialistBody):
+        try:
+            return container().roster.create(
+                **{k: v for k, v in body.model_dump().items() if v is not None}).to_dict()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @r.get("/specialists/{specialist_id}")
+    async def get_specialist(specialist_id: str):
+        try:
+            return container().roster.get(specialist_id).to_dict()
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @r.put("/specialists/{specialist_id}")
+    async def update_specialist(specialist_id: str, body: SpecialistBody):
+        # exclude_unset, not "drop the Nones": clearing a field (a model back
+        # to the provider default, say) is a legitimate edit, and treating
+        # None as "not supplied" would make it impossible.
+        try:
+            return container().roster.update(
+                specialist_id, **body.model_dump(exclude_unset=True)).to_dict()
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except SpecialistInUse as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @r.delete("/specialists/{specialist_id}")
+    async def archive_specialist(specialist_id: str):
+        """Archives; never deletes. A specialist's id is on every task it ever
+        ran, so removing the row would orphan the history."""
+        try:
+            container().roster.archive(specialist_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except SpecialistInUse as exc:
+            # 409, with the reason: a live task holds it, or it is built in.
+            raise HTTPException(409, str(exc)) from exc
+        return {"archived": specialist_id}
+
+    @r.get("/roles")
+    async def list_roles():
+        """The roles a task may ask for, and which provider each prefers.
+
+        The preference only ORDERS candidates — it never excludes one, because
+        a user who created a reviewer on the other provider meant it.
+        """
+        c = container()
+        by_role: dict[str, list[dict]] = {role: [] for role in ROLES}
+        for s in c.roster.list():
+            by_role.setdefault(s.role, []).append({"id": s.id, "name": s.name,
+                                                   "provider_id": s.provider_id})
+        return {"roles": [{"role": role, "prefers": ROLE_PREFERENCE.get(role),
+                           "specialists": by_role.get(role, [])} for role in ROLES],
+                "capabilities": list(TASK_CAPABILITIES)}
+
+    @r.get("/templates")
+    async def list_templates():
+        return {"templates": [
+            {"name": t.name, "description": t.description,
+             "tasks": [{"id": task.id, "title": task.title, "role": task.role,
+                        "depends_on": list(task.depends_on), "read_only": task.read_only,
+                        "verification": list(task.verification)}
+                       for task in t.tasks]}
+            for t in sorted(container().workflow.templates.values(), key=lambda t: t.name)]}
+
+    # --- workflows ----------------------------------------------------------
+    @r.get("/missions/{mission_id}/workflow")
+    async def get_mission_workflow(mission_id: str):
+        c = container()
+        try:
+            c.missions.get(mission_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        workflows = c.store.workflows.for_mission(mission_id)
+        if not workflows:
+            # 200 with an explicit null, not a 404: "this mission has no
+            # workflow" is a normal answer the timeline renders as an empty
+            # state, and a 404 would make the UI show a load error instead.
+            return {"workflow": None, "tasks": [], "deps": {}}
+        w = workflows[0]
+        tasks = c.store.tasks.for_workflow(w.id)
+        deps = c.store.tasks.deps_for(w.id)
+        return {"workflow": w.to_dict(),
+                "tasks": [t.to_dict() for t in tasks],
+                "deps": {tid: sorted(d) for tid, d in deps.items()}}
+
+    @r.post("/missions/{mission_id}/workflow", status_code=201)
+    async def create_mission_workflow(mission_id: str, body: WorkflowBody):
+        c = container()
+        try:
+            m = c.missions.get(mission_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if body.template and body.tasks:
+            raise HTTPException(400, "give either a template or an explicit task list, "
+                                     "not both — a graph that claims a template it did not "
+                                     "come from makes the timeline lie")
+        if not body.template and not body.tasks:
+            raise HTTPException(400, "a workflow needs a template or a task list")
+        try:
+            w = await c.workflow.create(m, body.template or "", body.goal or m.goal or m.title,
+                                        overrides=body.overrides, tasks=body.tasks)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        # Born `draft`, deliberately: nothing runs until someone resumes it,
+        # which is what lets a spoken plan be read back before it starts.
+        return {"workflow": w.to_dict(),
+                "tasks": [t.to_dict() for t in c.store.tasks.for_workflow(w.id)]}
+
+    async def _workflow_action(workflow_id: str, action: str, request: Request):
+        c = container()
+        try:
+            c.workflow.get(workflow_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        try:
+            await getattr(c.workflow, action)(workflow_id, by=_by(request))
+        except (InvalidWorkflowTransition, InvalidTransition) as exc:
+            # BOTH: the workflow raises its own type, and pause/resume also
+            # move the MISSION, which raises the mission's. Catching only one
+            # turned an illegal transition into a 500 — caught by
+            # test_an_illegal_workflow_transition_is_a_409.
+            raise HTTPException(409, str(exc)) from exc
+        return {"workflow": c.workflow.get(workflow_id).to_dict()}
+
+    @r.post("/workflows/{workflow_id}/pause")
+    async def pause_workflow(workflow_id: str, request: Request):
+        return await _workflow_action(workflow_id, "pause", request)
+
+    @r.post("/workflows/{workflow_id}/resume")
+    async def resume_workflow(workflow_id: str, request: Request):
+        return await _workflow_action(workflow_id, "resume", request)
+
+    @r.post("/workflows/{workflow_id}/cancel")
+    async def cancel_workflow(workflow_id: str, request: Request):
+        return await _workflow_action(workflow_id, "cancel", request)
+
+    # --- tasks --------------------------------------------------------------
+    @r.post("/tasks/{task_id}/retry")
+    async def retry_task(task_id: str, request: Request):
+        return await _task_action(task_id, "retry", request)
+
+    @r.post("/tasks/{task_id}/skip")
+    async def skip_task(task_id: str, request: Request):
+        return await _task_action(task_id, "skip", request)
+
+    async def _task_action(task_id: str, action: str, request: Request):
+        c = container()
+        try:
+            t = await getattr(c.workflow, action)(task_id, by=_by(request))
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (InvalidWorkflowTransition, InvalidTransition,
+                InvalidTaskTransition, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"task": t.to_dict()}
+
+    @r.post("/tasks/{task_id}/assign")
+    async def assign_task(task_id: str, body: AssignBody, request: Request):
+        c = container()
+        try:
+            t = await c.workflow.assign(task_id, body.specialist_id, by=_by(request))
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except NoSpecialist as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (InvalidWorkflowTransition, InvalidTransition,
+                InvalidTaskTransition, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"task": t.to_dict()}
+
+    @r.get("/missions/{mission_id}/artifacts")
+    async def list_artifacts(mission_id: str):
+        """What the agents produced. This is what a handoff is built from, so
+        it is also the answer to "what does the next agent actually know?"."""
+        c = container()
+        try:
+            c.missions.get(mission_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"artifacts": [a.to_dict() for a in c.store.artifacts.for_mission(mission_id)]}
 
     # --- MCP servers --------------------------------------------------------
     #
