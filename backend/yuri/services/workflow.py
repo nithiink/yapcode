@@ -581,6 +581,7 @@ class WorkflowEngine:
         # `unavailable`, and `passed()` does not count that as a pass: a
         # project with no test command cannot claim `tests_pass`.
         results = await self._verify(t, w)
+        self._record_verdicts(t, results)
         if not verify.passed(results):
             self._verification_failed(t, w, results)
             await self.advance(w.id)
@@ -593,6 +594,18 @@ class WorkflowEngine:
             "specialist_id": t.specialist_id, "attempts": t.attempts})
         self.journal.append(f"task '{t.title}' completed")
         await self.advance(w.id)
+
+    def _record_verdicts(self, t: Task, results: list[verify.VerificationResult]) -> None:
+        """Keep each check's verdict ON THE TASK.
+
+        verification.failed carries them too, but an event is a moment and the
+        timeline is a page: a user opening a mission an hour later, or after a
+        reload, would see a task with declared checks and no sign of what they
+        said. Written into `result`, which is already a JSON column, so the one
+        workflow fetch the timeline makes carries everything it renders.
+        """
+        t.result = {**(t.result or {}), "verification": [r.to_dict() for r in results]}
+        self.store.tasks.update(t)
 
     def _ingest(self, t: Task) -> None:
         """Record what the task produced as artifacts (spec §9).
@@ -664,6 +677,7 @@ class WorkflowEngine:
             # Straight back through the same path a finished turn takes, so
             # there is one implementation of what a verdict means.
             results = await self._verify(t, w)
+            self._record_verdicts(t, results)
             if not verify.passed(results):
                 self._verification_failed(t, w, results)
                 return

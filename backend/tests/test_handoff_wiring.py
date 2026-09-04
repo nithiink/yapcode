@@ -272,3 +272,33 @@ class HandoffEventTests(Wiring):
         [ev] = self._handoffs()
         for mode in ("normal", "quiet"):
             self.assertIsNone(NarrationService().line_for(ev, mode), mode)
+
+
+class VerdictsAreKeptTests(Wiring):
+    """A verdict that lives only in an event is a verdict the timeline cannot
+    show after a reload."""
+
+    async def test_a_completed_task_keeps_the_verdicts_that_passed_it(self):
+        await self.engine.advance(self.w.id)
+        await self._run("investigate", "found it")     # no checks declared
+        t = self.store.tasks.get(self._task("investigate").id)
+        self.assertEqual(t.result.get("verification"), [])
+
+    async def test_a_task_that_failed_verification_keeps_why(self):
+        await self.engine.advance(self.w.id)
+        await self._run("investigate", "found it")
+        await self._run("fix the bug", "fixed it")
+        t = self._task("run the tests")
+        await self.engine.on_task_finished(t.id, ok=True, result={"assistant_text": "done"})
+        kept = self.store.tasks.get(t.id).result.get("verification")
+        self.assertTrue(kept, "the verdicts were not kept on the task")
+        # No test command is configured, so tests_pass could not RUN — which
+        # is not a pass, and must not read like one.
+        self.assertEqual(kept[0]["check"], "tests_pass")
+        self.assertEqual(kept[0]["verdict"], "unavailable")
+
+    async def test_recording_the_verdicts_does_not_lose_the_agents_text(self):
+        await self.engine.advance(self.w.id)
+        await self._run("investigate", "the cause is here")
+        t = self.store.tasks.get(self._task("investigate").id)
+        self.assertEqual(t.result.get("assistant_text"), "the cause is here")
