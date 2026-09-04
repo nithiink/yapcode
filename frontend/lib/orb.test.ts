@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { CORNER, DOCK_W, ORB_HUE, ORB_HUE_WAITING, look, orbState, pointCount, sphere, step, target } from "./orb.ts";
+import { CORNER, DOCK_W, ORB_HUE, ORB_HUE_WAITING, drift, look, persistence, orbState, pointCount, sphere, step, target } from "./orb.ts";
 
 test("centre target scales with the viewport, the corner does not", () => {
   const small = target(1000, 800, true);
@@ -159,12 +159,13 @@ test("at home she never sits behind the dock", () => {
   }
 });
 
-test("a wide stage keeps the design's proportions exactly", () => {
-  // The clamp is a fallback for narrow windows, not a new layout: where the
-  // design's own numbers fit, they must survive untouched.
+test("a wide stage centres her and applies the current proportions exactly", () => {
+  // The clamp is a fallback for narrow windows, not a new layout: where she
+  // fits, the numbers apply untouched. These were 0.45 across and 0.34 of the
+  // short side; both changed deliberately — smaller, and actually centred.
   const t = target(1920, 1080, false);
-  assert.equal(t.x, 1920 * 0.45);
-  assert.equal(t.r, 1080 * 0.34);
+  assert.equal(t.x, 1920 * 0.5);
+  assert.equal(t.r, 1080 * 0.26);
   assert.equal(t.y, 1080 * 0.47);
 });
 
@@ -201,4 +202,50 @@ test("the user talking is visible, and outranked by anything needing them", () =
   // Priority is unchanged: a decision waiting on the user still wins.
   assert.equal(orbState("listening", [], 1), "waiting");
   assert.equal(orbState("speaking", [], 0), "speaking");
+});
+
+test("drift never repeats visibly and stays small", () => {
+  // A drift that loops reads as an animation, which is the opposite of the
+  // point: she should look alive, not animated.
+  const seen = new Set<string>();
+  let maxOff = 0;
+  for (let t = 0; t < 20000; t += 7) {
+    const d = drift(t, 260);
+    maxOff = Math.max(maxOff, Math.hypot(d.dx, d.dy));
+    seen.add(`${d.dx.toFixed(1)},${d.dy.toFixed(1)}`);
+  }
+  assert.ok(seen.size > 2000, `drift path repeats: only ${seen.size} distinct positions`);
+  // Two axes, so the diagonal maximum is ~2.26x the per-axis amplitude.
+  assert.ok(maxOff < 260 * 0.07, `drift wanders ${maxOff.toFixed(0)}px — that is a move, not a breath`);
+  assert.ok(maxOff > 260 * 0.02, `drift of ${maxOff.toFixed(0)}px is too small to notice at all`);
+});
+
+test("drift scales with her size, so the corner sways as gently as the centre", () => {
+  // A fixed pixel offset that is a sway at 260px is a twitch at 54.
+  const big = drift(500, 260), small = drift(500, 54);
+  assert.ok(Math.hypot(big.dx, big.dy) > Math.hypot(small.dx, small.dy) * 3);
+});
+
+test("every state holds some trail, and waiting holds the least", () => {
+  // Fading instead of clearing is what gives motion a wake. The pulse that
+  // exists to catch the eye needs crisp edges, so it keeps the least.
+  const states = ["idle", "listening", "working", "waiting", "speaking"] as const;
+  for (const s of states) {
+    const p = persistence(s);
+    assert.ok(p > 0 && p < 1, `${s}: ${p}`);
+  }
+  assert.equal(Math.min(...states.map(persistence)), persistence("waiting"));
+  assert.equal(Math.max(...states.map(persistence)), persistence("speaking"));
+});
+
+test("she is smaller than she was, and centred where she fits", () => {
+  // 0.34 of the short side forced her permanently left of centre to clear the
+  // dock; 0.26 lets her actually sit in the middle.
+  const wide = target(1944, 1000, false);
+  assert.equal(wide.x, 972, "not centred on a wide stage");
+  assert.ok(wide.r < 1000 * 0.28, `radius ${wide.r} is not smaller`);
+  // Narrow: visible and off-centre beats symmetrical and hidden.
+  const narrow = target(1000, 650, false);
+  assert.ok(narrow.x < 500, "should shift left rather than sit under the dock");
+  assert.ok(narrow.x + narrow.r <= 1000 - DOCK_W - 1);
 });

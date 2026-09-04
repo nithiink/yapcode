@@ -38,8 +38,15 @@ const GAP = 24;
 export function target(w: number, h: number, engaged: boolean): Target {
   if (engaged) return { x: w - CORNER.dx, y: CORNER.y, r: CORNER.r };
   const free = Math.max(w - DOCK_W, w * 0.5);
-  const r = Math.min(Math.min(w, h) * 0.34, free * 0.42);
-  return { x: Math.min(w * 0.45, Math.max(free - r - GAP, r + GAP)), y: h * 0.47, r };
+  // 0.26 of the short side, down from 0.34. Smaller is what makes true
+  // centring possible: at 0.34 a centred orb ran into the dock on anything
+  // under a very wide window, so it had to be nudged left permanently.
+  const r = Math.min(Math.min(w, h) * 0.26, free * 0.42);
+  // Genuinely centred (0.5, not 0.45) wherever it fits — which is now most
+  // desktop widths. The clamp still shifts her left rather than let the dock
+  // cover her, so on a narrow window she is off-centre instead of hidden;
+  // being visible beats being symmetrical.
+  return { x: Math.min(w * 0.5, Math.max(free - r - GAP, r + GAP)), y: h * 0.47, r };
 }
 
 /** One lerp step. Position and radius move together — a separate radius
@@ -180,4 +187,38 @@ export function orbState(
 export function pointCount(reducedMotion: boolean, cores: number): number {
   if (reducedMotion) return 500;
   return cores <= 4 ? 600 : 1500;
+}
+
+/** A slow wander of her centre, in pixels, so she is never perfectly still.
+ *
+ *  Two incommensurable frequencies per axis, so the path never visibly loops —
+ *  a repeating drift reads as an animation, which is the opposite of the
+ *  intended effect. Amplitude is a fraction of her radius rather than a fixed
+ *  pixel count, so she drifts the same *relative* amount in the corner as at
+ *  centre; a fixed offset that is a gentle sway at 260px is a twitch at 54.
+ *
+ *  Deliberately tiny. This should be the difference between a photograph and
+ *  a held breath, not something the user can point at.
+ */
+export function drift(t: number, radius: number): { dx: number; dy: number } {
+  const a = radius * 0.028;
+  return {
+    dx: (Math.sin(t * 0.0043) + Math.sin(t * 0.0011) * 0.6) * a,
+    dy: (Math.cos(t * 0.0037) + Math.sin(t * 0.0009) * 0.6) * a,
+  };
+}
+
+/** How much of the previous frame survives into this one, 0..1.
+ *
+ *  The canvas is faded rather than cleared, so motion leaves a wake — the
+ *  glide to the corner becomes a comet, and her breathing has a soft edge
+ *  instead of a hard one. Speaking holds a longer trail because that is when
+ *  she is most alive; `waiting` holds almost none, because a pulse meant to
+ *  catch the eye needs crisp edges to do it.
+ */
+export function persistence(state: OrbState): number {
+  if (state === "speaking") return 0.55;
+  if (state === "waiting") return 0.15;
+  if (state === "working") return 0.45;
+  return 0.35;
 }

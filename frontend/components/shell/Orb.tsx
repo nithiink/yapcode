@@ -5,7 +5,8 @@
 // two things that keep it from burning a laptop battery — a cloud sized to
 // the machine, and a loop that stops when nothing can see it.
 import { useEffect, useRef } from "react";
-import { look, orbState, pointCount, sphere, step, target, type Target } from "@/lib/orb.ts";
+import { drift, look, orbState, persistence, pointCount, sphere, step, target,
+         type Target } from "@/lib/orb.ts";
 import { useYuri } from "@/components/VoiceProvider";
 
 function rgb(hex: string): [number, number, number] {
@@ -33,6 +34,11 @@ export function Orb({ engaged }: { engaged: boolean }) {
     if (!cv || !cx) return;
 
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    // The canvas is FADED rather than cleared each frame, so motion leaves a
+    // wake. That needs the page's own background colour, read from the token
+    // so it cannot drift from it — a hardcoded hex here would show up as a
+    // faint rectangle the day --bg changes.
+    const bg = (getComputedStyle(document.documentElement).getPropertyValue("--bg") || "#1a1917").trim();
     const pts = sphere(pointCount(reduced, navigator.hardwareConcurrency || 8));
 
     let w = 0, h = 0;
@@ -55,7 +61,6 @@ export function Orb({ engaged }: { engaged: boolean }) {
 
     const frame = () => {
       t += 1;
-      cx.clearRect(0, 0, w, h);
       const s = live.current;
       const to = target(w, h, s.engaged);
       pos = pos ? step(pos, to) : to;
@@ -73,11 +78,44 @@ export function Orb({ engaged }: { engaged: boolean }) {
       }
 
       const st = orbState(s.vstate, s.sessions, s.approvals.length);
+
+      // Fade, don't clear: the previous frame decays instead of vanishing, so
+      // the glide to the corner draws a comet and her breathing has a soft
+      // edge. `reduced` opts out entirely — a persistent trail is motion, and
+      // someone who asked for less of it means this too.
+      if (reduced) {
+        cx.clearRect(0, 0, w, h);
+      } else {
+        cx.globalAlpha = 1 - persistence(st);
+        cx.fillStyle = bg;
+        cx.fillRect(0, 0, w, h);
+        cx.globalAlpha = 1;
+      }
       // Live loudness, straight off the analyser's envelope. Read through the
       // ref rather than through props: this changes ~60 times a second and
       // must never cause a React render.
-      const { hue, alpha, spin, jitter, scale, wave, waveDepth } =
-        look(st, t, ampRef.current ?? 0);
+      const amp = ampRef.current ?? 0;
+      const { hue, alpha, spin, jitter, scale, wave, waveDepth } = look(st, t, amp);
+      // A slow wander, so she is never perfectly still. Applied to the drawn
+      // position only — never to `pos` itself, or the lerp would chase the
+      // drift and the two would compound into a wobble.
+      const dr = reduced ? { dx: 0, dy: 0 } : drift(t, pos.r);
+      const cxp = pos.x + dr.dx;
+      const cyp = pos.y + dr.dy;
+
+      // Her core. A uniform shell of points reads as an object; something
+      // brighter at the centre reads as a thing with an inside. It breathes
+      // with her voice, which is the whole reason it is here.
+      const coreR = pos.r * (0.42 + amp * 0.22);
+      const g = cx.createRadialGradient(cxp, cyp, 0, cxp, cyp, coreR);
+      const [cr0, cg0, cb0] = rgb(hue);
+      g.addColorStop(0, `rgba(${cr0},${cg0},${cb0},${(0.16 + amp * 0.2).toFixed(3)})`);
+      g.addColorStop(0.55, `rgba(${cr0},${cg0},${cb0},${(0.05 + amp * 0.07).toFixed(3)})`);
+      g.addColorStop(1, `rgba(${cr0},${cg0},${cb0},0)`);
+      cx.fillStyle = g;
+      cx.beginPath();
+      cx.arc(cxp, cyp, coreR, 0, Math.PI * 2);
+      cx.fill();
       const [cr, cg, cb] = rgb(hue);
       const rot = t * spin;
       const ca = Math.cos(rot), sa = Math.sin(rot);
@@ -100,8 +138,8 @@ export function Orb({ engaged }: { engaged: boolean }) {
         let disp = 1;
         if (jitter) disp += Math.sin(t * 0.05 + i * 0.7) * jitter;
         if (wave) disp += Math.sin(waveDepth - z2 * 3.2) * wave;
-        const sx = pos.x + x1 * pos.r * k * disp * scale;
-        const sy = pos.y + y1 * pos.r * k * disp * scale;
+        const sx = cxp + x1 * pos.r * k * disp * scale;
+        const sy = cyp + y1 * pos.r * k * disp * scale;
         // Depth keys both brightness and size: that pairing is what makes a
         // flat scatter of squares read as a sphere.
         const depth = (z2 + 1) / 2;
