@@ -18,7 +18,7 @@ function rgb(hex: string): [number, number, number] {
 
 export function Orb({ engaged }: { engaged: boolean }) {
   const cvRef = useRef<HTMLCanvasElement>(null);
-  const { vstate, sessions, approvals } = useYuri();
+  const { vstate, sessions, approvals, ampRef } = useYuri();
 
   // The loop reads its inputs through a ref rather than restarting on every
   // change: sessions refresh on a 2.5s poll, and a loop that tore down and
@@ -73,7 +73,11 @@ export function Orb({ engaged }: { engaged: boolean }) {
       }
 
       const st = orbState(s.vstate, s.sessions, s.approvals.length);
-      const { hue, alpha, spin, jitter, scale } = look(st, t);
+      // Live loudness, straight off the analyser's envelope. Read through the
+      // ref rather than through props: this changes ~60 times a second and
+      // must never cause a React render.
+      const { hue, alpha, spin, jitter, scale, wave, waveDepth } =
+        look(st, t, ampRef.current ?? 0);
       const [cr, cg, cb] = rgb(hue);
       const rot = t * spin;
       const ca = Math.cos(rot), sa = Math.sin(rot);
@@ -88,9 +92,16 @@ export function Orb({ engaged }: { engaged: boolean }) {
         // Weak perspective (d = 1.9) so the near face reads as nearer without
         // the cloud looking like a fisheye lens.
         const k = 1.9 / (1.9 - z2 * 0.55);
-        const wob = jitter ? 1 + Math.sin(t * 0.05 + i * 0.7) * jitter : 1;
-        const sx = pos.x + x1 * pos.r * k * wob * scale;
-        const sy = pos.y + y1 * pos.r * k * wob * scale;
+        // Turbulence (working) and the speaking ripple are both per-point
+        // radial displacements, so they compose into one multiplier. The
+        // ripple is phased BY DEPTH, which is what makes it read as a wave
+        // travelling out through the cloud rather than the whole sphere
+        // throbbing in unison.
+        let disp = 1;
+        if (jitter) disp += Math.sin(t * 0.05 + i * 0.7) * jitter;
+        if (wave) disp += Math.sin(waveDepth - z2 * 3.2) * wave;
+        const sx = pos.x + x1 * pos.r * k * disp * scale;
+        const sy = pos.y + y1 * pos.r * k * disp * scale;
         // Depth keys both brightness and size: that pairing is what makes a
         // flat scatter of squares read as a sphere.
         const depth = (z2 + 1) / 2;

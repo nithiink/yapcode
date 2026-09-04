@@ -157,6 +157,9 @@ export type YuriContext = {
   voiceUsage: VoiceUsage | null;
   narrationBusy: boolean;
   orbRef: RefObject<HTMLDivElement | null>;
+  // Live audio loudness (0..1) for the canvas orb. A ref so reading it every
+  // frame costs no re-render.
+  ampRef: RefObject<number>;
   glowRef: RefObject<HTMLDivElement | null>;
   modeBusy: string | null;
   switchMode: (handle: string, mode: string) => Promise<void>;
@@ -235,6 +238,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   // Per-stream analysers feeding ONE smoothed --amp: keyed by source so the
   // mic and the assistant audio can both drive the orb without clobbering
   // each other. smoothed holds the envelope state across rAF frames.
+  // Live loudness in 0..1, the louder of mic and her own speech, envelope
+  // smoothed. Read by components/shell/Orb.tsx's frame loop.
+  const ampRef = useRef(0);
   const analysersRef = useRef<Map<"mic" | "remote", { analyser: AnalyserNode; buf: Uint8Array }>>(
     new Map(),
   );
@@ -854,6 +860,12 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     // Envelope: snap up quickly, ease down slowly.
     const k = target > smoothedRef.current ? 0.35 : 0.08;
     smoothedRef.current += (target - smoothedRef.current) * k;
+    // The canvas orb reads this every frame. It used to be written only as a
+    // CSS variable on the DOM orb, which the Yuri OS re-shell deleted — so
+    // this envelope was computed 60 times a second and thrown away, and every
+    // one of her states looked the same. A ref, not state: the orb must not
+    // re-render at audio rate.
+    ampRef.current = smoothedRef.current;
     const amp = smoothedRef.current.toFixed(3);
     orbRef.current?.style.setProperty("--amp", amp);
     glowRef.current?.style.setProperty("--amp", amp);
@@ -1253,6 +1265,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       voiceUsage,
       narrationBusy,
       orbRef,
+      ampRef,
       glowRef,
       modeBusy,
       switchMode,

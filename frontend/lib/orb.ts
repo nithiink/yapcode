@@ -16,7 +16,7 @@ export const EASE = 0.075;
  *  corner she is chrome, and chrome should not grow with the window. */
 export const CORNER = { dx: 92, y: 130, r: 54 };
 
-export type OrbState = "idle" | "working" | "waiting" | "speaking";
+export type OrbState = "idle" | "listening" | "working" | "waiting" | "speaking";
 export type Target = { x: number; y: number; r: number };
 
 /** The dock's footprint on the right of the stage (its width plus its margin).
@@ -66,10 +66,6 @@ export function sphere(n: number): [number, number, number][] {
   return out;
 }
 
-/** Per-state look. Only `waiting` pulses, because it is the one state that is
- *  costing the user time; making `working` pulse too would spend the signal on
- *  the state they are happy to leave alone. Hue stays hers in every state — a
- *  provider colour on the orb would make her look like a session. */
 /** Yuri's colour on the canvas.
  *
  *  Brighter than the `--acc` token (#dd8a6a) the rest of the UI uses, and
@@ -89,23 +85,70 @@ export const ORB_HUE = "#ffb489";
  *  what the pulse is already spending. */
 export const ORB_HUE_WAITING = "#ffb281";
 
-export function look(state: OrbState, t: number): {
+/** How each state looks. `amp` is live audio loudness in 0..1 — the RMS
+ *  envelope VoiceProvider already computes from both the microphone and her
+ *  own speech, fast attack, slow release. It was written to a CSS variable on
+ *  the pre-canvas DOM orb and has gone NOWHERE since the re-shell, which is
+ *  most of why every state looked alike: the only thing marking "speaking"
+ *  was a 3.2% scale wobble, invisible on a sphere.
+ *
+ *  Each state gets a distinct KIND of motion, not just a different speed,
+ *  because speed alone is not legible on a rotating point cloud:
+ *
+ *    idle       slow breathing — at rest, not switched off
+ *    listening  the cloud TIGHTENS as the user speaks — leaning in
+ *    speaking   it SWELLS with her own voice, with a ripple travelling
+ *               outward, so the sound looks like it comes from her
+ *    working    fast spin plus turbulence — churning
+ *    waiting    a strong slow pulse; the one state that costs the user time,
+ *               so the one that should catch peripheral vision
+ *
+ *  `wave` and `waveDepth` are consumed by the renderer as a depth-phased
+ *  radial displacement; 0 means no ripple.
+ */
+export function look(state: OrbState, t: number, amp = 0): {
   hue: string; alpha: number; spin: number; jitter: number; scale: number;
+  wave: number; waveDepth: number;
 } {
-  const spin = state === "working" ? 0.0125 : state === "speaking" ? 0.0075 : 0.0028;
+  // NaN has to be caught explicitly: Math.max(0, Math.min(1, NaN)) is NaN,
+  // which propagates into every coordinate and draws nothing at all — she
+  // would simply vanish. The envelope divides by a buffer length, so a zero
+  // there is enough to produce one.
+  const a = Number.isFinite(amp) ? Math.max(0, Math.min(1, amp)) : 0;
+  const still = { jitter: 0, wave: 0, waveDepth: 0 };
+
   if (state === "waiting") {
-    return { hue: ORB_HUE_WAITING, alpha: 0.82 + Math.sin(t * 0.045) * 0.18, spin, jitter: 0, scale: 1 };
+    // Brightness and a slight squash on the same phase, so the pulse reads
+    // even where colour does not.
+    const pulse = Math.sin(t * 0.045);
+    return { ...still, hue: ORB_HUE_WAITING, alpha: 0.82 + pulse * 0.18,
+             spin: 0.0028, scale: 1 + pulse * 0.035 };
   }
-  return {
-    hue: ORB_HUE,
-    // Idle is still visibly quieter than working — she should look at rest,
-    // not switched off. The old 0.52 crossed that line once the depth floor
-    // in Orb.tsx took the far side down to a sixth of it.
-    alpha: state === "idle" ? 0.88 : 1,
-    spin,
-    jitter: state === "working" ? 0.012 : 0,
-    scale: state === "speaking" ? 1 + Math.sin(t * 0.075) * 0.032 : 1,
-  };
+
+  if (state === "speaking") {
+    return { hue: ORB_HUE,
+             // Floored, so a quiet passage does not make her vanish mid-sentence.
+             alpha: 0.86 + a * 0.14,
+             spin: 0.0075, jitter: 0,
+             // Real loudness rather than a fixed sine. This is the fix.
+             scale: 1 + a * 0.18,
+             wave: 0.03 + a * 0.06, waveDepth: t * 0.11 };
+  }
+
+  if (state === "listening") {
+    return { ...still, hue: ORB_HUE, alpha: 0.8 + a * 0.2, spin: 0.004,
+             // Contracts where speaking swells — the opposite gesture, so the
+             // two can never be mistaken for each other.
+             scale: 1 - a * 0.07 };
+  }
+
+  if (state === "working") {
+    return { ...still, hue: ORB_HUE, alpha: 1, spin: 0.0125, jitter: 0.02, scale: 1 };
+  }
+
+  // idle: small and slow, but motion — she should not read as a frozen image.
+  return { ...still, hue: ORB_HUE, alpha: 0.88, spin: 0.0028,
+           scale: 1 + Math.sin(t * 0.016) * 0.02 };
 }
 
 /** Her state, in priority order: a decision waiting on the user outranks her
@@ -119,6 +162,10 @@ export function orbState(
   if (approvalCount > 0 || sessions.some((s) => s.status === "needs_permission" || s.status === "needs_choice"))
     return "waiting";
   if (vstate === "speaking") return "speaking";
+  // The user talking is worth showing. Without it she looks identical whether
+  // she is hearing them or ignoring them, which is the least reassuring thing
+  // a listening interface can do.
+  if (vstate === "listening" || vstate === "hearing") return "listening";
   // `running` is a turn executing right now. `status === "running"` is NOT
   // that — it means the session process is alive, which is true of every idle
   // session sitting at a prompt. Keying "working" off the status made her spin

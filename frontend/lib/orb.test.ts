@@ -56,24 +56,68 @@ test("sphere handles the degenerate sizes without NaN", () => {
   assert.ok(Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2]));
 });
 
-test("only waiting pulses, and every state keeps her own hue", () => {
-  const pulse = (s: Parameters<typeof look>[0]) =>
-    look(s, 0).alpha !== look(s, 40).alpha;
-  assert.ok(pulse("waiting"), "the one state that costs the user time must pulse");
-  for (const s of ["idle", "working"] as const) {
-    assert.ok(!pulse(s), `${s} should not pulse — it spends the signal`);
+test("every state keeps her own hue", () => {
+  for (const st of ["idle", "listening", "working", "speaking"] as const) {
+    assert.equal(look(st, 3).hue, ORB_HUE, st);
   }
-  // "speaking" breathes via scale, not alpha.
-  assert.ok(look("speaking", 0).scale !== look("speaking", 20).scale);
-  assert.equal(look("speaking", 0).alpha, look("speaking", 40).alpha);
-
-  // Her colour, not a colour that happens to start with the right two hex
-  // digits — the old regex here broke the moment the orb was brightened, which
-  // is a test pinning an implementation detail rather than the rule.
-  for (const s of ["idle", "working", "speaking"] as const) {
-    assert.equal(look(s, 3).hue, ORB_HUE, `${s} is not Yuri's colour`);
-  }
+  // Waiting runs a touch warmer so "something needs you" is a temperature
+  // change too, not brightness alone.
   assert.equal(look("waiting", 3).hue, ORB_HUE_WAITING);
+});
+
+test("every state moves, and no two move the same way", () => {
+  // The reported bug: "there is no motion when she is speaking, it just keeps
+  // spinning in all the stages". Previously only `waiting` varied at all and
+  // speaking's 3.2% scale wobble was invisible on a sphere. A state whose
+  // signature is identical to another's is a state the user cannot see.
+  const sig = (st: Parameters<typeof look>[0]) => {
+    const a = look(st, 0, 0.6), b = look(st, 40, 0.6);
+    return JSON.stringify([
+      a.spin, a.jitter, +(a.alpha !== b.alpha), +(a.scale !== b.scale),
+      +(a.wave > 0), +(a.scale > 1), +(a.scale < 1),
+    ]);
+  };
+  const states = ["idle", "listening", "working", "waiting", "speaking"] as const;
+  const seen = new Map<string, string>();
+  for (const st of states) {
+    const k = sig(st);
+    assert.ok(!seen.has(k), `${st} looks identical to ${seen.get(k)}`);
+    seen.set(k, st);
+  }
+});
+
+test("speaking is driven by her real voice, not a fixed animation", () => {
+  // VoiceProvider already computes this envelope from live audio; it was
+  // being written to a CSS variable on the DOM orb deleted in the re-shell,
+  // so it reached nothing.
+  const quiet = look("speaking", 0, 0);
+  const loud = look("speaking", 0, 1);
+  assert.ok(loud.scale > quiet.scale * 1.1, "loudness does not change her size");
+  assert.ok(loud.alpha > quiet.alpha, "loudness does not change her brightness");
+  assert.ok(loud.wave > quiet.wave, "the ripple does not track her voice");
+  assert.ok(quiet.alpha > 0.8, "a quiet passage must not make her vanish mid-sentence");
+});
+
+test("listening contracts where speaking swells", () => {
+  // Opposite gestures on purpose: the two states are adjacent in time and
+  // must never be mistaken for one another.
+  assert.ok(look("listening", 0, 0.8).scale < 1);
+  assert.ok(look("speaking", 0, 0.8).scale > 1);
+});
+
+test("amplitude is clamped, so a bad reading cannot distort her", () => {
+  for (const bad of [-5, 2, 99, NaN]) {
+    const l = look("speaking", 0, bad as number);
+    assert.ok(l.scale >= 1 && l.scale <= 1.19, `scale ${l.scale} for amp ${bad}`);
+    assert.ok(l.alpha >= 0.86 && l.alpha <= 1.0001, `alpha ${l.alpha} for amp ${bad}`);
+  }
+});
+
+test("only speaking ripples", () => {
+  for (const st of ["idle", "listening", "working", "waiting"] as const) {
+    assert.equal(look(st, 5, 1).wave, 0, st);
+  }
+  assert.ok(look("speaking", 5, 1).wave > 0);
 });
 
 test("working spins faster than idle", () => {
@@ -88,15 +132,17 @@ test("a decision waiting on the user outranks everything else", () => {
 
 test("state falls through speaking, then work, then idle", () => {
   assert.equal(orbState("speaking", [{ running: true }], 0), "speaking");
-  assert.equal(orbState("listening", [{ running: true }], 0), "working");
-  assert.equal(orbState("listening", [{ status: "stopped" }], 0), "idle");
+  // "connecting" stands in for "not speaking and not hearing anything" —
+  // `listening` and `hearing` are their own state now.
+  assert.equal(orbState("connecting", [{ running: true }], 0), "working");
+  assert.equal(orbState("connecting", [{ status: "stopped" }], 0), "idle");
   assert.equal(orbState("idle", [], 0), "idle");
 });
 
 test("a live session with no turn in flight is idle, not working", () => {
   // status "running" is the process being up, not work happening. Reading it
   // as work made her spin whenever anything at all was open.
-  assert.equal(orbState("listening", [{ status: "running", running: false }], 0), "idle");
+  assert.equal(orbState("connecting", [{ status: "running", running: false }], 0), "idle");
 });
 
 test("a modest machine or reduced motion gets the cheap cloud", () => {
@@ -145,4 +191,14 @@ test("idle still reads as at rest, not as switched off", () => {
   const working = look("working", 0).alpha;
   assert.ok(idle < working, "idle must stay quieter than working");
   assert.ok(idle > 0.6, `idle alpha ${idle} is dim enough to look broken`);
+});
+
+test("the user talking is visible, and outranked by anything needing them", () => {
+  // She looked identical whether she was hearing the user or ignoring them,
+  // which is the least reassuring thing a listening interface can do.
+  assert.equal(orbState("listening", [], 0), "listening");
+  assert.equal(orbState("hearing", [], 0), "listening");
+  // Priority is unchanged: a decision waiting on the user still wins.
+  assert.equal(orbState("listening", [], 1), "waiting");
+  assert.equal(orbState("speaking", [], 0), "speaking");
 });
