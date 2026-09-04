@@ -98,8 +98,11 @@ export function Orb({ engaged }: { engaged: boolean }) {
         // nothing: at 0.16 the back of the sphere was a sixth of an already
         // sub-1 alpha, which is what made her read as dim rather than distant.
         // The near/far ratio still carries the depth cue.
-        const a = alpha * (0.3 + depth * 0.7);
-        const px = 0.55 + depth * 1.05;
+        const a = alpha * (0.45 + depth * 0.55);
+        // Size is the one brightness lever that costs no saturation: more lit
+        // pixels rather than paler ones. Depth still drives it, so the cue
+        // survives — the near face is simply drawn heavier than it was.
+        const px = 0.85 + depth * 1.25;
         cx.fillStyle = `rgba(${cr},${cg},${cb},${a.toFixed(3)})`;
         cx.fillRect(sx, sy, px, px);
       }
