@@ -77,6 +77,20 @@ _pending_confirm: dict[str, Any] | None = None
 _confirm_consulted: bool = False
 
 
+def _declined_without_acting() -> None:
+    """Satisfy the central gate check for a confirm-tier tool that REFUSED.
+
+    dispatch_tool raises if a confirm-tier tool returns without consulting the
+    gate, because that would mean it acted ungated. A tool that returns having
+    done NOTHING — start_mission finding the mission already running — has
+    nothing to gate, and the alternative is that a correct refusal comes back
+    to the model as "the tool failed unexpectedly". Same reasoning that moved
+    the check off the `finally`: the gate protects actions, not returns.
+    """
+    global _confirm_consulted
+    _confirm_consulted = True
+
+
 def _confirm_gate(tool: str, target: str, token: str | None) -> str | None:
     """Consult the gate for `tool` acting on `target`.
 
@@ -754,6 +768,12 @@ async def _dispatch_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
 # not about task graphs.
 
 ERROR_SPEECH_MAX = 200
+# The most recent mission start, so a rapid second call is redirected to it
+# instead of silently starting a twin. Mirrors _last_start (start_session) --
+# same voice-model quirk, same shape. Advisory only: the durable check is
+# _running_mission_for(), which reads the store and so survives the reload
+# uvicorn does while the user is mid-sentence.
+_last_mission: dict[str, Any] | None = None
 # Words that carry no identifying information in a step title. Without this,
 # "run the tests" overlapped every title in the bug-fix template through
 # "the", and every spoken reference came back ambiguous.
@@ -762,7 +782,46 @@ STOPWORDS: frozenset[str] = frozenset({
     "task", "one", "its", "our", "any", "all", "out",
 })
 STEPS_SPEECH_MAX = 8
-DEFAULT_TEMPLATE = "bug-fix"
+# Which plan an ask gets, when the user did not name one.
+#
+# There was a single default ("bug-fix"), so "create a single-page website"
+# was planned as a bug hunt and a researcher was told to "Investigate the
+# bug" for a landing page. The `feature` template existed the whole time; the
+# default simply never looked at the goal.
+#
+# First match wins, so order matters: "fix the failing test" is a bug before
+# it is a test. The fallback is `single` -- one task, one specialist -- because
+# guessing a multi-step plan for an ask we did not understand is exactly how
+# "Investigate the bug" happened. A wrong guess here is also recoverable: the
+# plan is read back before anything runs, and it now NAMES the plan it chose.
+TEMPLATE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("bug-fix", ("bug", "broken", "crash", "crashes", "crashing", "hang", "hangs",
+                 "hanging", "fail", "failing", "fails", "error", "regression", "wrong",
+                 "fix", "fixing", "repair", "debug")),
+    ("code-review", ("review", "critique", "look over", "check over")),
+    ("refactor", ("refactor", "clean up", "tidy", "restructure", "rename", "extract",
+                  "simplify", "reorganise", "reorganize")),
+    ("research", ("investigate", "research", "find out", "look into", "why", "how does",
+                  "understand", "compare", "explore")),
+    ("feature", ("build", "create", "add", "make", "write", "design", "implement",
+                 "new", "website", "page", "feature", "support")),
+)
+FALLBACK_TEMPLATE = "single"
+
+
+def template_for(goal: str, available: dict) -> str:
+    """Pick a plan shape from what the user asked for.
+
+    Pure and separate from the tool so it can be tested against every phrasing
+    without a container.
+    """
+    # Padded both ends, so a bare `in` is a whole-word match: "fixture" must
+    # not read as "fix", and "newsletter" must not read as "new".
+    low = f" {' '.join((goal or '').lower().split())} ".replace(",", " ").replace(".", " ")
+    for name, words in TEMPLATE_HINTS:
+        if name in available and any(f" {word} " in low for word in words):
+            return name
+    return FALLBACK_TEMPLATE if FALLBACK_TEMPLATE in available else next(iter(available), "")
 
 
 def _live_workflow(m):
@@ -836,6 +895,27 @@ def _workflow_speech(m) -> dict:
             "more_steps": max(0, len(tasks) - len(steps))}
 
 
+def _running_mission_for(goal: str):
+    """A mission that is ALREADY doing this, or None.
+
+    Read from the store rather than from `_last_mission`, deliberately: the
+    in-memory note is lost every time uvicorn --reload restarts the process,
+    which happens while the user is mid-sentence. A duplicate that survives a
+    reload is exactly the one nobody would catch.
+
+    Matched on the goal, because that is what identity means here: the title
+    is derived from the goal, and the same request phrased once produces the
+    same goal string every time the model repeats the call.
+    """
+    want = " ".join((goal or "").lower().split())
+    if not want:
+        return None
+    for m in container().missions.active():
+        if " ".join((m.goal or m.title or "").lower().split()) == want:
+            return m
+    return None
+
+
 async def _start_mission(args: dict[str, Any]) -> dict[str, Any]:
     """Plan first, run only on the second call (spec §14.1).
 
@@ -849,10 +929,38 @@ async def _start_mission(args: dict[str, Any]) -> dict[str, Any]:
     goal = " ".join(str(args.get("goal") or "").split())
     if not goal:
         raise ValueError("what should the mission achieve? Ask the user, then call this again.")
-    template = str(args.get("template") or "").strip() or DEFAULT_TEMPLATE
+    template = (str(args.get("template") or "").strip()
+                or template_for(goal, c.workflow.templates))
     if template not in c.workflow.templates:
         known = ", ".join(sorted(c.workflow.templates))
         raise ValueError(f"there is no {template!r} plan. The ones you have are: {known}.")
+
+    # BEFORE the gate, and this is the whole fix for the loop observed on
+    # 2026-09-04. The model fires start_mission two or three times within
+    # seconds carrying the same token (the quirk _last_start exists for). The
+    # first call consumed it and started the mission; every later call found
+    # it spent, so the gate armed a FRESH token and answered "NOTHING HAS
+    # STARTED. Read this plan back and wait." That was false AND it was an
+    # instruction, so the plan got read back, the user said yes, and a second
+    # mission started. Five missions and five live agents from one request.
+    #
+    # The gate was working as designed. What it cannot know is that a mission
+    # already exists for this goal — so that is checked here, and checked
+    # against the store so a reload cannot forget it.
+    running = None if args.get("another") else _running_mission_for(goal)
+    if running is not None:
+        _declined_without_acting()
+        # No `confirm` key in this result, deliberately: handing back a fresh
+        # token is what let the next "yes" start another one.
+        title = clip_speech(running.title, TITLE_SPEECH_MAX)
+        return {"started": False, "already_running": True, "mission_id": running.id,
+                "title": title, "status": running.status,
+                "message": (
+                    f'"{title}" is ALREADY RUNNING — this exact mission is underway, so '
+                    "nothing new was started and you must NOT plan it again. Tell the user "
+                    "it is already going, and use workflow_status if they want to know where "
+                    "it has got to. Only if they explicitly want a SECOND, SEPARATE mission "
+                    "for the same thing, call start_mission again with another=true.")}
 
     # Keyed on the goal, not on a mission id: the first call has not created
     # anything yet, so the goal IS the identity of what is being confirmed —
@@ -873,14 +981,21 @@ async def _start_mission(args: dict[str, Any]) -> dict[str, Any]:
         return {"started": False, "confirm": token, "goal": goal, "template": template,
                 "plan": plan, "no_one_for": unfillable,
                 "message": (
-                    "NOTHING HAS STARTED. Read this plan back in one short sentence — who does "
-                    "what, in order — and wait for the user to agree. "
+                    f"NOTHING HAS STARTED. This is the {template!r} plan. Read it back in one "
+                    "short sentence — who does what, in order — and wait for the user to "
+                    "agree. "
                     + (f"Say that no one can do: {', '.join(unfillable)}. " if unfillable else "")
                     + f"Only then call start_mission again with confirm={token}.")}
 
     project = c.projects.resolve_or_create(str(args.get("project") or ""))
     title = " ".join(str(args.get("title") or "").split()) or goal[:60]
+    # Recorded BEFORE the (slow) create, so a concurrent duplicate call trips
+    # the guard rather than racing past it — the same reason start_session
+    # records its guard before starting.
+    global _last_mission
+    _last_mission = {"ts": time.monotonic(), "goal": goal, "mission_id": "", "title": title}
     m = c.missions.create(project, title, created_by="voice", goal=goal)
+    _last_mission = {"ts": time.monotonic(), "goal": goal, "mission_id": m.id, "title": title}
     w = await c.workflow.create(m, template, goal)
     await c.workflow.resume(w.id, by="voice")
     started = await c.workflow.advance(w.id)

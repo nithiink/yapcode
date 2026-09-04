@@ -47,8 +47,14 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def _start(self, **over):
-        """Through the real two calls, because that IS the surface."""
-        args = {"goal": "stop the cycle detector hanging", "project": self.root}
+        """Through the real two calls, because that IS the surface.
+
+        The template is named rather than inferred: these tests are about
+        assign/skip/retry, and leaving them to depend on which plan a phrasing
+        maps to would make them move whenever TEMPLATE_HINTS changes.
+        """
+        args = {"goal": "stop the cycle detector hanging", "project": self.root,
+                "template": "bug-fix"}
         args.update(over)
         armed = await tools.dispatch_tool("start_mission", dict(args))
         self.assertFalse(armed["started"])
@@ -304,3 +310,153 @@ class TheGateOnlyFiresWhenSomethingRanTests(Base):
         with mock.patch.object(tools, "_dispatch", ungated):
             with self.assertRaises(AssertionError):
                 await tools.dispatch_tool("skip_task", {})
+
+
+class TheDuplicateMissionLoopTests(Base):
+    """The loop observed live on 2026-09-04, and why it ran.
+
+    Gemini fires `start_mission` two or three times within a couple of
+    seconds, carrying the SAME confirm token — the identical quirk
+    `start_session`'s `_last_start` guard exists for. The first call consumed
+    the token and started the mission. Every later call found the token spent,
+    so the gate armed a FRESH one and answered "NOTHING HAS STARTED. Read this
+    plan back and wait for the user to agree."
+
+    That sentence was false — a mission was already running — and it was also
+    an instruction, so the model read the plan back, the user said yes, and a
+    second mission started. Five missions and five live OpenCode agents from
+    one request.
+
+    The gate was working exactly as designed; what was missing is that the
+    gate has no idea a mission was just created for this goal.
+    """
+
+    async def _first_two_calls(self):
+        args = {"goal": "build the landing page", "project": self.root}
+        armed = await tools.dispatch_tool("start_mission", dict(args))
+        started = await tools.dispatch_tool("start_mission", {**args, "confirm": armed["confirm"]})
+        self.assertTrue(started["started"])
+        return args, armed, started
+
+    async def test_a_repeat_call_does_not_start_a_second_mission(self):
+        args, armed, started = await self._first_two_calls()
+        again = await tools.dispatch_tool("start_mission", {**args, "confirm": armed["confirm"]})
+        self.assertFalse(again["started"])
+        self.assertEqual(len(self.c.missions.active()), 1, "a second mission was created")
+
+    async def test_a_repeat_call_never_claims_nothing_has_started(self):
+        # The sentence that drove the loop. It has to be impossible to say
+        # once something HAS started.
+        args, armed, _ = await self._first_two_calls()
+        again = await tools.dispatch_tool("start_mission", {**args, "confirm": armed["confirm"]})
+        self.assertNotIn("NOTHING HAS STARTED", again["message"])
+        self.assertIn("already", again["message"].lower())
+
+    async def test_a_repeat_call_points_at_the_mission_that_is_running(self):
+        # So the model can say "it's underway" instead of re-planning.
+        args, armed, started = await self._first_two_calls()
+        again = await tools.dispatch_tool("start_mission", {**args, "confirm": armed["confirm"]})
+        self.assertEqual(again["mission_id"], started["mission_id"])
+        self.assertTrue(again["already_running"])
+
+    async def test_a_repeat_call_does_not_hand_back_a_fresh_token(self):
+        # A new token is what made the next "yes" start another mission.
+        args, armed, _ = await self._first_two_calls()
+        again = await tools.dispatch_tool("start_mission", {**args, "confirm": armed["confirm"]})
+        self.assertNotIn("confirm", again)
+
+    async def test_a_call_with_no_token_at_all_also_refuses_to_replan(self):
+        # The model sometimes drops the token entirely on the retry.
+        args, _, _ = await self._first_two_calls()
+        again = await tools.dispatch_tool("start_mission", dict(args))
+        self.assertFalse(again["started"])
+        self.assertTrue(again["already_running"])
+
+    async def test_the_user_can_still_deliberately_start_a_second_one(self):
+        # Refusing forever would make "actually, do that again separately"
+        # impossible. Same escape start_session's guard has.
+        args, _, _ = await self._first_two_calls()
+        armed = await tools.dispatch_tool("start_mission", {**args, "another": True})
+        self.assertFalse(armed["started"])
+        second = await tools.dispatch_tool(
+            "start_mission", {**args, "another": True, "confirm": armed["confirm"]})
+        self.assertTrue(second["started"])
+        self.assertEqual(len(self.c.missions.active()), 2)
+
+    async def test_a_different_goal_is_never_blocked_by_the_guard(self):
+        await self._first_two_calls()
+        armed = await tools.dispatch_tool("start_mission", {"goal": "something else entirely",
+                                                            "project": self.root})
+        self.assertFalse(armed["started"])
+        self.assertTrue(armed["confirm"], "a different goal was refused")
+        self.assertIn("NOTHING HAS STARTED", armed["message"])
+
+    async def test_the_guard_survives_a_restart_because_it_reads_the_store(self):
+        # In-memory bookkeeping would forget across a reload — and uvicorn's
+        # --reload restarts the process while the user is talking.
+        args, armed, started = await self._first_two_calls()
+        tools._last_mission = None          # as if the process had restarted
+        again = await tools.dispatch_tool("start_mission", dict(args))
+        self.assertTrue(again["already_running"])
+        self.assertEqual(again["mission_id"], started["mission_id"])
+
+    async def test_a_finished_mission_does_not_block_starting_it_again(self):
+        # The guard is about work IN FLIGHT, not about history.
+        args, armed, started = await self._first_two_calls()
+        await self.c.missions.cancel(started["mission_id"], by="test")
+        armed2 = await tools.dispatch_tool("start_mission", dict(args))
+        self.assertTrue(armed2.get("confirm"), "a cancelled mission still blocked a new one")
+
+
+class TheTemplateChoiceTests(Base):
+    """"Create a website" went to the bug-fix plan, so a researcher was told
+    to "Investigate the bug" for a landing page. `feature` existed the whole
+    time; the default just never looked at the goal."""
+
+    async def _plan_for(self, goal: str) -> dict:
+        return await tools.dispatch_tool("start_mission", {"goal": goal, "project": self.root})
+
+    async def test_building_something_does_not_get_the_bug_plan(self):
+        out = await self._plan_for(
+            "create a single-page HTML website describing what Yuri can do")
+        self.assertNotEqual(out["template"], "bug-fix")
+        steps = " ".join(p["step"] for p in out["plan"]).lower()
+        self.assertNotIn("bug", steps, f"a website build was planned as {out['template']}")
+
+    async def test_fixing_something_still_gets_the_bug_plan(self):
+        out = await self._plan_for("fix the crash when the cycle detector hangs")
+        self.assertEqual(out["template"], "bug-fix")
+
+    async def test_each_kind_of_ask_lands_somewhere_sensible(self):
+        for goal, expected in [
+            ("build a landing page for the docs", "feature"),
+            ("add a dark mode toggle", "feature"),
+            ("fix the failing login test", "bug-fix"),
+            ("the export button is broken", "bug-fix"),
+            ("refactor the session manager", "refactor"),
+            ("look into why startup is slow", "research"),
+            ("review the changes on this branch", "code-review"),
+        ]:
+            out = await self._plan_for(goal)
+            self.assertEqual(out["template"], expected, goal)
+            # Each call arms the gate; clear it so the next goal starts clean.
+            tools._pending_confirm = None
+
+    async def test_an_ask_that_matches_nothing_gets_the_simplest_plan(self):
+        # `single` is one task and one specialist: never absurd, whatever the
+        # goal turns out to be. Guessing a multi-step plan for an ask we did
+        # not understand is how "Investigate the bug" happened.
+        out = await self._plan_for("xyzzy plugh")
+        self.assertEqual(out["template"], "single")
+
+    async def test_the_chosen_plan_is_named_so_she_can_say_it(self):
+        out = await self._plan_for("build a landing page")
+        self.assertIn(out["template"], out["message"])
+
+    async def test_an_explicit_template_always_wins(self):
+        out = await self._plan_for_template("build a landing page", "research")
+        self.assertEqual(out["template"], "research")
+
+    async def _plan_for_template(self, goal: str, template: str) -> dict:
+        return await tools.dispatch_tool("start_mission", {"goal": goal, "template": template,
+                                                            "project": self.root})
