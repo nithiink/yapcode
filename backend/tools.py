@@ -24,6 +24,7 @@ from typing import Any
 
 from slash_commands import list_slash_commands
 from yuri.app import container, stamp_last_spoke
+from yuri.own import search as own_search
 from yuri.domain.mission import InvalidTransition
 from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_speech
 
@@ -378,6 +379,29 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         
         " A request to TALK or narrate less is NOT this — that is set_narration. Muting cannot be undone by voice (you will not hear them), so the user unmutes with the on-screen button: never promise to unmute yourself, and never reach for this when they only asked you to say less."),
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "type": "function",
+        "name": "web_search",
+        "tier": "safe",
+        "category": "own",
+        "description": ("Look something up on the web and get a short answer with its sources. "
+                        "Use this for anything you don't know or can't be sure is current — "
+                        "news, prices, versions, whether something still exists. Do NOT use it "
+                        "for something you already know, and do NOT re-search to double-check "
+                        "an answer you just gave; each call costs time the user is waiting "
+                        "through. One search per call: it will not follow up on its own. "
+                        "CITE BY NAME, never by URL — say \"Wikipedia says\", because a spoken "
+                        "URL is unusable and cannot be checked. If `grounded` comes back false "
+                        "there were no sources, so say you couldn't find one rather than "
+                        "presenting the answer as looked-up."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to search for, in plain words."},
+            },
+            "required": ["query"],
+        },
     },
     {
         "type": "function",
@@ -748,6 +772,14 @@ async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
         title = clip_speech(m.title, TITLE_SPEECH_MAX)
         return {"mission_id": m.id, "title": title, "status": m.status, "cancelled": True,
                 "message": f'Mission "{title}" is cancelled.'}
+
+    if name == "web_search":
+        # SearchUnavailable is a soft error: main.py hands its message to the
+        # model, which reads it out. That is the whole point of the named type
+        # — "I can't search, GEMINI_API_KEY isn't set" is actionable, and
+        # "the tool failed unexpectedly" is not.
+        res = await own_search.search(str(args.get("query") or ""))
+        return res.to_dict()
 
     if name in ("pause_mission", "resume_mission"):
         c = container()

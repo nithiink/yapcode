@@ -38,6 +38,7 @@ from tmux_runner import validate_session_id
 from tools import TOOL_DEFINITIONS, dispatch_tool, tools_for_model
 from yuri import app as yuri_app
 from yuri.api.routes import build_router
+from yuri.own.search import SearchUnavailable
 from yuri.providers.base import ProviderUnavailable
 
 # .env is loaded once, by `import config` above. No second load here: a CWD-based
@@ -705,8 +706,8 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         log.info("tool %s unsupported: %s", req.name, exc)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
-    except ProviderUnavailable as exc:
-        # A provider that cannot serve wrote an actionable message about how to
+    except (ProviderUnavailable, SearchUnavailable) as exc:
+        # Something that cannot serve wrote an actionable message about how to
         # fix it; the generic handler below would throw that away. Soft, like
         # YuriUnavailable above, so the model relays it instead of retrying.
         log.warning("tool %s: provider unavailable: %s", req.name, exc)
