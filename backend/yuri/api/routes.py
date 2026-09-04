@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
+from dataclasses import replace
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,9 +21,11 @@ from fastapi.responses import StreamingResponse
 
 from yuri.app import container, last_spoke_at, narration_mode, set_narration_mode
 from yuri.domain.mission import InvalidTransition
+from yuri.mcp import config as mcp_config
+from yuri.mcp.manager import FAILED_VERDICT, probe
 from yuri.services.missions import MissionInUse
 from yuri.narration.policy import MODES
-from .schemas import NarrationUpdate, ProjectCreate
+from .schemas import McpEnabled, McpServerBody, NarrationUpdate, ProjectCreate
 
 ACTIVE = ("running", "waiting_for_approval", "paused", "queued")
 
@@ -219,6 +222,110 @@ def build_router(require_auth: Callable) -> APIRouter:
     @r.post("/approvals/{approval_id}/deny")
     async def deny(approval_id: str, request: Request):
         return await _decide(approval_id, "denied", request)
+
+    # --- MCP servers --------------------------------------------------------
+    #
+    # What these never return: an `env` or `header` VALUE. Those hold API keys.
+    # The shape comes from ServerConfig.public(), which reports which keys are
+    # SET, by name, and nothing more — the same rule config.py applies to
+    # VC_AUTH_TOKEN. The redaction lives in that one method rather than in each
+    # route, so a new route cannot forget it.
+    def _candidate(body: McpServerBody) -> mcp_config.ServerConfig:
+        """Validate a request body through the SAME validator the file uses.
+
+        Deliberately not a second, parallel set of checks: one validator means
+        a config the API accepted cannot be one the loader rejects at next
+        startup, which would be a server that saves fine and then vanishes.
+        """
+        raw = {"transport": body.transport, "tier": body.tier, "command": body.command,
+               "args": list(body.args), "env": dict(body.env), "enabled": body.enabled}
+        if body.cwd:
+            raw["cwd"] = body.cwd
+        try:
+            servers = mcp_config.parse({"servers": {body.name: raw}})
+        except mcp_config.ConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return servers[0]
+
+    @r.get("/mcp")
+    async def list_mcp():
+        return container().mcp.public()
+
+    @r.post("/mcp/test")
+    async def test_mcp(body: McpServerBody):
+        """Dry-run a candidate server. Persists NOTHING.
+
+        Three verdicts, because the remedy differs: `ok`, `empty` (connected
+        but offers no tools — a warning, not a pass), `failed` (with the
+        reason and the stderr tail, because "failed to connect" on its own
+        leaves the user nowhere to go).
+        """
+        return await probe(_candidate(body))
+
+    @r.post("/mcp", status_code=201)
+    async def save_mcp(body: McpServerBody):
+        """Add a server. Re-tests it here and refuses to save a failing one.
+
+        The test is re-run server-side rather than trusting a flag from the
+        client: a disabled Save button is a label, not a lock, and the whole
+        point of the flow is that an unreachable server never reaches config —
+        where it becomes a startup error and a capability she quietly does not
+        have.
+
+        Add, not edit: a name that already exists is a 409. Replacing an entry
+        wholesale would silently wipe env values the UI never received (they
+        are redacted, so it cannot send them back), and "your API key vanished
+        when you renamed the server" is exactly the kind of quiet damage this
+        endpoint should not be able to do.
+        """
+        c = container()
+        candidate = _candidate(body)
+        existing = c.mcp.read_config()
+        if any(s.name == candidate.name for s in existing):
+            raise HTTPException(409, f"a server called {candidate.name!r} already exists; "
+                                     "remove it first")
+        if len(existing) + 1 > mcp_config.MAX_SERVERS:
+            raise HTTPException(400, f"{len(existing)} servers are configured; "
+                                     f"the limit is {mcp_config.MAX_SERVERS}")
+        result = await probe(candidate)
+        if result["verdict"] == FAILED_VERDICT:
+            raise HTTPException(400, {"error": "the server did not start, so it was not saved",
+                                      "reason": result["error"], "stderr": result["stderr"]})
+        mcp_config.save(c.mcp.home_dir, existing + [candidate])
+        state = await c.mcp.reconnect(candidate.name)
+        return {"server": state.public(), "test": result}
+
+    @r.delete("/mcp/{name}")
+    async def delete_mcp(name: str):
+        c = container()
+        remaining = [s for s in c.mcp.read_config() if s.name != name]
+        if len(remaining) == len(c.mcp.read_config()):
+            raise HTTPException(404, f"no server called {name!r}")
+        mcp_config.save(c.mcp.home_dir, remaining)
+        # Stop it and unregister its tools now, not at next startup: a stale
+        # declaration makes her offer something that will fail.
+        await c.mcp.remove(name)
+        return {"removed": name}
+
+    @r.post("/mcp/{name}/reconnect")
+    async def reconnect_mcp(name: str):
+        try:
+            state = await container().mcp.reconnect(name)
+        except KeyError as exc:
+            raise HTTPException(404, f"no server called {name!r}") from exc
+        return {"server": state.public()}
+
+    @r.put("/mcp/{name}/enabled")
+    async def set_mcp_enabled(name: str, body: McpEnabled):
+        """Turn a server off without losing its configuration (and its keys)."""
+        c = container()
+        servers = c.mcp.read_config()
+        if not any(s.name == name for s in servers):
+            raise HTTPException(404, f"no server called {name!r}")
+        updated = [replace(s, enabled=body.enabled) if s.name == name else s for s in servers]
+        mcp_config.save(c.mcp.home_dir, updated)
+        state = await c.mcp.reconnect(name)
+        return {"server": state.public()}
 
     # --- events -------------------------------------------------------------
     @r.get("/events")

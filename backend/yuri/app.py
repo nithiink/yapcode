@@ -34,6 +34,7 @@ from yuri.domain.event import YuriEvent
 from yuri.domain.ids import utcnow
 from yuri.events.bus import EventBus, bridge_to_event_log
 from yuri.home import Home, default_home
+from yuri.mcp.manager import McpManager
 from yuri.narration.policy import MODES, Mode, normalize_mode
 from yuri.narration.service import NarrationService
 from yuri.providers.base import AgentProvider
@@ -82,6 +83,10 @@ class Container:
     # container because startup/shutdown own its bus subscription -- nothing
     # else should reach for it.
     dispatcher: WorkflowDispatcher
+    # Configured MCP servers and the tools they currently provide. Built here
+    # but CONNECTED in startup(), because connecting is async and best-effort:
+    # a server that will not start must not stop the backend.
+    mcp: McpManager
 
 
 _container: Container | None = None
@@ -197,7 +202,7 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         store.close()
         raise
     c = Container(home, store, bus, registry, router, journal, memory, narration, projects, approvals, missions,
-                 sessions, roster, workflow, dispatcher)
+                 sessions, roster, workflow, dispatcher, McpManager(home.path))
     set_container(c)
     return c
 
@@ -227,6 +232,14 @@ async def startup() -> Container:
     # dispatched/completed) and those events should be persisted, not dropped
     # into a queue nobody is reading yet.
     c.dispatcher.start()
+    try:
+        # Best effort, and never blocking: each server has its own bounded
+        # connect timeout, and one that fails is logged and simply not
+        # advertised. Because the capability map is derived from the live tool
+        # list, a server that is down cannot become a capability she promises.
+        await c.mcp.start_all()
+    except Exception:
+        log.exception("yuri: connecting MCP servers failed; continuing without them")
     note_startup_failure(None)   # a successful start clears any earlier failure
     log.info("yuri: home=%s db=%s agents=%s", home.path, home.db_path, registry.ids())
     return c
@@ -245,6 +258,13 @@ async def shutdown() -> None:
         # thing that can START an agent, and starting one during teardown would
         # leave a live session behind a closed store.
         await c.dispatcher.stop()
+        # Before the providers, and for the same reason: these are child
+        # processes we spawned, and leaving one running past shutdown orphans
+        # it.
+        try:
+            await c.mcp.close()
+        except Exception:
+            log.exception("yuri: stopping MCP servers failed")
         # Order matters, and it is the reverse of startup: providers stop FIRST,
         # because tearing one down can still publish (a cancelled turn, or
         # session.stopped when VC_KILL_SESSIONS_ON_SHUTDOWN=1). Only then is it

@@ -18,12 +18,16 @@ ValueError texts (recovery instructions written for the model to read).
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from typing import Any
 
 from slash_commands import list_slash_commands
-from yuri.app import container, stamp_last_spoke
+from yuri.app import container, container_or_none, stamp_last_spoke
+from yuri.mcp import naming as mcp_naming
+from yuri.mcp.jsonrpc import McpError
+from yuri.mcp.manager import CONFIRM_ARG
 from yuri.own import search as own_search
 from yuri.domain.mission import InvalidTransition
 from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_speech
@@ -31,6 +35,8 @@ from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_spee
 # start_session duplicate guard (see the handler): the most recent session
 # creation, so a rapid second call can be redirected to it instead of silently
 # spawning a twin. {"ts": monotonic, "handle": str, "name": str} or None.
+log = logging.getLogger("yuri.tools")
+
 START_GUARD_SECS = 15.0
 _last_start: dict[str, Any] | None = None
 
@@ -106,22 +112,52 @@ def _confirm_gate(tool: str, target: str, token: str | None) -> str | None:
 _MODEL_KEYS = ("type", "name", "description", "parameters")
 
 
+def mcp_definitions() -> list[dict[str, Any]]:
+    """Tools from connected MCP servers, derived live and never cached.
+
+    Derived on every call on purpose: a server that has gone down must stop
+    being advertised the moment it does, because the capability map is built
+    from this list and a stale entry makes her offer something that will fail.
+    Empty when there is no container (a test importing tools.py, or startup
+    having failed) rather than raising — MCP is additive, so its absence is
+    never the reason a tool call breaks.
+    """
+    c = container_or_none()
+    if c is None:
+        return []
+    try:
+        return c.mcp.tool_definitions()
+    except Exception:      # pragma: no cover - defensive
+        log.exception("listing MCP tools failed")
+        return []
+
+
+def all_tools() -> list[dict[str, Any]]:
+    """Every tool she has right now: the native ones plus MCP's.
+
+    Native first, so an MCP server can never take precedence in a
+    first-match lookup — though the namespace already makes a collision
+    impossible (see yuri/mcp/naming.py).
+    """
+    return list(TOOL_DEFINITIONS) + mcp_definitions()
+
+
 def tools_for_model() -> list[dict[str, Any]]:
-    """TOOL_DEFINITIONS with our own bookkeeping fields removed."""
-    return [{k: v for k, v in d.items() if k in _MODEL_KEYS} for d in TOOL_DEFINITIONS]
+    """Every tool with our own bookkeeping fields removed."""
+    return [{k: v for k, v in d.items() if k in _MODEL_KEYS} for d in all_tools()]
 
 
 def tier_of(name: str) -> str:
     """A tool's declared tier. Absent means "safe" — the common case, and the
     right default for a field being added to 23 existing tools."""
-    for d in TOOL_DEFINITIONS:
+    for d in all_tools():
         if d.get("name") == name:
             return str(d.get("tier") or "safe")
     return "safe"
 
 
 def confirm_tools() -> list[str]:
-    return [str(d["name"]) for d in TOOL_DEFINITIONS if (d.get("tier") or "safe") == "confirm"]
+    return [str(d["name"]) for d in all_tools() if (d.get("tier") or "safe") == "confirm"]
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -539,6 +575,46 @@ def _require_session(args: dict[str, Any], action: str) -> str:
         raise ValueError(str(exc)) from exc
 
 
+async def _dispatch_mcp(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Run a tool that came from a configured MCP server.
+
+    Two things this does that the native tools get for free:
+
+    * The gate, for a `confirm`-tier server. The arm is keyed on the tool
+      name, which IS the resolved target here — an MCP tool acts on whatever
+      its own arguments say, and we cannot read a third party's schema well
+      enough to know what that is. So the confirmation says which tool, not
+      which object; that is weaker than cancel_mission's per-mission arm and
+      is the honest limit of what we know.
+    * The attribution. `manager.call` returns text prefixed with the server's
+      own name, because a third party's answer is something that was SAID, not
+      something verified — the same rule her prompt already applies to what an
+      agent claims.
+    """
+    c = container_or_none()
+    if c is None:
+        raise ValueError("MCP servers aren't available right now.")
+    payload = {k: v for k, v in (args or {}).items() if k != CONFIRM_ARG}
+    if tier_of(name) == "confirm":
+        token = _confirm_gate(name, name, (args or {}).get(CONFIRM_ARG))
+        if token is not None:
+            server, tool = mcp_naming.split(name)
+            return {"tool": name, "server": server, "ran": False, CONFIRM_ARG: token,
+                    "message": (f"This would run {tool} on the {server} service with "
+                                f"{payload or 'no arguments'}. Nothing has happened yet — "
+                                f"tell the user exactly that, and only call {name} again "
+                                f"with {CONFIRM_ARG}={token} once they agree.")}
+    try:
+        text = await c.mcp.call(name, payload)
+    except McpError as exc:
+        # A soft error: the model reads it back and can offer to reconnect,
+        # rather than the turn dying on an exception.
+        raise ValueError(str(exc)) from exc
+    server, tool = mcp_naming.split(name)
+    return {"tool": name, "server": server, "ran": True, "result": text,
+            "message": text}
+
+
 async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     # Every voice tool call is evidence Yuri and the user were talking. Stamped
     # here, at the one place they all pass through, so "when did we last
@@ -563,6 +639,9 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
+
+    if mcp_naming.is_mcp(name):
+        return await _dispatch_mcp(name, args)
 
     if name == "list_projects":
         return container().projects.list()

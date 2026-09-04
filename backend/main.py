@@ -35,7 +35,7 @@ import config
 import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
 from tmux_runner import validate_session_id
-from tools import TOOL_DEFINITIONS, dispatch_tool, tools_for_model
+from tools import all_tools, dispatch_tool, tools_for_model
 from yuri import app as yuri_app
 from yuri.api.routes import build_router
 from yuri.own.search import SearchUnavailable
@@ -309,7 +309,10 @@ async def health() -> dict[str, str]:
 
 @app.get("/tools", dependencies=[Depends(require_auth)])
 async def list_tools() -> dict[str, Any]:
-    return {"tools": TOOL_DEFINITIONS}
+    # all_tools(), not TOOL_DEFINITIONS: the frontend builds her capability map
+    # from this payload, so a tool from a connected MCP server has to appear
+    # here or she is holding a tool she has not been told she has.
+    return {"tools": all_tools()}
 
 
 @app.get("/voice/models", dependencies=[Depends(require_auth)])
