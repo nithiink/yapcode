@@ -279,3 +279,103 @@ class ToolsDispatch(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CancelMissionNeedsConfirmingTests(ToolsDispatch):
+    """Cancelling ends work and stops running agents.
+
+    The only thing standing between a misheard phrase and that happening used
+    to be a sentence in the tool's description telling the model to confirm.
+    A prompt instruction is not a guard — this is the same reasoning that kept
+    mission DELETE off the voice surface entirely.
+
+    Found in the field: a mission the user never named was cancelled `by:
+    "voice"` two seconds after an unrelated one was cancelled from the UI.
+    """
+
+    def setUp(self):
+        super().setUp()
+        tools._pending_cancel = None
+
+    def tearDown(self):
+        tools._pending_cancel = None
+        super().tearDown()
+
+    async def _mission(self, title="billing fix"):
+        # Clear the duplicate guard: it redirects a second start within
+        # START_GUARD_SECS to the first, and these tests deliberately want two
+        # distinct missions in quick succession.
+        tools._last_start = None
+        out = await tools.dispatch_tool("start_session",
+                                        {"project_path": "proj", "name": title})
+        return out["mission_id"]
+
+    async def test_the_first_call_never_cancels(self):
+        mid = await self._mission()
+        out = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        self.assertIs(out["cancelled"], False)
+        self.assertIn("confirm", out)
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled",
+                            "one call cancelled the mission")
+
+    async def test_the_first_call_says_what_would_happen(self):
+        await self._mission()
+        out = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        self.assertIn("billing fix", out["message"])
+        self.assertIn("Nothing has been cancelled yet", out["message"])
+
+    async def test_a_second_call_with_the_token_cancels(self):
+        mid = await self._mission()
+        armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        out = await tools.dispatch_tool("cancel_mission",
+                                                            {"mission": "billing fix", "confirm": armed["confirm"]})
+        self.assertIs(out["cancelled"], True)
+        self.assertEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def test_an_invented_token_is_refused(self):
+        mid = await self._mission()
+        await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        out = await tools.dispatch_tool("cancel_mission",
+                                                            {"mission": "billing fix", "confirm": "deadbeef"})
+        self.assertIs(out["cancelled"], False)
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def test_a_wrong_guess_burns_the_arm(self):
+        # Single use, consumed whether or not it matched: otherwise a model
+        # could guess repeatedly against one still-valid arm.
+        mid = await self._mission()
+        armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        await tools.dispatch_tool("cancel_mission", {"mission": "billing fix", "confirm": "nope"})
+        out = await tools.dispatch_tool("cancel_mission",
+                                                            {"mission": "billing fix", "confirm": armed["confirm"]})
+        self.assertIs(out["cancelled"], False, "the burned token still worked")
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def test_a_token_armed_for_one_mission_cannot_cancel_another(self):
+        # The exact shape of the reported bug: the wrong mission going down.
+        first = await self._mission("billing fix")
+        second = await self._mission("docs pass")
+        armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        out = await tools.dispatch_tool("cancel_mission",
+                                                            {"mission": "docs pass", "confirm": armed["confirm"]})
+        self.assertIs(out["cancelled"], False)
+        self.assertNotEqual(self.c.missions.get(second).status, "cancelled")
+        self.assertNotEqual(self.c.missions.get(first).status, "cancelled")
+
+    async def test_a_stale_arm_expires(self):
+        import tools as tools_mod
+        mid = await self._mission()
+        armed = await tools.dispatch_tool("cancel_mission", {"mission": "billing fix"})
+        tools_mod._pending_cancel["ts"] -= tools_mod.CANCEL_CONFIRM_SECS + 1
+        out = await tools.dispatch_tool("cancel_mission",
+                                                            {"mission": "billing fix", "confirm": armed["confirm"]})
+        self.assertIs(out["cancelled"], False)
+        self.assertNotEqual(self.c.missions.get(mid).status, "cancelled")
+
+    async def test_pause_and_resume_are_untouched_and_still_single_call(self):
+        # The guard is for the destructive one only. Making pause two-step
+        # would be friction with nothing to protect.
+        mid = await self._mission()
+        out = await tools.dispatch_tool("pause_mission", {"mission": "billing fix"})
+        self.assertEqual(self.c.missions.get(mid).status, "paused")
+        self.assertNotIn("confirm", out)

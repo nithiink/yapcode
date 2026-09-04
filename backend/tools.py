@@ -18,6 +18,7 @@ ValueError texts (recovery instructions written for the model to read).
 """
 from __future__ import annotations
 
+import secrets
 import time
 from typing import Any
 
@@ -31,6 +32,43 @@ from yuri.services.missions import MISSION_LIST_MAX, TITLE_SPEECH_MAX, clip_spee
 # spawning a twin. {"ts": monotonic, "handle": str, "name": str} or None.
 START_GUARD_SECS = 15.0
 _last_start: dict[str, Any] | None = None
+
+# cancel_mission's confirmation gate. Cancelling ends work and stops running
+# agents, and the only thing that stood between a misheard phrase and that
+# happening was a sentence in the tool's description telling the model to
+# confirm first. A prompt instruction is not a guard — this is the same
+# reasoning that kept mission DELETE off the voice surface entirely
+# (MissionService.delete): a speech recogniser must not fire a destructive
+# action on one utterance.
+#
+# So the FIRST call never cancels. It arms, server-side, and hands back a
+# token; only a second call carrying that exact token, for that same mission,
+# inside the window, goes through. A model that calls twice blindly does not
+# have the token, and one that invents a token is refused — the arm lives here,
+# not in anything the model can assert.
+CANCEL_CONFIRM_SECS = 120.0
+_pending_cancel: dict[str, Any] | None = None
+
+
+def _arm_cancel(mission_id: str) -> str:
+    global _pending_cancel
+    token = secrets.token_hex(3)
+    _pending_cancel = {"ts": time.monotonic(), "mission_id": mission_id, "token": token}
+    return token
+
+
+def _cancel_is_confirmed(mission_id: str, token: str | None) -> bool:
+    """True iff `token` is the live arm for exactly this mission. Single use:
+    consumed whether or not it matched, so a wrong guess cannot be retried
+    against a still-valid arm."""
+    global _pending_cancel
+    pending, _pending_cancel = _pending_cancel, None
+    if not pending or not token:
+        return False
+    if time.monotonic() - pending["ts"] > CANCEL_CONFIRM_SECS:
+        return False
+    return pending["mission_id"] == mission_id and secrets.compare_digest(
+        str(pending["token"]), str(token))
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -337,10 +375,18 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "cancel_mission",
-        "description": "Cancel a mission and stop its agents. This ends the work — confirm with the user first, naming the mission you are about to cancel. Omit mission to mean the one active mission.",
+        "description": ("Cancel a mission and stop its agents. This ends the work. It takes TWO "
+                        "calls: call it once WITHOUT confirm to find out exactly what would be "
+                        "cancelled, read that back to the user and wait for them to agree, then "
+                        "call it again passing the confirm token from the first call. The first "
+                        "call never cancels anything, so it is always safe. Omit mission to mean "
+                        "the one active mission."),
         "parameters": {
             "type": "object",
-            "properties": {"mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."}},
+            "properties": {
+                "mission": {"type": "string", "description": "Mission title, id, or a phrase from its title. Omit for the current one."},
+                "confirm": {"type": "string", "description": "The confirm token returned by the first call. Only pass it after the user has agreed out loud."},
+            },
             "required": [],
         },
     },
@@ -576,7 +622,29 @@ async def dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         # a soft error the model reads back to the user (see main.py).
         return c.missions.speech_detail(c.missions.resolve(args.get("mission", "")).id)
 
-    if name in ("pause_mission", "resume_mission", "cancel_mission"):
+    if name == "cancel_mission":
+        c = container()
+        m = c.missions.resolve(args.get("mission", ""))
+        if not _cancel_is_confirmed(m.id, args.get("confirm")):
+            live = c.missions.live_sessions(m.id)
+            token = _arm_cancel(m.id)
+            title = clip_speech(m.title, TITLE_SPEECH_MAX)
+            agents = (f" and stop {len(live)} running agent"
+                      f"{'s' if len(live) != 1 else ''}") if live else ""
+            return {"mission_id": m.id, "title": title, "status": m.status,
+                    "confirm": token, "cancelled": False,
+                    "message": (f'This would end "{title}"{agents}. Nothing has been '
+                                f"cancelled yet — tell the user exactly that, and only call "
+                                f"cancel_mission again with confirm={token} once they agree.")}
+        try:
+            m = await c.missions.cancel(m.id, by="voice")
+        except InvalidTransition as exc:
+            raise ValueError(str(exc)) from exc
+        title = clip_speech(m.title, TITLE_SPEECH_MAX)
+        return {"mission_id": m.id, "title": title, "status": m.status, "cancelled": True,
+                "message": f'Mission "{title}" is cancelled.'}
+
+    if name in ("pause_mission", "resume_mission"):
         c = container()
         m = c.missions.resolve(args.get("mission", ""))
         verb = name.split("_")[0]

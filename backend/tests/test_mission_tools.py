@@ -38,6 +38,19 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
         [p.stop() for p in self.patches]
         self.tmp.cleanup()
 
+    async def _cancel(self, mission: str | None = None):
+        """Cancel through the two-call gate cancel_mission now requires.
+
+        These tests are about what cancelling DOES, not about the gate — the
+        gate has its own tests in test_tools_dispatch. Going through the real
+        two calls here rather than reaching past them keeps them honest about
+        the surface the voice model actually has.
+        """
+        args = {"mission": mission} if mission is not None else {}
+        armed = await tools.dispatch_tool("cancel_mission", dict(args))
+        return await tools.dispatch_tool("cancel_mission",
+                                         {**args, "confirm": armed["confirm"]})
+
     async def _start(self, name="s1"):
         return await self.c.sessions.start("proj", name=name)
 
@@ -73,7 +86,7 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(paused), {"mission_id", "status", "title", "message"})
         self.assertEqual(paused["status"], "paused")
         self.assertEqual((await tools.dispatch_tool("resume_mission", {}))["status"], "running")
-        self.assertEqual((await tools.dispatch_tool("cancel_mission", {}))["status"], "cancelled")
+        self.assertEqual((await self._cancel())["status"], "cancelled")
 
     async def test_pause_interrupts_a_live_session_first(self):
         out = await self._start()
@@ -99,7 +112,7 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_invalid_transition_is_a_soft_error(self):
         await self._start()
-        await tools.dispatch_tool("cancel_mission", {})
+        await self._cancel()
         # Resolve by name: a cancelled mission is no longer active, so a
         # deictic ref would refuse before the transition was ever attempted.
         with self.assertRaises(ValueError) as cm:      # soft: {"ok": false, "error": ...}
@@ -108,7 +121,7 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_deictic_reference_with_nothing_active_is_a_soft_error(self):
         await self._start()
-        await tools.dispatch_tool("cancel_mission", {})
+        await self._cancel()
         with self.assertRaises(ValueError) as cm:
             await tools.dispatch_tool("mission_status", {})
         self.assertIn("no active missions", str(cm.exception).lower())
@@ -166,7 +179,7 @@ class MissionTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_stops_the_live_session(self):
         out = await self._start()
-        await tools.dispatch_tool("cancel_mission", {})
+        await self._cancel()
         self.assertIn(("stop", out["session_id"]), self.fake.calls)
 
 

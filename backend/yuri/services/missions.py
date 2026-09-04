@@ -422,6 +422,15 @@ class MissionService:
                                         payload={"title": m.title, "status": m.status, "by": by}))
         self.journal.append(f"mission deleted: {m.title}")
 
+    def live_sessions(self, mission_id: str) -> list[AgentSession]:
+        """The mission's sessions that are still running.
+
+        Exists so a caller can say what cancelling WOULD cost before doing it
+        (cancel_mission's confirmation step) without reaching past this service
+        into the store — test_mission_tools enforces that boundary.
+        """
+        return self.store.sessions.list(mission_id=mission_id, live_only=True)
+
     async def cancel(self, mission_id: str, by: str) -> Mission:
         m = self.get(mission_id)
         live = [s for s in self.store.sessions.list(mission_id=m.id, live_only=True)]
