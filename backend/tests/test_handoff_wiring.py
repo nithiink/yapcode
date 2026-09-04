@@ -31,7 +31,14 @@ from yuri.store.sqlite import SqliteStore  # noqa: E402
 from yuri.workflows.loader import load_templates  # noqa: E402
 
 
-class Wiring(unittest.IsolatedAsyncioTestCase):
+class Harness(unittest.IsolatedAsyncioTestCase):
+    """Setup only, no tests of its own.
+
+    A class that carries BOTH the harness and tests makes every subclass
+    re-run the parent's tests — the suite grew by 26 duplicated cases before
+    this was split out.
+    """
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Home(os.path.join(self.tmp.name, "Yuri")).ensure()
@@ -85,6 +92,9 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         """Finish a task the way a real turn does."""
         t = self._task(fragment)
         await self.engine.on_task_finished(t.id, ok=True, result={"assistant_text": text})
+
+class Wiring(Harness):
+    """What the agent is actually sent, and what comes back."""
 
     # --- what the agent is actually sent -----------------------------------
 
@@ -219,7 +229,7 @@ class Wiring(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(done.ended_at)
 
 
-class HandoffEventTests(Wiring):
+class HandoffEventTests(Harness):
     """`handoff.passed` (spec §11) — the only audible sign that one agent's
     work reached the next."""
 
@@ -274,7 +284,7 @@ class HandoffEventTests(Wiring):
             self.assertIsNone(NarrationService().line_for(ev, mode), mode)
 
 
-class VerdictsAreKeptTests(Wiring):
+class VerdictsAreKeptTests(Harness):
     """A verdict that lives only in an event is a verdict the timeline cannot
     show after a reload."""
 
