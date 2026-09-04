@@ -126,6 +126,19 @@ export function verdictLabel(v: Verdict): { tone: "good" | "bad" | "unknown"; te
   };
 }
 
+/** What to say about a declared check that produced no verdict.
+ *
+ *  "not checked yet" is right for a step still to run and WRONG for a skipped
+ *  one, where the check will never run at all — and that is the fact the user
+ *  most needs after skipping a test or a review. Same rule as everywhere
+ *  else: never let two different situations read the same. */
+export function pendingCheckLabel(t: Task, check: string): { tone: "unknown" | "pending"; text: string } {
+  if (t.status === "skipped" || t.status === "cancelled") {
+    return { tone: "unknown", text: `${check} never ran` };
+  }
+  return { tone: "pending", text: `${check} not checked yet` };
+}
+
 /** The verdicts a task kept, if any. Read off `result` rather than the event
  *  stream so they survive a reload. */
 export function verdictsOf(t: Task): Verdict[] {

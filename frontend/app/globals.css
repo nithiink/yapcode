@@ -4125,3 +4125,169 @@ a.miss-row {
    font-style: normal;
    color: var(--danger);
 }
+
+/* --- the workflow timeline ------------------------------------------------
+   Steps in dependency order. The status stripe is the fastest read on the
+   page, so it carries the state; the label spells it out in words. */
+.wf {
+   min-width: 0;
+}
+
+.wf-top {
+   display: flex;
+   align-items: baseline;
+   gap: 12px;
+   flex-wrap: wrap;
+   margin-bottom: 12px;
+   font-size: 12px;
+   color: var(--dim);
+}
+
+.wf-progress {
+   color: var(--mut);
+   font-variant-numeric: tabular-nums;
+}
+
+/* Said separately from the count, because "3 of 4" hides a blocked step. */
+.wf-needs {
+   color: var(--warn);
+}
+
+.wf-meta {
+   margin-left: auto;
+}
+
+.wf-list {
+   list-style: none;
+   margin: 0;
+   padding: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   min-width: 0;
+}
+
+.wf-step {
+   border: 1px solid var(--line);
+   border-left: 3px solid var(--line2);
+   border-radius: 12px;
+   padding: 11px 14px;
+   min-width: 0;
+}
+
+.wf-stephead {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.wf-n {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--dim);
+   flex: none;
+   font-variant-numeric: tabular-nums;
+}
+
+/* The agent's colour, the same one its roster card shows. */
+.wf-dot {
+   width: 8px;
+   height: 8px;
+   border-radius: 50%;
+   flex: none;
+}
+
+.wf-title {
+   flex: 1;
+   font-size: 14px;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.wf-status {
+   flex: none;
+   font-size: 11px;
+   color: var(--mut);
+}
+
+.wf-stepmeta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 5px;
+}
+
+.wf-err {
+   font-family: var(--mono);
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+   max-height: 140px;
+   overflow-y: auto;
+   margin: 8px 0 0;
+   padding: 7px 9px;
+   border-radius: 9px;
+   background: var(--panel);
+   color: var(--danger);
+}
+
+.wf-verdicts {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+   margin-top: 8px;
+}
+
+.wf-verdict {
+   font-size: 11px;
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 2px 9px;
+   color: var(--mut);
+}
+
+.wf-verdict.good {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.wf-verdict.bad {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+/* "could not run" is neither a pass nor a failure, and must not borrow
+   either colour — the backend does not count it as a pass either. */
+.wf-verdict.unknown {
+   color: var(--warn);
+   border-color: var(--warn);
+}
+
+.wf-verdict.pending {
+   color: var(--dim);
+}
+
+.wf-actions,
+.wf-assign {
+   display: flex;
+   gap: 7px;
+   flex-wrap: wrap;
+   margin-top: 10px;
+}
+
+/* One stripe colour per status. Every status in lib/workflow.ts's
+   TASK_STATUSES has a rule here; a missing one renders as the default
+   hairline, which reads as "no state at all". */
+.wf-step.tk-pending { border-left-color: var(--line2); }
+.wf-step.tk-ready { border-left-color: var(--mut); }
+.wf-step.tk-dispatched,
+.wf-step.tk-running { border-left-color: var(--acc); }
+.wf-step.tk-waiting_approval { border-left-color: var(--warn); }
+.wf-step.tk-verifying { border-left-color: var(--plan); }
+.wf-step.tk-completed { border-left-color: var(--good); }
+.wf-step.tk-skipped { border-left-color: var(--dim); }
+.wf-step.tk-failed,
+.wf-step.tk-blocked { border-left-color: var(--danger); }
+.wf-step.tk-cancelled { border-left-color: var(--dim); }

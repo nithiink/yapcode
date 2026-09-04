@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   STATUS_LABEL, TASK_STATUSES, canAssign, canRetry, canSkip, durationOf, isTerminal,
-  progressOf, statusLabel, taskClass, timelineOrder, verdictLabel, verdictsOf,
+  pendingCheckLabel, progressOf, statusLabel, taskClass, timelineOrder, verdictLabel,
+  verdictsOf,
   type Deps, type Task,
 } from "./workflow.ts";
 
@@ -168,4 +169,17 @@ test("a finished step shows how long it took, a running one how long so far", ()
                "1h 30m");
   assert.equal(durationOf(task("a", 0, { started_at: start }), Date.parse("2026-09-04T10:00:10Z")),
                "10s");
+});
+
+test("a skipped step's check says it never ran, not that it is pending", () => {
+  // The fact that matters after skipping a test or a review: the mission
+  // finished with that check never having run. "not checked yet" implies it
+  // still might.
+  const skipped = task("a", 0, { status: "skipped" });
+  assert.match(pendingCheckLabel(skipped, "tests_pass").text, /never ran/);
+  assert.match(pendingCheckLabel(task("b", 1, { status: "cancelled" }), "x").text, /never ran/);
+  const waiting = task("c", 2, { status: "pending" });
+  assert.match(pendingCheckLabel(waiting, "tests_pass").text, /not checked yet/);
+  // And the two do not share a tone, so they do not look the same either.
+  assert.notEqual(pendingCheckLabel(skipped, "x").tone, pendingCheckLabel(waiting, "x").tone);
 });

@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useYuri } from "@/components/VoiceProvider";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { ViewError } from "@/components/ViewError";
+import { WorkflowTimeline } from "@/components/WorkflowTimeline";
 import { MISSION_CLASS, canCancel, canPause, canResume } from "@/lib/missions";
 import { sessionLabel } from "@/lib/sessions";
 import { yget, ypost, ApiError } from "@/lib/api";
@@ -187,24 +188,17 @@ export default function MissionDetailPage() {
       )}
 
       <section className="miss-section">
-        <h3 className="apr-subhead">Steps</h3>
-        {orderedSteps.length === 0 ? (
-          <div className="empty">No steps yet.</div>
-        ) : (
-          <div className="dash-list">
-            {orderedSteps.map((s) => (
-              <div className="dash-row" key={s.id}>
-                <div className="dash-row-top">
-                  <span className="dash-row-title">
-                    {s.ordinal}. {s.title}
-                  </span>
-                  <span className="dash-row-meta">{s.status.replace(/_/g, " ")}</span>
-                </div>
-                {s.role && <span className="dash-row-task">{s.role}</span>}
-              </div>
-            ))}
-          </div>
-        )}
+        <h3 className="apr-subhead">The plan</h3>
+        {/* Replaces the ordinal-sorted list: ordinal is AUTHORING order, and
+            what a reader needs is the order the work actually runs in, with
+            who has each step and what the checks said. WorkflowTimeline
+            fetches the workflow endpoint itself because this page's `steps`
+            carry neither the dependency map nor the verdicts.
+
+            `refreshKey` re-fetches when this page does, so a step that
+            changes while the user watches is picked up by the same event that
+            refreshes everything else. */}
+        <WorkflowTimeline missionId={id} refreshKey={orderedSteps.length + events.length} />
       </section>
 
       <section className="miss-section">
