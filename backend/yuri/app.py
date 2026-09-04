@@ -8,7 +8,8 @@ WHY the shape:
   argument lives here and nowhere else: the provider observers (provider event
   -> SessionService), `missions.stop_sessions` / `missions.interrupt_sessions`
   (both injected to break the
-  Mission<->Session cycle), and `session_manager.set_provider` (the module's
+  Mission<->Session cycle), `workflow.dispatch` (injected the same way, to
+  break the Engine<->Session one), and `session_manager.set_provider` (the module's
   provider slot must hold the SAME ClaudeCodeProvider as the services — two
   live TmuxClaudeRunners would fight over the same tmux control dirs and both
   rehydrate the same panes).
@@ -37,14 +38,18 @@ from yuri.narration.service import NarrationService
 from yuri.providers.base import AgentProvider
 from yuri.providers.registry import AgentRegistry, build_registry
 from yuri.services.approvals import ApprovalService
+from yuri.services.dispatch import WorkflowDispatcher
 from yuri.services.journal import Journal
 from yuri.services.memory import Memory
 from yuri.services.missions import MissionService
 from yuri.services.projects import ProjectService
+from yuri.services.roster import RosterService
 from yuri.services.router import AgentRouter
 from yuri.services.sessions import SessionService
+from yuri.services.workflow import WorkflowEngine
 from yuri.store.base import Store
 from yuri.store.sqlite import SqliteStore
+from yuri.workflows.loader import load_templates
 
 log = logging.getLogger("yuri.app")
 
@@ -70,6 +75,12 @@ class Container:
     approvals: ApprovalService
     missions: MissionService
     sessions: SessionService
+    roster: RosterService
+    workflow: WorkflowEngine
+    # The two wires between the engine and SessionService (spec §8.1). On the
+    # container because startup/shutdown own its bus subscription -- nothing
+    # else should reach for it.
+    dispatcher: WorkflowDispatcher
 
 
 _container: Container | None = None
@@ -147,6 +158,25 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
                                   home=home.path)
         missions.stop_sessions = sessions.stop_many
         missions.interrupt_sessions = sessions.interrupt_many
+        roster = RosterService(store, bus, registry)
+        workflow = WorkflowEngine(store, bus, journal, roster, load_templates())
+        dispatcher = WorkflowDispatcher(store, bus, sessions, workflow)
+        # The same injection as stop_sessions above, and for the same reason:
+        # the engine cannot import SessionService (which holds the store the
+        # engine also holds), and until this line runs `dispatch is None` — a
+        # dry run that schedules nothing. Wired HERE, at build time, not at
+        # startup: a container whose engine can plan but not run would fail
+        # only when a user actually released a workflow.
+        workflow.dispatch = dispatcher.dispatch
+        missions.sync_workflow = dispatcher.sync_workflow
+        try:
+            roster.seed()
+        except Exception:
+            # A roster that failed to seed is recoverable — the user can create
+            # specialists by hand, or fix YURI_AGENTS and restart — but a
+            # backend that will not start is not. Seeding is idempotent, so the
+            # next startup retries it for free.
+            log.exception("yuri: seeding the builtin specialists failed; the roster may be empty")
         for p in registry.all():
             # Observer is (handle, ProviderEvent); on_provider_event also wants
             # the agent id, which the provider never sends — bind it here.
@@ -166,7 +196,7 @@ def build_container(home: Home, registry: AgentRegistry, *, bridge: Bridge | Non
         store.close()
         raise
     c = Container(home, store, bus, registry, router, journal, memory, narration, projects, approvals, missions,
-                 sessions)
+                 sessions, roster, workflow, dispatcher)
     set_container(c)
     return c
 
@@ -192,6 +222,10 @@ async def startup() -> Container:
                         default_agent="claude-code" if "claude-code" in ids
                         else (ids[0] if ids else "claude-code"))
     c.bus.start_writer()
+    # After the writer, because the driver's own handling publishes (task
+    # dispatched/completed) and those events should be persisted, not dropped
+    # into a queue nobody is reading yet.
+    c.dispatcher.start()
     note_startup_failure(None)   # a successful start clears any earlier failure
     log.info("yuri: home=%s db=%s agents=%s", home.path, home.db_path, registry.ids())
     return c
@@ -199,12 +233,17 @@ async def startup() -> Container:
 
 async def shutdown() -> None:
     """Stop, flush and forget everything startup() built, in the reverse order:
-    providers -> drain -> event writer -> store. Safe to call twice, and safe on
-    a container whose writer was never started (see test_container)."""
+    driver -> providers -> drain -> event writer -> store. Safe to call twice,
+    and safe on a container whose writer and driver were never started (see
+    test_container)."""
     c = _container
     if c is None:
         return
     try:
+        # The workflow driver goes first, before the providers: it is the only
+        # thing that can START an agent, and starting one during teardown would
+        # leave a live session behind a closed store.
+        await c.dispatcher.stop()
         # Order matters, and it is the reverse of startup: providers stop FIRST,
         # because tearing one down can still publish (a cancelled turn, or
         # session.stopped when VC_KILL_SESSIONS_ON_SHUTDOWN=1). Only then is it

@@ -76,9 +76,22 @@ class SessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row.native_session_id, row.status, row.agent_id), (out["session_id"], "idle", "fake"))
         m = self.store.missions.get(out["mission_id"])
         self.assertEqual((m.title, m.goal, m.status), ("proj", None, "running"))
-        step = self.store.missions.steps_for(m.id)[0]
-        self.assertEqual(step.session_id, row.id)
+        # No `mission_steps` row: 0003 drained that table and the workflow owns
+        # tasks now (see MissionService.create).
+        self.assertEqual(self.store.missions.steps_for(m.id), [])
         self.assertEqual(self._types(), ["project.registered", "mission.created", "session.created"])
+
+    async def test_start_attaches_to_a_given_mission(self):
+        """A workflow task's session joins the mission its graph belongs to.
+        Without this, every dispatched task created a second mission — one with
+        no workflow, so nothing would ever drive it."""
+        first = await self.svc.start("proj")
+        mission = self.store.missions.get(first["mission_id"])
+        self._events()
+        out = await self.svc.start("proj", name="second", mission=mission)
+        self.assertEqual(out["mission_id"], mission.id)
+        self.assertEqual(len(self.store.missions.list()), 1, "a second mission was created")
+        self.assertEqual(self._types(), ["session.created"], "mission.created fired again")
 
     async def test_names_dedupe_and_clash_falls_back(self):
         a = await self.svc.start("proj")

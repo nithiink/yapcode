@@ -9,6 +9,8 @@ from yuri.domain.event import EventType, YuriEvent  # noqa: E402
 from yuri.domain.mission import InvalidTransition  # noqa: E402
 from yuri.domain.project import Project  # noqa: E402
 from yuri.domain.session import AgentSession  # noqa: E402
+from yuri.domain.task import Task  # noqa: E402
+from yuri.domain.workflow import Workflow  # noqa: E402
 from yuri.events.bus import EventBus  # noqa: E402
 from yuri.home import Home  # noqa: E402
 from yuri.services.journal import Journal  # noqa: E402
@@ -38,14 +40,32 @@ class MissionServiceTests(unittest.IsolatedAsyncioTestCase):
             out.append(self.q.get_nowait().type)
         return out
 
-    async def test_create_has_one_step_and_event(self):
+    async def test_create_writes_no_step_row(self):
+        """create() used to write one `mission_steps` row titled 'work'.
+        Migration 0003 drained that table and the workflow owns tasks now, so
+        that row was written and never read, and `current_step` pointed at
+        something nothing could advance. Both must stay gone."""
         m = self.svc.create(self.project, "Fix billing", created_by="voice", agent_id="claude-code")
-        steps = self.store.missions.steps_for(m.id)
-        self.assertEqual([(s.ordinal, s.title, s.agent_id, s.status) for s in steps],
-                         [(1, "work", "claude-code", "running")])
+        self.assertEqual(self.store.missions.steps_for(m.id), [])
+        self.assertIsNone(m.current_step)
+        self.assertIsNone(self.store.missions.get(m.id).current_step)
         self.assertEqual(m.status, "running")
         self.assertEqual(self._types(), ["mission.created"])
         self.assertIn("Fix billing", Journal(self.home).read_today())
+
+    async def test_detail_steps_are_the_missions_tasks(self):
+        """detail()'s `steps` key keeps its name (the mission view reads it)
+        but now carries the workflow's tasks."""
+        m = self.svc.create(self.project, "Fix billing", created_by="voice")
+        self.assertEqual(self.svc.detail(m.id)["steps"], [])   # no workflow planned yet
+        w = Workflow(mission_id=m.id, status="running")
+        self.store.workflows.insert(w)
+        t = Task(workflow_id=w.id, ordinal=1, title="Investigate", role="researcher")
+        self.store.tasks.insert(t)
+        steps = self.svc.detail(m.id)["steps"]
+        self.assertEqual([(s["ordinal"], s["title"], s["status"]) for s in steps],
+                         [(1, "Investigate", "pending")])
+        self.assertEqual(steps[0]["id"], t.id)
 
     async def test_goal_set_once(self):
         m = self.svc.create(self.project, "t", created_by="voice")

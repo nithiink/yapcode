@@ -40,7 +40,7 @@ from typing import Callable
 from claude_runner import normalize_mode
 from permissions import mode_covers
 from yuri.domain.event import EventType, YuriEvent
-from yuri.domain.mission import InvalidTransition
+from yuri.domain.mission import InvalidTransition, Mission
 from yuri.domain.session import LIVE_STATUSES, AgentSession
 from yuri.domain.specialist import Specialist
 from yuri.events.bus import EventBus
@@ -310,7 +310,8 @@ class SessionService:
 
     async def start(self, project_ref: str, backend: str = "cli", mode: str = "default",
                     model: str | None = None, name: str | None = None, created_by: str = "voice",
-                    agent_id: str | None = None, specialist: Specialist | None = None) -> dict:
+                    agent_id: str | None = None, specialist: Specialist | None = None,
+                    mission: Mission | None = None) -> dict:
         project = self.projects.resolve_or_create(project_ref)
         # A specialist names its own provider; an explicit agent_id still wins
         # (the caller asked for it by hand), but absent that, route to the
@@ -318,7 +319,14 @@ class SessionService:
         # this project/process defaults to.
         agent = self.router.select(project, agent_id or (specialist.provider_id if specialist else None))
         sess_name = self._pick_name(name, project.root_path)
-        mission = self.missions.create(project, sess_name, created_by=created_by, agent_id=agent.id)
+        # A workflow task attaches to the mission its graph already belongs to.
+        # Creating a second one here is the bug this parameter exists to
+        # prevent: the mission control UI would show two rows for one piece of
+        # work, and the new mission would have no workflow at all -- so nothing
+        # would ever drive it, and MissionService.detail would report a live
+        # mission with no steps.
+        if mission is None:
+            mission = self.missions.create(project, sess_name, created_by=created_by, agent_id=agent.id)
         # A specialist's own model/permission_mode were set ON IT deliberately
         # -- the user picked them when authoring this specialist, and that
         # outranks whatever default this particular start() call happened to
@@ -369,9 +377,6 @@ class SessionService:
                            backend=backend_tag, working_directory=project.root_path,
                            mission_id=mission.id, status="idle", name=sess_name, mode=mode, model=model)
         self.store.sessions.insert(row)
-        step = self.store.missions.steps_for(mission.id)[0]
-        step.session_id = row.id
-        self.store.missions.update_step(step)
         self._persist_name(agent, handle, sess_name)
         self.bus.publish(YuriEvent.make(EventType.SESSION_CREATED, mission_id=mission.id, session_id=row.id,
                                         agent_id=agent.id, project_id=project.id,
@@ -660,7 +665,7 @@ class SessionService:
         row = self.row_for(handle)
         self._touch(row, "stopped")
         self.bus.publish(self._ev(EventType.SESSION_STOPPED, row, handle, {}))
-        if row is not None and row.mission_id:
+        if row is not None and row.mission_id and not self._orchestrated(row.mission_id):
             others = [s for s in self.store.sessions.list(mission_id=row.mission_id, live_only=True)
                       if s.id != row.id]
             if not others:
@@ -875,10 +880,28 @@ class SessionService:
         except InvalidTransition:
             pass   # e.g. paused mission receiving a late completion — leave it
 
+    def _orchestrated(self, mission_id: str | None) -> bool:
+        """True when a live workflow is driving this mission.
+
+        Phase 4's rule was "missions are driven by the callers that already
+        exist"; Phase 7 added an orchestrator, and where one is running it owns
+        the mission's fate outright. The two session-level verdicts below --
+        `failed` when the last agent errors, `paused` when the last one closes
+        -- are exactly the ones that would pre-empt it, and both are wrong
+        under a workflow: an errored task is retriable (MAX_TASK_ATTEMPTS), and
+        a finished task's session is deliberately reaped between two tasks.
+        Worse, both are one-way for the engine: `advance()` refuses outright
+        for a terminal mission, and `paused → completed` is not an edge, so a
+        workflow that ran to the end could never say the mission was done.
+        """
+        if not mission_id:
+            return False
+        return bool(self.store.workflows.for_mission(mission_id, live_only=True))
+
     def _fail_if_alone(self, row: AgentSession, reason: str) -> None:
         """One session erroring fails the mission only when it was the mission's
         last live session — a sibling still working means the mission isn't dead."""
-        if not row.mission_id:
+        if not row.mission_id or self._orchestrated(row.mission_id):
             return
         others = [s for s in self.store.sessions.list(mission_id=row.mission_id, live_only=True)
                   if s.id != row.id]

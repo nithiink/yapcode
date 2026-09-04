@@ -111,15 +111,43 @@ export type AgentSession = {
   runtime_metadata: Record<string, unknown>;
 };
 
-export type MissionStep = {
+// One unit of work in a mission's workflow — backend/yuri/domain/task.py's
+// Task.to_dict(). This is what GET /missions/{id} returns under `steps`: the
+// key name predates Phase 7, but `mission_steps` was drained by migration 0003
+// and the workflow owns tasks now, so the rows are Tasks.
+export type Task = {
   id: string;
-  mission_id: string;
-  ordinal: number;
+  workflow_id: string;
+  ordinal: number; // authoring order, NOT execution order
   title: string;
-  agent_id: string | null;
-  status: "pending" | "running" | "done" | "failed" | "skipped";
+  kind: "agent_task" | "approval" | "verification" | "human_input";
+  role: string | null;
+  specialist_id: string | null;
   session_id: string | null;
+  status:
+    | "pending"
+    | "ready"
+    | "dispatched"
+    | "running"
+    | "waiting_approval"
+    | "verifying"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "skipped"
+    | "cancelled";
+  instruction: string;
+  requires: string[];
+  verification: string[];
+  read_only: boolean;
+  attempts: number;
+  max_attempts: number;
   result: Record<string, unknown>;
+  error: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 // Matches YuriEvent.to_dict() (backend/yuri/domain/event.py) exactly — an

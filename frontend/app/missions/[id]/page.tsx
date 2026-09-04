@@ -1,6 +1,7 @@
 "use client";
 
-// The Mission detail view. Fetches its own steps/sessions/approvals/events
+// The Mission detail view. Fetches its own steps (the workflow's tasks —
+// see Task in lib/yuriTypes.ts)/sessions/approvals/events
 // through lib/api.ts rather than reading them off useYuri() — the provider
 // deliberately holds only global-and-continuous state (the boundary Task 3
 // drew), and this detail is per-view, fetched on demand.
@@ -15,11 +16,11 @@ import { sessionLabel } from "@/lib/sessions";
 import { yget, ypost, ApiError } from "@/lib/api";
 import { fmtLogTime, fmtLogTimeTitle, clip } from "@/lib/format";
 import { isFlatObject } from "@/lib/timeline";
-import type { Approval, AgentSession, Mission, MissionStep, YuriEvent } from "@/lib/yuriTypes";
+import type { Approval, AgentSession, Mission, Task, YuriEvent } from "@/lib/yuriTypes";
 
 type MissionDetail = {
   mission: Mission;
-  steps: MissionStep[];
+  steps: Task[];
   sessions: AgentSession[];
   approvals: Approval[]; // this mission's, oldest first
   events: YuriEvent[]; // its last 50
@@ -184,9 +185,9 @@ export default function MissionDetailPage() {
                   <span className="dash-row-title">
                     {s.ordinal}. {s.title}
                   </span>
-                  <span className="dash-row-meta">{s.status}</span>
+                  <span className="dash-row-meta">{s.status.replace(/_/g, " ")}</span>
                 </div>
-                {s.agent_id && <span className="dash-row-task">{s.agent_id}</span>}
+                {s.role && <span className="dash-row-task">{s.role}</span>}
               </div>
             ))}
           </div>

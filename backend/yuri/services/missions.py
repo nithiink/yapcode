@@ -1,16 +1,19 @@
 """Missions (spec §5.3). Missions are created implicitly by
-SessionService.start/adopt — there is no orchestrator (Phase 4 ruled one out),
-so this service is the whole of mission lifecycle: spoken resolution, the
-speech shapes the voice tools read back, and pause/resume/cancel."""
+SessionService.start/adopt, and from Phase 7 also planned deliberately by
+WorkflowEngine.create; this service is the whole of mission LIFECYCLE —
+spoken resolution, the speech shapes the voice tools read back, and
+pause/resume/cancel. What a mission does, step by step, belongs to its
+workflow (yuri/services/workflow.py), not here."""
 from __future__ import annotations
 
 import re
 from typing import Awaitable, Callable
 
 from yuri.domain.event import EventType, YuriEvent
-from yuri.domain.mission import TRANSITIONS, InvalidTransition, Mission, MissionStep
+from yuri.domain.mission import TRANSITIONS, InvalidTransition, Mission
 from yuri.domain.project import Project
 from yuri.domain.session import AgentSession
+from yuri.domain.task import Task
 from yuri.events.bus import EventBus
 from yuri.services.journal import Journal
 from yuri.store.base import Store
@@ -103,6 +106,13 @@ class MissionService:
         # Injected by the container (SessionService.interrupt_many) to avoid a
         # circular import, same as stop_sessions.
         self.interrupt_sessions: Callable[[list[AgentSession]], Awaitable[None]] | None = None
+        # Injected by the container (WorkflowDispatcher.sync_workflow), same
+        # reason again -- the engine holds the store this service holds.
+        # Called with (mission, to, by) from the three USER lifecycle methods
+        # only, never from set_status: a `derived` change restates something a
+        # session already reported, and pausing the workflow behind that would
+        # stop the mission on an event the user did not cause.
+        self.sync_workflow: Callable[[Mission, str, str], Awaitable[None]] | None = None
 
     def get(self, mission_id: str) -> Mission:
         m = self.store.missions.get(mission_id)
@@ -118,10 +128,11 @@ class MissionService:
         m = Mission(title=title, project_id=project.id, goal=(goal or None) and goal[:GOAL_MAX],
                     status="running", created_by=created_by)
         self.store.missions.insert(m)
-        step = MissionStep(mission_id=m.id, ordinal=1, title="work", agent_id=agent_id, status="running")
-        self.store.missions.insert_step(step)
-        m.current_step = step.id
-        self.store.missions.update(m)
+        # No `mission_steps` row. Migration 0003 drained that table and the
+        # workflow owns tasks now, so the one-row "work" step this used to
+        # write was written and never read again -- and `current_step` pointed
+        # at a row nothing could advance. It stays None until a task actually
+        # starts; WorkflowDispatcher derives it from the task graph.
         self.bus.publish(YuriEvent.make(EventType.MISSION_CREATED, mission_id=m.id,
                                         project_id=project.id, agent_id=agent_id,
                                         payload={"title": title, "goal": m.goal,
@@ -173,10 +184,21 @@ class MissionService:
         approvals = [a for s in sessions for a in self.store.approvals.list(session_id=s.id)]
         approvals.sort(key=lambda a: a.requested_at)
         return {"mission": m.to_dict(),
-                "steps": [s.to_dict() for s in self.store.missions.steps_for(m.id)],
+                # `steps` is the mission's TASK graph. The key name is kept
+                # because the mission detail view reads it, but the rows are
+                # Tasks: `mission_steps` was drained by migration 0003 and
+                # nothing writes it any more. The NEWEST workflow rather than
+                # the live one -- a finished or cancelled mission still has to
+                # be able to show what it did, and for_mission() already
+                # returns newest version first.
+                "steps": [t.to_dict() for t in self._tasks_of(m.id)],
                 "sessions": [s.to_dict() for s in sessions],
                 "approvals": [a.to_dict() for a in approvals],
                 "events": [e.to_dict() for e in self.store.events.list(mission_id=m.id, limit=50)]}
+
+    def _tasks_of(self, mission_id: str) -> list[Task]:
+        workflows = self.store.workflows.for_mission(mission_id)
+        return self.store.tasks.for_workflow(workflows[0].id) if workflows else []
 
     # --- spoken references ----------------------------------------------------
 
@@ -359,11 +381,13 @@ class MissionService:
             # cannot race the pause (same ordering cancel() already uses).
             await self.interrupt_sessions(live)
         self.set_status(m, "paused", by)
+        await self._sync_workflow(m, "paused", by)
         return m
 
     async def resume(self, mission_id: str, by: str) -> Mission:
         m = self.get(mission_id)
         self.set_status(m, "running", by)
+        await self._sync_workflow(m, "running", by)
         return m
 
     async def delete(self, mission_id: str, by: str) -> None:
@@ -404,4 +428,19 @@ class MissionService:
         if live and self.stop_sessions is not None:
             await self.stop_sessions(live)
         self.set_status(m, "cancelled", by)
+        await self._sync_workflow(m, "cancelled", by)
         return m
+
+    async def _sync_workflow(self, m: Mission, to: str, by: str) -> None:
+        """Tell the orchestrator the user moved the mission.
+
+        Best effort by construction: a mission with no workflow (every
+        voice-started one) has nothing to tell, and a container that never
+        wired the hook -- every test that builds this service by hand -- must
+        behave exactly as it did before Phase 7. A failure here must not undo
+        the mission transition that already happened and was already spoken;
+        it is logged by the hook itself.
+        """
+        if self.sync_workflow is None:
+            return
+        await self.sync_workflow(m, to, by)
