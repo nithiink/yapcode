@@ -27,6 +27,7 @@ the bounds below mean anything at all.
 from __future__ import annotations
 
 import datetime
+import logging
 from dataclasses import asdict, dataclass, replace
 from typing import Awaitable, Callable
 
@@ -43,7 +44,7 @@ from yuri.events.bus import EventBus
 # happens next, verify.py decides what a check MEANS. That split is why
 # "`unavailable` never passes" is one rule in one file rather than a default
 # the scheduler could soften.
-from yuri.services import verify
+from yuri.services import handoff, verify
 from yuri.services.journal import Journal
 from yuri.services.roster import NoSpecialist, RosterService
 from yuri.store.base import Store
@@ -88,6 +89,8 @@ DONE: tuple[str, ...] = ("completed", "skipped", "cancelled")
 # input was cancelled has no input, and running it anyway would hand an agent
 # a handoff with a hole in it that nothing downstream could detect. It stays
 # `pending` and surfaces as a deadlock naming the cancelled task instead.
+log = logging.getLogger("yuri.workflow")
+
 SATISFIES: tuple[str, ...] = ("completed", "skipped")
 # Statuses a finish report may arrive for: the engine asked, and is waiting.
 # A report for anything else (a task reset to `ready` after a failure, one
@@ -327,7 +330,10 @@ class WorkflowEngine:
             else:
                 if writers >= MAX_WRITERS or readers:
                     continue
-            if not await self._dispatch_one(t, w):
+            # The dependencies travel with the dispatch: the handoff is built
+            # from the artifacts of the tasks this one waited on, and only
+            # those (§7.10).
+            if not await self._dispatch_one(t, w, deps.get(t.id, set())):
                 continue
             started.append(t)
             if t.read_only:
@@ -372,7 +378,7 @@ class WorkflowEngine:
                 t.transition("ready")
                 self.store.tasks.update(t)
 
-    async def _dispatch_one(self, t: Task, w: Workflow) -> bool:
+    async def _dispatch_one(self, t: Task, w: Workflow, deps: set[str] | None = None) -> bool:
         """Resolve, dispatch, mark `dispatched`. False means "did not start",
         and the caller must not count it against the concurrency budget.
 
@@ -407,8 +413,13 @@ class WorkflowEngine:
         # surely as one that reported an error.
         t.attempts += 1
         t.specialist_id = specialist.id
+        # The brief is built BEFORE the error is cleared, deliberately: the
+        # reason the last attempt failed is the single most useful line in a
+        # retry's brief, and clearing it first made a retry the same
+        # instruction sent twice — which fails the same way. Caught by
+        # test_a_retrys_brief_says_why_the_last_attempt_did_not_stand.
+        instruction = self._instruction(t, deps or set())
         t.error = None
-        instruction = self._instruction(t)
         try:
             session_id = await self.dispatch(t, specialist, instruction)
         except Exception as exc:                      # noqa: BLE001
@@ -420,6 +431,11 @@ class WorkflowEngine:
             return False
 
         t.session_id = session_id or t.session_id
+        # Nothing wrote these before. They are what scopes a task's file list
+        # to THIS attempt (a reused session carries the previous task's tool
+        # events too), and what the timeline needs to show a duration.
+        t.started_at = utcnow()
+        t.ended_at = None
         t.transition("dispatched")
         self.store.tasks.update(t)
         self._publish(EventType.TASK_DISPATCHED, w, payload={
@@ -430,12 +446,23 @@ class WorkflowEngine:
         self.journal.append(f"task '{t.title}' → {specialist.name} (attempt {t.attempts})")
         return True
 
-    def _instruction(self, t: Task) -> str:
-        """What the specialist is told. The constructed handoff (spec §9) is
-        Task 8's; until it lands the task's own instruction is the whole of it,
-        which is honest — an empty handoff is better than a transcript dump
-        §7.10 forbids."""
-        return t.instruction or t.title
+    def _instruction(self, t: Task, deps: set[str]) -> str:
+        """What the specialist is told: the constructed handoff (spec §9).
+
+        Built from the artifacts of `deps` and nothing else — never a
+        transcript dump, which §7.10 forbids. The task's own instruction
+        travels INSIDE the handoff (as `summary`), so this returns the whole
+        brief rather than the instruction plus context.
+
+        Falls back to the bare instruction if assembling the brief raises: an
+        agent briefed on less is recoverable, an agent never started is a
+        dead workflow.
+        """
+        try:
+            return handoff.build_handoff(self.store, t, deps).render()
+        except Exception:                                  # noqa: BLE001
+            log.exception("building the handoff for task %s failed", t.id)
+            return t.instruction or t.title
 
     # --- the engine's own event sink --------------------------------------
 
@@ -492,6 +519,12 @@ class WorkflowEngine:
 
         if result:
             t.result = dict(result)
+        # The other half of the handoff. Done HERE, before verification, so a
+        # task that fails its checks still leaves behind what it found — the
+        # retry's brief and the next task's brief both read these, and an
+        # attempt whose findings were discarded because the tests were red is
+        # an attempt the workflow learns nothing from.
+        self._ingest(t)
         # `verifying` is entered even with no checks declared, so the timeline
         # never shows work completing without the step that decided it (§7.2).
         t.transition("verifying")
@@ -514,12 +547,27 @@ class WorkflowEngine:
             await self.advance(w.id)
             return
         t.transition("completed")
+        t.ended_at = utcnow()
         self.store.tasks.update(t)
         self._publish(EventType.TASK_COMPLETED, w, payload={
             "workflow_id": w.id, "task_id": t.id, "title": t.title,
             "specialist_id": t.specialist_id, "attempts": t.attempts})
         self.journal.append(f"task '{t.title}' completed")
         await self.advance(w.id)
+
+    def _ingest(self, t: Task) -> None:
+        """Record what the task produced as artifacts (spec §9).
+
+        Never raises into the scheduler: advance() is driven from a bus
+        subscriber, and a store error while filing a finding must not stop
+        every other task in the workflow from being scheduled. A lost artifact
+        costs the next task some context; a raised exception costs the mission.
+        """
+        try:
+            text = str((t.result or {}).get("assistant_text") or "")
+            handoff.ingest_result(self.store, t, text, handoff.files_from_events(self.store, t))
+        except Exception:                                  # noqa: BLE001
+            log.exception("ingesting the result of task %s failed", t.id)
 
     # --- verification (spec §10) ------------------------------------------
 
@@ -597,6 +645,7 @@ class WorkflowEngine:
             t.transition("dispatched")
         t.error = reason
         t.transition("failed")
+        t.ended_at = utcnow()
         self.store.tasks.update(t)
         self._publish(EventType.TASK_FAILED, w, payload={
             "workflow_id": w.id, "task_id": t.id, "title": t.title,
@@ -628,6 +677,7 @@ class WorkflowEngine:
                 self.store.tasks.update(t)
             return
         t.transition("blocked")
+        t.ended_at = utcnow()
         self.store.tasks.update(t)
         self._publish(EventType.TASK_BLOCKED, w, payload={
             "workflow_id": w.id, "task_id": t.id, "title": t.title,
@@ -683,6 +733,7 @@ class WorkflowEngine:
         # workflow or let the turn land — silently pretending the work was
         # dropped while the agent keeps editing the tree would be worse.
         t.transition("skipped")
+        t.ended_at = utcnow()
         self.store.tasks.update(t)
         self.journal.append(f"task '{t.title}' skipped by {by}")
         self._back_to_running(w, by)
@@ -743,6 +794,7 @@ class WorkflowEngine:
                 continue
             t.transition("cancelled")
             t.error = t.error or reason
+            t.ended_at = utcnow()
             self.store.tasks.update(t)
         if w.transition("cancelled"):
             self.store.workflows.update(w)
