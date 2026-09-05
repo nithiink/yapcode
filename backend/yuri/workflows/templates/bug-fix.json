@@ -1,0 +1,37 @@
+{
+  "name": "bug-fix",
+  "description": "Investigate, fix, test and review a bug.",
+  "tasks": [
+    {
+      "id": "investigate",
+      "role": "researcher",
+      "title": "Investigate the bug",
+      "read_only": true,
+      "instruction": "Find the root cause of: {goal}. Do not change any files — report what you find with file and line references."
+    },
+    {
+      "id": "implement",
+      "role": "developer",
+      "title": "Fix the bug",
+      "depends_on": ["investigate"],
+      "instruction": "Fix the cause described in the findings. {goal}"
+    },
+    {
+      "id": "test",
+      "role": "tester",
+      "title": "Run the tests",
+      "depends_on": ["implement"],
+      "instruction": "Run the project's tests and report the result exactly. Quote any real failure output; never report a pass you did not observe.",
+      "verification": ["tests_pass"]
+    },
+    {
+      "id": "review",
+      "role": "reviewer",
+      "title": "Review the fix",
+      "depends_on": ["test"],
+      "read_only": true,
+      "instruction": "Review the diff for correctness. Give a concrete failing scenario for each finding. End with exactly one line: 'VERDICT: approved' or 'VERDICT: changes-requested'.",
+      "verification": ["review_approved"]
+    }
+  ]
+}

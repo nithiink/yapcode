@@ -1,0 +1,239 @@
+"""AgentProvider — the contract every coding-agent backend implements.
+
+Shaped to what the existing runners actually do: `send_message`/`answer` are
+NON-BLOCKING (they kick off a turn and return) and `poll` returns the runner's
+result dict — the voice model depends on "returns working instantly, poll later"
+(see frontend/lib/operating.ts). Awaiting a turn to completion here would stall
+the voice for minutes.
+"""
+from __future__ import annotations
+
+import datetime
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+def utcnow_iso() -> str:
+    return (datetime.datetime.now(datetime.timezone.utc)
+            .isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+
+
+@dataclass(frozen=True)
+class AgentCapabilities:
+    interactive_terminal: bool = False
+    slash_commands: bool = False
+    send_keys: bool = False
+    permission_modes: tuple[str, ...] = ("default",)
+    supports_interrupt: bool = True
+    supports_rehydrate: bool = False
+    supports_resume: bool = False
+    supports_events: bool = False
+    cost_tracking: bool = False
+    # Whether this provider has its OWN named-agent mechanism that carries a
+    # system prompt — `claude --agents <json>` / `--agent <slug>`, OpenCode's
+    # `POST /session {"agent": slug}`. Phase 7 delegates a specialist's persona
+    # to that rather than reimplementing prompt injection, so a provider
+    # answering False gets its specialists' prompts prepended to the first
+    # message instead: degraded, but honest, and the roster UI says which is
+    # which. Mechanical, like every other flag here — NOT a statement about
+    # what the provider is good at, which is a property of the specialist.
+    supports_personas: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"interactive_terminal": self.interactive_terminal,
+                "slash_commands": self.slash_commands, "send_keys": self.send_keys,
+                "permission_modes": list(self.permission_modes),
+                "supports_interrupt": self.supports_interrupt,
+                "supports_rehydrate": self.supports_rehydrate,
+                "supports_resume": self.supports_resume,
+                "supports_events": self.supports_events,
+                "cost_tracking": self.cost_tracking,
+                "supports_personas": self.supports_personas}
+
+
+class ProviderUnavailable(RuntimeError):
+    """A provider cannot serve right now, and the message says what to do.
+
+    A named type so the surfaces above can show the reason instead of burying
+    it: /tools/execute maps unknown exceptions to "the tool failed
+    unexpectedly", which would discard exactly the actionable text a provider
+    took care to write ("install OpenCode, or set OPENCODE_BIN to its full
+    path, or set OPENCODE_SPAWN=0 and run `opencode serve` yourself").
+
+    Lives here rather than in yuri.app so a provider package can raise it
+    without importing the composition root.
+    """
+
+
+@dataclass(frozen=True)
+class AgentHealth:
+    online: bool
+    version: str | None
+    detail: str
+    checked_at: str = field(default_factory=utcnow_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"online": self.online, "version": self.version, "detail": self.detail,
+                "checked_at": self.checked_at}
+
+
+@dataclass(frozen=True)
+class ProjectContext:
+    project_id: str
+    root_path: str
+
+
+@dataclass(frozen=True)
+class SessionOptions:
+    backend: str = "cli"
+    mode: str = "default"
+    model: str | None = None
+    name: str | None = None
+    # The three fields below are how a Specialist's persona (spec §5.2)
+    # actually reaches a provider. SessionService fills them in from whatever
+    # SpecialistMaterialiser.ensure() returned for the chosen specialist --
+    # never more than one is set at once, since a given provider only ever
+    # has one of these mechanisms.
+    agent_slug: str | None = None    # --agent <slug> / {"agent": slug} (Claude + OpenCode)
+    agents_json: str | None = None   # claude --agents <json> (Claude Code only; inline, launch-time)
+    prepend: str | None = None       # no native persona mechanism: text for the first message instead
+
+
+@dataclass(frozen=True)
+class ProviderEvent:
+    """Provider-neutral runtime signal. kind ∈ tool_started | needs_permission |
+    needs_choice | turn_completed | cost_updated | error. The provider never sees
+    Yuri ids, missions, or the store — SessionService turns these into YuriEvents."""
+    kind: str
+    payload: dict[str, Any]
+
+
+Observer = Callable[[str, ProviderEvent], None]
+
+
+class AgentProvider(ABC):
+    id: str = ""
+    name: str = ""
+
+    @abstractmethod
+    def capabilities(self) -> AgentCapabilities: ...
+
+    @abstractmethod
+    async def health(self) -> AgentHealth: ...
+
+    @abstractmethod
+    async def create_session(self, project: ProjectContext, opts: SessionOptions) -> str:
+        """Start a new native session in project.root_path; returns the native handle."""
+
+    @abstractmethod
+    def send_message(self, handle: str, message: str) -> None: ...
+
+    @abstractmethod
+    def answer(self, handle: str, choice: str) -> None: ...
+
+    @abstractmethod
+    def poll(self, handle: str) -> dict[str, Any]:
+        """Oldest unread turn result, or {"status": "working"|"idle", "session_id": handle}."""
+
+    @abstractmethod
+    async def interrupt(self, handle: str) -> None: ...
+
+    @abstractmethod
+    async def stop(self, handle: str) -> None: ...
+
+    @abstractmethod
+    async def set_mode(self, handle: str, mode: str) -> str: ...
+
+    @abstractmethod
+    async def read(self, handle: str) -> str: ...
+
+    @abstractmethod
+    async def peek(self, handle: str, lines: int = 40) -> str | None:
+        """Live screen snapshot, or None when the backend has no TUI."""
+
+    @abstractmethod
+    def list_native(self) -> list[dict[str, Any]]:
+        """Runner-shaped session dicts (handle, cwd, model, mode, status, cost_usd, prompt?,
+        queued counts) tagged with "backend"."""
+
+    @abstractmethod
+    def set_observer(self, cb: Observer | None) -> None: ...
+
+    @abstractmethod
+    async def shutdown(self) -> None: ...
+
+    # Optional surface — default "unsupported". Callers check capabilities() or catch.
+    async def send_keys(self, handle: str, items: list[dict]) -> dict[str, Any]:
+        raise NotImplementedError(f"{self.id} does not support send_keys")
+
+    def run_slash(self, handle: str, text: str) -> None:
+        raise NotImplementedError(f"{self.id} does not support slash commands")
+
+    async def resume(self, native_session_id: str, project: ProjectContext,
+                     opts: SessionOptions) -> str:
+        raise NotImplementedError(f"{self.id} does not support resume")
+
+    async def transcript(self, handle: str, limit: int = 300) -> dict[str, Any]:
+        """The session's conversation, for the UI's transcript panel.
+
+        `{found: bool, events: [...]}` where each event is one of
+        `{kind:'user', text}`, `{kind:'assistant', text}`,
+        `{kind:'tool', name, summary, risky}`, `{kind:'tool_result', ok, text}`
+        -- oldest first.
+
+        Provider-owned because the source differs: Claude Code has an on-disk
+        JSONL, and a server-backed provider has an API. The default says "no
+        transcript" rather than guessing at someone else's storage.
+        """
+        return {"found": False, "events": []}
+
+    def can_open_terminal(self, handle: str) -> bool:
+        """Could a live terminal view be offered for this session?
+
+        Per-session, not per-provider: Claude Code's CLI backend has a pane
+        and its SDK backend does not, and the answer for OpenCode depends on
+        whether tmux is installed. The UI gates its "Watch live" button on
+        this, so a False here is what stops it offering a button that cannot
+        work.
+        """
+        return bool(self.native_pane(handle))
+
+    def resume_command(self, handle: str) -> str | None:
+        """A shell command that reopens this session in the user's terminal.
+
+        Only the provider can know this: the frontend used to hardcode
+        `claude --resume <id>` for every session, which handed an OpenCode
+        user a Claude command for a session Claude has never heard of.
+        None means the provider offers no such handoff.
+        """
+        return None
+
+    def native_pane(self, handle: str) -> str | None:
+        return None
+
+    def backend_of(self, handle: str) -> str | None:
+        return None
+
+    async def rehydrate(self, known: dict[str, dict] | None = None) -> list[dict[str, Any]]:
+        """Re-adopt what survived a restart.
+
+        `known` is what Yuri already has a row for, per native session id:
+        `{native_session_id: {**runtime_metadata, "cwd": working_directory}}`.
+        A provider whose sessions die with the process ignores it and
+        enumerates its own survivors; a provider whose sessions are durable
+        server-side needs it to tell *hers* from sessions the user started
+        themselves, which are never adopted.
+        """
+        return []
+
+    def runtime_metadata_for(self, handle: str) -> dict[str, Any]:
+        """Provider state that must survive a restart, merged onto the session
+        row on every poll.
+
+        `{}` for every provider whose state dies with the process — which is
+        all of them but OpenCode, whose read cursors are the only thing
+        standing between a restart and re-narrating history. Sync, because
+        `poll` is: this is read on the same tick.
+        """
+        return {}

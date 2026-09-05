@@ -1,0 +1,52 @@
+{
+  "name": "feature",
+  "description": "Understand, design, implement, test, review and document a new feature.",
+  "tasks": [
+    {
+      "id": "understand",
+      "role": "researcher",
+      "title": "Understand the requirement",
+      "read_only": true,
+      "instruction": "Understand what is being asked: {goal}. Read the relevant code and report the existing patterns and constraints a design must respect. Do not change any files."
+    },
+    {
+      "id": "design",
+      "role": "researcher",
+      "title": "Design the approach",
+      "depends_on": ["understand"],
+      "read_only": true,
+      "instruction": "Propose a concrete approach for: {goal}, based on the findings above. Name the files that will change and why. Do not change any files."
+    },
+    {
+      "id": "implement",
+      "role": "developer",
+      "title": "Implement the feature",
+      "depends_on": ["design"],
+      "instruction": "Implement the design above. {goal}"
+    },
+    {
+      "id": "test",
+      "role": "tester",
+      "title": "Run the tests",
+      "depends_on": ["implement"],
+      "instruction": "Run the project's tests and report the result exactly. Quote any real failure output; never report a pass you did not observe.",
+      "verification": ["tests_pass"]
+    },
+    {
+      "id": "review",
+      "role": "reviewer",
+      "title": "Review the change",
+      "depends_on": ["test"],
+      "read_only": true,
+      "instruction": "Review the diff for correctness. Give a concrete failing scenario for each finding. End with exactly one line: 'VERDICT: approved' or 'VERDICT: changes-requested'.",
+      "verification": ["review_approved"]
+    },
+    {
+      "id": "document",
+      "role": "documenter",
+      "title": "Document the change",
+      "depends_on": ["review"],
+      "instruction": "Document what changed and why, for someone who was not here: {goal}. Describe the behaviour, not the diff."
+    }
+  ]
+}

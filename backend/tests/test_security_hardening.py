@@ -67,7 +67,16 @@ class ResolveWithinRoots(unittest.TestCase):
                     config.resolve_within_roots(os.path.join(root, "..", "..", "etc"))
 
     def test_fails_closed_without_roots(self):
-        with mock.patch.dict(os.environ, {"ALLOWED_PROJECT_ROOTS": ""}):
+        # config.allowed_project_roots() also appends Yuri's home once it
+        # exists on disk, independent of ALLOWED_PROJECT_ROOTS — without
+        # pinning YURI_HOME to a path that is guaranteed absent, this test
+        # would pass on a machine with a real ~/Yuri only because "/tmp"
+        # happens not to be a subpath of it, not because roots was actually
+        # empty. Use a tempdir path that is never created, so "no roots" is
+        # really no roots.
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.dict(os.environ, {"ALLOWED_PROJECT_ROOTS": ""}), \
+             mock.patch.object(config, "YURI_HOME", os.path.join(d, "Yuri")):
             with self.assertRaises(ValueError):
                 config.resolve_within_roots("/tmp")
 

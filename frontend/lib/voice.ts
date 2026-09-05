@@ -10,6 +10,12 @@ export type ToolDef = {
   name: string;
   description?: string;
   parameters?: Record<string, unknown>;
+  // Ours, not the API's — both are stripped before the definitions reach a
+  // provider (see realtime.ts's session.update and the backend's
+  // tools_for_model). `tier` drives the confirmation gate; `category` groups
+  // the capability map in lib/instructions.ts.
+  tier?: "safe" | "confirm";
+  category?: string;
 };
 
 export type VoiceState =
@@ -63,8 +69,18 @@ export interface VoiceSession {
   start(audioEl: HTMLAudioElement): Promise<void>;
   stop(): void;
   // Inject an out-of-band update (e.g. a background Claude result) and prompt
-  // the model to speak about it, even mid-conversation.
-  injectUpdate(text: string): void;
+  // the model to speak about it, even mid-conversation. `blocking` marks a line
+  // the agent is waiting on an answer for (a permission request or a question):
+  // a transport that queues updates must never drop one. See
+  // lib/narration.ts's PendingInjection, and the backend's ALWAYS_SPEAK.
+  injectUpdate(text: string, opts?: { blocking?: boolean }): void;
+  // Send a typed message as the USER's own turn — the silent equivalent of
+  // saying it out loud, so the model must both see it and answer it. Distinct
+  // from injectUpdate, which speaks as the system about something that
+  // happened elsewhere. Throws if the transport can't carry it right now:
+  // the composer keeps the user's draft and shows the failure rather than
+  // pretending the text went somewhere.
+  sendText(text: string): void;
   // Mute/unmute the microphone (the agent stops hearing the user).
   setMuted(muted: boolean): void;
 }

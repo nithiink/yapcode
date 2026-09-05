@@ -155,6 +155,10 @@ class _TmuxSession:
         self.model = model
         self.name: str | None = None        # human-readable name (persisted in meta)
         self.mode = "default"               # permission mode (Shift+Tab cycle)
+        # A specialist's persona (spec §5.2): agents_json defines it inline at
+        # launch, agent_slug selects it. Both None for a plain session.
+        self.agent_slug: str | None = None
+        self.agents_json: str | None = None
         self.pane = f"vc_{handle[:8]}"
         self.ctrl = os.path.join(CTRL_ROOT, handle)
         self.transcript_path: str | None = None
@@ -256,10 +260,19 @@ class TmuxClaudeRunner(ClaudeRunner):
         self._write_mode(s)
 
         chrome = "--chrome " if ENABLE_CHROME else ""
+        # `--agents <json>` carries a whole persona (description/prompt/tools/
+        # model) as ONE shell word. shlex.quote is not optional here: this repo
+        # has already shipped a shell-escaping bug from interpolating untrusted
+        # text into this same one-string command line (see 5149db7), and a
+        # specialist's system_prompt is exactly that -- user-authored text that
+        # can contain quotes, `;`, or `$(...)`.
+        agents_flag = f"--agents {shlex.quote(s.agents_json)} " if s.agents_json else ""
+        agent_flag = f"--agent {shlex.quote(s.agent_slug)} " if s.agent_slug else ""
         inner = (
             f"VC_CTRL={shlex.quote(s.ctrl)} "
             f"claude {claude_id_arg} --model {shlex.quote(s.model)} "
             f"--permission-mode {shlex.quote(s.mode)} "
+            f"{agents_flag}{agent_flag}"
             f"{chrome}--settings {shlex.quote(os.path.join(s.ctrl, 'settings.json'))}"
         )
         rc, out = await self._tmux(
@@ -279,11 +292,14 @@ class TmuxClaudeRunner(ClaudeRunner):
         s._tail = asyncio.create_task(self._tail_events(s))
         await self._await_ready(s)
 
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str:
         cwd = self._preflight(cwd)
         handle = str(uuid4())
         s = _TmuxSession(handle, cwd, model or self._default_model)
         s.mode = normalize_mode(mode)
+        s.agent_slug = agent_slug
+        s.agents_json = agents_json
         await self._spawn(s, f"--session-id {handle}")
         log.info("tmux session %s started in %s (chrome=%s)", handle, cwd, ENABLE_CHROME)
         return handle
@@ -500,6 +516,7 @@ class TmuxClaudeRunner(ClaudeRunner):
                 text=_summarize_tool(ev.get("tool_name", ""), ev.get("tool_input", {})),
                 options=["allow", "deny"],
                 tool_name=ev.get("tool_name", ""),
+                tool_input=ev.get("tool_input") or {},
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.prompt_seq += 1
@@ -556,6 +573,12 @@ class TmuxClaudeRunner(ClaudeRunner):
                         "(no completion event fired within the timeout; "
                         "the session may still be working — try peek_screen to verify)"
                     )
+                # The row and the mission advance off this return value, but the
+                # observer only ever hears from the hook path — so without this
+                # the turn produces no session.turn_completed event and no
+                # journal line. Same payload shape as the hook's turn_complete.
+                self._notify(s.handle, "turn_complete",
+                             {"assistant_text": res.assistant_text, "tools_used": list(s.tools_used)})
                 return res
             return self._collect(s)
 
@@ -1232,6 +1255,12 @@ class TmuxClaudeRunner(ClaudeRunner):
             full = await self._capture_history(s)
             text = self._slash_output(full, command)
             s.status = "completed"
+            # A UI-only built-in (/context, /model, /permissions, /clear) fires no
+            # Stop hook, so the observer never hears about it unless we say so
+            # here — the turn would update the row and the mission but leave no
+            # session.turn_completed event and no journal line.
+            self._notify(s.handle, "turn_complete",
+                         {"assistant_text": text, "tools_used": list(s.tools_used)})
             return AdvanceResult(status="completed", assistant_text=text,
                                  session_id=s.handle, cost_usd=0.0)
 
@@ -1346,12 +1375,15 @@ class TmuxClaudeRunner(ClaudeRunner):
                 s.tools_used.append(name)
                 log_event("claude", "backend", "hook", f"tool: {name}", session=_slabel(s),
                           detail=ev)
+                self._notify(s.handle, "tool",
+                            {"tool_name": name, "tool_input": ev.get("tool_input", {})})
         elif kind == "needs_permission":
             s.pending = Prompt(
                 kind="permission",
                 text=_summarize_tool(ev.get("tool_name", ""), ev.get("tool_input", {})),
                 options=["allow", "deny"],
                 tool_name=ev.get("tool_name", ""),
+                tool_input=ev.get("tool_input") or {},
             )
             s.pending_tool_use_id = ev.get("tool_use_id")
             s.prompt_seq += 1
@@ -1359,6 +1391,10 @@ class TmuxClaudeRunner(ClaudeRunner):
             log_event("claude", "backend", "hook",
                       f"needs permission: {s.pending.text}", session=_slabel(s), detail=ev)
             s._stop.set()
+            self._notify(s.handle, "needs_permission",
+                         {"request_id": s.pending.request_id, "tool_name": s.pending.tool_name,
+                          "tool_input": ev.get("tool_input", {}), "text": s.pending.text,
+                          "options": list(s.pending.options)})
         elif kind == "needs_choice":
             s.questions = _parse_questions(ev.get("tool_input", {}))
             s.q_index = 0
@@ -1369,11 +1405,17 @@ class TmuxClaudeRunner(ClaudeRunner):
             log_event("claude", "backend", "hook",
                       f"needs choice: {s.pending.text}", session=_slabel(s), detail=ev)
             s._stop.set()
+            self._notify(s.handle, "needs_choice",
+                         {"request_id": s.pending.request_id, "tool_name": s.pending.tool_name,
+                          "text": s.pending.text, "options": list(s.pending.options),
+                          "multi_select": s.pending.multi_select})
         elif kind == "turn_complete":
             await self._read_new_text(s)
             s.status = "completed"
             log_event("claude", "backend", "hook", "turn complete", session=_slabel(s))
             s._stop.set()
+            self._notify(s.handle, "turn_complete",
+                         {"assistant_text": "".join(s._delta), "tools_used": list(s.tools_used)})
 
     async def _read_new_text(self, s: _TmuxSession, settle: float = 0.7,
                              max_wait: float = 10.0) -> None:
@@ -1467,6 +1509,7 @@ class TmuxClaudeRunner(ClaudeRunner):
             return
         s.cost_usd = pricing.cost_for_transcript_lines(lines)
         s._cost_scan_size = size
+        self._notify(s.handle, "cost", {"cost_usd": s.cost_usd, "model": s.model})
 
     def _find_transcript(self, s: _TmuxSession) -> str | None:
         if s.transcript_path and os.path.exists(s.transcript_path):

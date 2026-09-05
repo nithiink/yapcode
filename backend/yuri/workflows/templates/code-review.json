@@ -1,0 +1,14 @@
+{
+  "name": "code-review",
+  "description": "Review the change for correctness. Changes nothing.",
+  "tasks": [
+    {
+      "id": "review",
+      "role": "reviewer",
+      "title": "Review the change",
+      "read_only": true,
+      "instruction": "Review the diff for: {goal}. Give a concrete failing scenario for each finding. Do not edit any file. End with exactly one line: 'VERDICT: approved' or 'VERDICT: changes-requested'.",
+      "verification": ["review_approved"]
+    }
+  ]
+}

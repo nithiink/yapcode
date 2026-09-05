@@ -1,0 +1,214 @@
+"""The narration ownership table is the structural guard against Yuri saying
+everything twice: all four events the poll loop narrates are ALSO speakable, so
+each event type must be claimed by exactly one carrier (spec section 3).
+
+    python -m unittest discover -s backend/tests
+"""
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from yuri.domain.event import DEFAULTS, EventType, YuriEvent  # noqa: E402
+from yuri.narration.service import NarrationService  # noqa: E402
+from yuri.narration import policy  # noqa: E402
+
+
+def _all_event_types() -> list[str]:
+    return [v for k, v in vars(EventType).items() if k.isupper()]
+
+
+class OwnershipTable(unittest.TestCase):
+    def test_every_event_type_is_owned_exactly_once(self):
+        for t in _all_event_types():
+            self.assertIn(t, policy.NARRATION_OWNER, f"{t} has no owner")
+        self.assertEqual(len(policy.NARRATION_OWNER), len(_all_event_types()),
+                         "the table owns a type that is not an EventType")
+
+    def test_no_type_is_owned_by_both_carriers(self):
+        # The table is a dict, so double-ownership can only show up as an owner
+        # value that means "both" — assert the vocabulary is closed instead.
+        for t, owner in policy.NARRATION_OWNER.items():
+            self.assertIn(owner, ("poll", "stream", "stream_verbose", "none"), f"{t}: {owner}")
+
+    def test_the_poll_owned_types_are_exactly_the_declared_set(self):
+        # An exact set, not a subset: a type quietly moved to `poll` is a type
+        # `line_for` stops narrating, and `line_for_poll` reads a poll RESULT
+        # dict rather than an event — so a fact the bus carries can never
+        # reach it. These four are the ones line_for_poll actually renders.
+        poll_owned = {t for t, o in policy.NARRATION_OWNER.items() if o == "poll"}
+        self.assertEqual(poll_owned, {
+            EventType.APPROVAL_REQUESTED, EventType.SESSION_QUESTION,
+            EventType.AGENT_ERROR, EventType.SESSION_TURN_COMPLETED})
+
+    def test_mission_events_belong_to_the_stream(self):
+        for t in (EventType.MISSION_CREATED, EventType.MISSION_STATUS_CHANGED,
+                  EventType.SESSION_LOST):
+            self.assertEqual(policy.owner_of(t), "stream")
+
+    def test_debug_texture_is_verbose_only(self):
+        for t in (EventType.TOOL_STARTED, EventType.COST_UPDATED):
+            self.assertEqual(policy.owner_of(t), "stream_verbose")
+
+    def test_user_caused_events_are_never_narrated(self):
+        for t in (EventType.SESSION_CREATED, EventType.SESSION_MESSAGE_SENT,
+                  EventType.APPROVAL_RESOLVED, EventType.SESSION_INTERRUPTED,
+                  EventType.SESSION_STOPPED, EventType.PROJECT_REGISTERED,
+                  EventType.MEMORY_REMEMBERED):
+            self.assertEqual(policy.owner_of(t), "none")
+
+    def test_unknown_type_owner_is_none_not_a_crash(self):
+        self.assertEqual(policy.owner_of("something.invented"), "none")
+
+
+class OneOwnerPerFact(unittest.TestCase):
+    """Per-TYPE ownership is strictly weaker than "the user hears each fact
+    once": `_fail_if_alone` turns one agent.error into a mission.status_changed
+    carrying the same reason string, and a voice tool's own spoken result is a
+    third carrier the type table never modelled. The origin field decides who
+    speaks. See the policy module docstring."""
+
+    def test_a_voice_commanded_change_is_not_news(self):
+        self.assertFalse(policy.mission_status_change_is_news("voice"))
+        self.assertFalse(policy.mission_created_is_news("voice"))
+
+    def test_a_MARKED_system_status_change_is_derived_and_silent(self):
+        # failed ← agent.error, paused ← the session the user closed. Only
+        # _mission_to sets `derived`, and only because those are restatements.
+        self.assertFalse(policy.mission_status_change_is_news("system", True))
+
+    def test_an_UNMARKED_system_status_change_is_original_news(self):
+        # start()'s provider-failure path calls set_status directly: no session
+        # row exists, so no poll can report it, and the agent.error beside it is
+        # poll-owned (silent on the stream). If this were suppressed, a mission
+        # failing to start would be narrated by nobody.
+        self.assertTrue(policy.mission_status_change_is_news("system"))
+        self.assertTrue(policy.mission_status_change_is_news("system", False))
+        self.assertTrue(policy.mission_status_change_is_news("system", None))
+
+    def test_the_marker_never_silences_a_non_system_origin(self):
+        # `derived` is only meaningful for a system change; a ui/api change is
+        # news whatever the marker says, and voice is silent either way.
+        for d in (True, False):
+            self.assertTrue(policy.mission_status_change_is_news("ui", d), d)
+            self.assertFalse(policy.mission_status_change_is_news("voice", d), d)
+
+    def test_a_system_or_handoff_mission_is_still_news(self):
+        # Nobody spoke for these: Yuri started work herself, or picked up a
+        # session that was already running.
+        self.assertTrue(policy.mission_created_is_news("system"))
+        self.assertTrue(policy.mission_created_is_news("handoff"))
+
+    def test_ui_and_api_are_news_on_both(self):
+        for by in ("ui", "api"):
+            self.assertTrue(policy.mission_status_change_is_news(by), by)
+            self.assertTrue(policy.mission_created_is_news(by), by)
+
+    def test_an_unknown_or_missing_origin_fails_open(self):
+        # A rare repeat beats a silently swallowed line.
+        for by in (None, "", "   ", 7, {}, "orchestrator"):
+            self.assertTrue(policy.mission_status_change_is_news(by, True), repr(by))
+            self.assertTrue(policy.mission_status_change_is_news(by), repr(by))
+            self.assertTrue(policy.mission_created_is_news(by), repr(by))
+
+    def test_origin_is_case_and_space_insensitive(self):
+        self.assertEqual(policy.origin("  VOICE "), "voice")
+        self.assertFalse(policy.mission_status_change_is_news(" System ", True))
+
+
+class ModeFilter(unittest.TestCase):
+    def _speaks(self, t, mode):
+        sev = DEFAULTS.get(t, ("info", False))[0]
+        return policy.speaks(t, sev, mode)
+
+    def test_quiet_still_asks_the_user(self):
+        # A mode that swallowed a permission request would strand the agent
+        # waiting on an answer the user was never asked for.
+        self.assertTrue(self._speaks(EventType.APPROVAL_REQUESTED, "quiet"))
+        self.assertTrue(self._speaks(EventType.SESSION_QUESTION, "quiet"))
+
+    def test_quiet_speaks_warnings_and_errors(self):
+        self.assertTrue(self._speaks(EventType.AGENT_ERROR, "quiet"))
+        self.assertTrue(self._speaks(EventType.SESSION_LOST, "quiet"))
+
+    def test_quiet_suppresses_ordinary_progress(self):
+        self.assertFalse(self._speaks(EventType.SESSION_TURN_COMPLETED, "quiet"))
+        self.assertFalse(self._speaks(EventType.MISSION_CREATED, "quiet"))
+        self.assertFalse(self._speaks(EventType.MISSION_STATUS_CHANGED, "quiet"))
+
+    def test_normal_speaks_progress_but_not_debug_texture(self):
+        self.assertTrue(self._speaks(EventType.SESSION_TURN_COMPLETED, "normal"))
+        self.assertTrue(self._speaks(EventType.MISSION_CREATED, "normal"))
+        self.assertFalse(self._speaks(EventType.TOOL_STARTED, "normal"))
+        self.assertFalse(self._speaks(EventType.COST_UPDATED, "normal"))
+
+    def test_verbose_adds_the_debug_texture(self):
+        self.assertTrue(self._speaks(EventType.TOOL_STARTED, "verbose"))
+        self.assertTrue(self._speaks(EventType.COST_UPDATED, "verbose"))
+        self.assertTrue(self._speaks(EventType.SESSION_TURN_COMPLETED, "verbose"))
+
+    def test_never_narrated_types_stay_silent_in_every_mode(self):
+        for mode in policy.MODES:
+            self.assertFalse(self._speaks(EventType.SESSION_CREATED, mode), mode)
+            self.assertFalse(self._speaks(EventType.APPROVAL_RESOLVED, mode), mode)
+
+    def test_normalize_mode(self):
+        self.assertEqual(policy.normalize_mode("quiet"), "quiet")
+        self.assertEqual(policy.normalize_mode("VERBOSE"), "verbose")
+        self.assertEqual(policy.normalize_mode(" normal "), "normal")
+        for bad in (None, "", "loud", 7, {}):
+            self.assertEqual(policy.normalize_mode(bad), policy.DEFAULT_MODE, repr(bad))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class EveryOwnerCanActuallySpeakTests(unittest.TestCase):
+    """The gate that was missing.
+
+    NARRATION_OWNER assigns exactly one owner per event type, and a test
+    enforces that. Nothing enforced that the assigned owner could *produce a
+    sentence* — so eight Phase 7 types were declared owned and narrated by
+    nobody. Ownership without a line is silence with paperwork.
+    """
+
+    def _event(self, type_):
+        # A payload rich enough for any branch to render from. A branch that
+        # needs a field absent here should return None rather than raise, and
+        # this asserts a LINE, so a missing field shows up as a failure.
+        return YuriEvent.make(
+            type_, mission_id="m1", project_id="p1", session_id="s1", agent_id="claude-code",
+            payload={
+                "title": "the billing fix", "project": "yuri-code", "created_by": "ui",
+                "from": "running", "to": "completed", "session_name": "billing",
+                "tool_name": "Bash", "agent_name": "Claude", "cost_usd": 0.41,
+                "specialist": "Reviewer", "role": "reviewer", "attempt": 1,
+                "reason": "two tests failed", "will_retry": True, "attempts": 2,
+                "blocking": ["review"], "blocking_count": 1,
+                "from_title": "investigate the bug", "to_specialist": "Claude",
+                "findings": 2,
+                "tasks": [{"id": "t1", "title": "investigate", "role": "researcher"},
+                          {"id": "t2", "title": "fix", "role": "developer"}],
+            })
+
+    def test_every_stream_owned_type_renders_a_line(self):
+        svc = NarrationService()
+        missing = []
+        for type_, owner in policy.NARRATION_OWNER.items():
+            if owner not in ("stream", "stream_verbose"):
+                continue
+            # verbose so stream_verbose types are in scope too
+            if svc.line_for(self._event(type_), "verbose") is None:
+                missing.append(type_)
+        self.assertEqual(missing, [],
+                         f"declared stream-owned but line_for says nothing: {missing}")
+
+    def test_a_none_owned_type_stays_silent(self):
+        svc = NarrationService()
+        for type_, owner in policy.NARRATION_OWNER.items():
+            if owner == "none":
+                self.assertIsNone(svc.line_for(self._event(type_), "verbose"), type_)

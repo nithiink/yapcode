@@ -135,10 +135,14 @@ SESSION_STORE_DIR: str = os.path.abspath(os.path.expanduser(
 
 def allowed_project_roots() -> list[str]:
     """Realpath'd ALLOWED_PROJECT_ROOTS entries — the directory sandbox a session's
-    cwd must live under. Realpath (not just abspath) so symlinked roots compare
-    correctly against a realpath'd candidate."""
+    cwd must live under — plus Yuri's home once it exists. Realpath (not just
+    abspath) so symlinked roots compare correctly against a realpath'd candidate."""
     raw = os.getenv("ALLOWED_PROJECT_ROOTS", "")
-    return [os.path.realpath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+    roots = [os.path.realpath(os.path.expanduser(p)) for p in raw.split(",") if p.strip()]
+    home = os.path.realpath(YURI_HOME)
+    if os.path.isdir(home) and home not in roots:
+        roots.append(home)
+    return roots
 
 
 def resolve_within_roots(path: str) -> str:
@@ -171,6 +175,73 @@ def resolve_within_roots(path: str) -> str:
 # sessions. Set VC_KILL_SESSIONS_ON_SHUTDOWN=1 to restore the old behavior where
 # stopping the backend kills every CLI session and removes its control dir.
 KILL_SESSIONS_ON_SHUTDOWN: bool = _env_bool("VC_KILL_SESSIONS_ON_SHUTDOWN", False)
+
+# Which agent providers Yuri registers (comma-separated ids). Default: Claude
+# Code only. A configured agent is still shown "offline" until its health check
+# passes (spec §7).
+YURI_AGENTS: str = (os.getenv("YURI_AGENTS") or "claude-code").strip()
+
+# Yuri's home: her state store (yuri.db), memory/, journal/ and workspace/.
+# She may read/write freely here; it is appended to the project sandbox roots
+# at runtime (see allowed_project_roots) once it exists.
+YURI_HOME: str = os.path.abspath(os.path.expanduser(os.getenv("YURI_HOME") or "~/Yuri"))
+
+
+# --- OpenCode provider ------------------------------------------------------
+# Only read when YURI_AGENTS includes "opencode"; OpenCode is optional.
+#
+# Yuri attaches to a server already answering at OPENCODE_URL; only when
+# nothing answers does she spawn one, and she only ever stops a server she
+# started. OPENCODE_SPAWN=0 makes her attach-only, for a user who wants to own
+# the process. OPENCODE_SERVER_PASSWORD is never logged: summary() above prints
+# names and sources only, and `yuri doctor` prints the URL and the status, never
+# the value.
+OPENCODE_URL: str = (os.getenv("OPENCODE_URL") or "http://127.0.0.1:4096").strip()
+OPENCODE_SPAWN: bool = _env_bool("OPENCODE_SPAWN", True)
+OPENCODE_BIN: str = (os.getenv("OPENCODE_BIN") or "opencode").strip()
+OPENCODE_SERVER_PASSWORD: str = (os.getenv("OPENCODE_SERVER_PASSWORD") or "").strip()
+# Basic-auth username. The server pairs the password with a username, and
+# Basic with an empty user is refused -- `opencode attach --username` uses
+# the same default. Measured, not guessed (see the verification doc).
+OPENCODE_SERVER_USERNAME: str = (os.getenv("OPENCODE_SERVER_USERNAME")
+                                 or "opencode").strip() or "opencode"
+OPENCODE_MODEL: str = (os.getenv("OPENCODE_MODEL") or "").strip()
+
+# Whether the spawned OpenCode keeps Yuri's voice-provider keys — see
+# opencode_child_env(). Off by default: the spec says strip.
+OPENCODE_INHERIT_KEYS: bool = _env_bool("OPENCODE_INHERIT_KEYS", False)
+
+
+def opencode_child_env() -> dict[str, str]:
+    """The environment a spawned `opencode serve` is given.
+
+    Design spec §4: the child "inherits no Yuri secrets". This is the only
+    layer that knows which names those are — `OpenCodeServer` may not import
+    config, so it takes whatever this returns verbatim.
+
+    * **VC_AUTH_TOKEN is stripped unconditionally.** It is the shared secret
+      gating Yuri's own endpoints; OpenCode has no use for it, and a coding
+      agent that can read it could authenticate to her API as the user.
+    * **VOICE_KEY_VARS are stripped by default, and that is a judgement call.**
+      They are Yuri's voice-model keys *and* plausibly OpenCode's own provider
+      auth (the same GEMINI_API_KEY / OPENAI_API_KEY names). The spec says
+      strip, so stripping is the default; OPENCODE_INHERIT_KEYS=1 is the escape
+      hatch for a user whose OpenCode reads its model auth from the environment
+      rather than from its own `opencode auth login` store. The hatch covers
+      the ambiguous model keys only — never VC_AUTH_TOKEN, which is never
+      OpenCode's.
+    * **Everything else passes through**, PATH and HOME in particular: the child
+      cannot find its own binary or its config without them.
+
+    The server password is *not* set here. `OpenCodeServer._spawn` layers it on
+    top of whatever this returns, so filtering can never disarm server auth.
+    """
+    env = dict(os.environ)
+    env.pop("VC_AUTH_TOKEN", None)
+    if not OPENCODE_INHERIT_KEYS:
+        for var in VOICE_KEY_VARS:
+            env.pop(var, None)
+    return env
 
 
 # --- Access control ---------------------------------------------------------

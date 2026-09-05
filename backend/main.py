@@ -28,25 +28,18 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
 import event_log
 from cost_log import COST_LOG_PATH, append_cost_event
-from session_manager import (
-    cli_pane_for,
-    default_name_for,
-    get_runner,
-    list_all_sessions,
-    register_owner,
-    rehydrate_cli_sessions,
-    resolve_project_path,
-    set_session_name,
-    shutdown_all,
-)
 from tmux_runner import validate_session_id
-from tools import TOOL_DEFINITIONS, dispatch_tool
+from tools import all_tools, dispatch_tool, tools_for_model
+from yuri import app as yuri_app
+from yuri.api.routes import build_router
+from yuri.own.search import SearchUnavailable
+from yuri.providers.base import ProviderUnavailable
 
 # .env is loaded once, by `import config` above. No second load here: a CWD-based
 # re-read would restore the VC_AUTH_TOKEN a run mode intentionally left unset.
@@ -131,17 +124,58 @@ async def lifespan(_: FastAPI):
             "Looked in %s. Fix: run `yapcode config`, or re-run the setup wizard "
             "(`yapcode up`).",
             " / ".join(config.VOICE_KEY_VARS), config.env_files_checked())
+    # The debug bus first, so the Yuri events published while the container is
+    # being built (project.registered, …) are mirrored by a live writer.
     event_log.start_writer()
+    # Build Yuri's object graph: home, store, event bus, providers, services.
+    # This also installs the one ClaudeCodeProvider in session_manager's provider
+    # slot, so nothing in the process ever owns a second runner.
+    # Degrade, don't refuse to boot: an unwritable ~/Yuri (or one that exists as
+    # a FILE) used to take the whole voice app down, where before this branch
+    # only bad config could. The block below already treats rehydration failure
+    # as non-fatal; storage failure gets the same treatment. Everything that
+    # needs the Yuri layer then reports YuriUnavailable — a 503 from /yuri/*, a
+    # soft {ok: false, error} from a voice tool — instead of a stack trace.
+    c = None
     try:
-        restored = await rehydrate_cli_sessions()
-        if restored:
-            log.info("rehydrated %d CLI session(s): %s", len(restored),
-                     [s.get("name") or s["handle"][:8] for s in restored])
-    except Exception:
-        log.exception("CLI session rehydration failed (continuing without it)")
+        c = await yuri_app.startup()
+    except Exception as exc:
+        yuri_app.note_startup_failure(exc)
+        log.exception(
+            "yuri: STARTUP FAILED — serving without the Yuri layer. Voice sessions cannot "
+            "start until this is fixed: nothing can be recorded (no missions, no approvals, "
+            "no journal) and /yuri/* returns 503. Check that YURI_HOME (%s) is a writable "
+            "DIRECTORY, not a file, then restart the backend.", config.YURI_HOME)
+    if c is not None:
+        try:
+            restored = await c.sessions.rehydrate()
+            if restored:
+                log.info("rehydrated %d CLI session(s): %s", len(restored),
+                         [s.get("name") or s["handle"][:8] for s in restored])
+        except Exception:
+            log.exception("CLI session rehydration failed (continuing without it)")
+        try:
+            # AFTER the rehydrate, and that order is the whole design (spec
+            # §13): reconcile decides a task's fate from whether its session
+            # came back, so running it first would call every session lost and
+            # re-run work that is still in flight.
+            recon = await c.workflow.reconcile()
+            if recon["workflows"]:
+                log.info(
+                    "reconciled %d workflow(s): %d task(s) kept, %d never started, "
+                    "%d lost their agent, %d re-verified",
+                    recon["workflows"], len(recon["kept"]), len(recon["restarted"]),
+                    len(recon["lost"]), len(recon["reverified"]))
+        except Exception:
+            # A mission that cannot be recovered must not stop the backend
+            # from serving. The tasks stay as they were, which the UI shows,
+            # and the user can retry by hand.
+            log.exception("workflow reconciliation failed (continuing without it)")
     yield
+    # Reverse order: Yuri's shutdown publishes/bridges its last events, so the
+    # debug writer has to outlive it.
+    await yuri_app.shutdown()
     await event_log.stop_writer()
-    await shutdown_all()
 
 
 # Routine poll heartbeats (every ~1.5s per active session) are pure noise; by
@@ -218,6 +252,21 @@ async def require_auth(request: Request) -> None:
         raise HTTPException(status_code=401 if config.AUTH_TOKEN else 403, detail=reason)
 
 
+# Mounted right after require_auth's own definition so the dependency it
+# passes in is unambiguously the one just above -- build_router() takes the
+# guard as a parameter (rather than importing main.require_auth itself)
+# purely to avoid yuri.api.routes <-> main circularity.
+app.include_router(build_router(require_auth))
+
+
+@app.exception_handler(yuri_app.YuriUnavailable)
+async def _yuri_unavailable(request: Request, exc: yuri_app.YuriUnavailable) -> JSONResponse:
+    """Yuri's storage is down (see the lifespan's degraded path). 503 with the
+    actionable reason — never a 500 and a stack trace."""
+    log.warning("%s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
 def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     """Authorize a WebSocket handshake (CORS middleware does not apply to WS).
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
@@ -277,7 +326,10 @@ async def health() -> dict[str, str]:
 
 @app.get("/tools", dependencies=[Depends(require_auth)])
 async def list_tools() -> dict[str, Any]:
-    return {"tools": TOOL_DEFINITIONS}
+    # all_tools(), not TOOL_DEFINITIONS: the frontend builds her capability map
+    # from this payload, so a tool from a connected MCP server has to appear
+    # here or she is holding a tool she has not been told she has.
+    return {"tools": all_tools()}
 
 
 @app.get("/voice/models", dependencies=[Depends(require_auth)])
@@ -313,7 +365,7 @@ def _mint_config(
         # stays minimal.
         session_cfg: dict[str, Any] = {
             "type": "realtime", "model": model,
-            "tools": TOOL_DEFINITIONS, "tool_choice": "auto",
+            "tools": tools_for_model(), "tool_choice": "auto",
             # Lock output to audio so the model never emits a text-only message
             # item that goes unspoken. Azure binds config at mint time and
             # ignores the client session.update, so it MUST be set here (the
@@ -455,30 +507,30 @@ async def handoff_session(req: HandoffRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Already a live vc_ session (seamless launcher path) — nothing to reopen.
-    pane = cli_pane_for(sid)
-    if pane:
-        sess = next((s for s in list_all_sessions() if s["handle"] == sid), None)
-        name = (sess or {}).get("name")
-        attach = f"tmux attach -t {pane}"
-        return {"session_id": sid, "name": name, "attach": attach,
-                "message": f"Voice is live on this session. Keep typing here, or attach "
-                           f"another terminal with: {attach}"}
-
-    # Bare session — reopen it under yapcode. resolve_project_path realpath +
-    # containment-checks the absolute cwd against ALLOWED_PROJECT_ROOTS (fail closed).
+    # SessionService.adopt decides which of the two paths this is (already a
+    # live session -> hand back the attach target; a bare one -> reopen it in a
+    # hooked pane) and records the mission/session rows either way. It resolves
+    # req.cwd through resolve_project_path, which realpath + containment-checks
+    # it against ALLOWED_PROJECT_ROOTS (fail closed).
     try:
-        cwd = resolve_project_path(req.cwd)
+        out = await yuri_app.container().sessions.adopt(sid, req.cwd, req.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    runner = get_runner("cli")
-    handle = await runner.resume(sid, cwd, None, "default", req.name)
-    register_owner(handle, "cli")
-    name = set_session_name(handle, req.name or default_name_for(cwd))
-    attach = f"tmux attach -t {cli_pane_for(handle) or 'vc_' + handle[:8]}"
-    return {"session_id": handle, "name": name, "cwd": cwd, "attach": attach,
-            "message": f"Reopened '{name}' under yapcode. Exit your old session "
-                       f"(Ctrl-D), then run: {attach}"}
+    # `attach` is None on a backend with no tmux pane (the SDK runner). It goes
+    # straight into a message the user is told to paste, so never fabricate one
+    # — say there is nothing to attach to instead.
+    attach = out["attach"]
+    if out["already"]:
+        return {"session_id": out["session_id"], "name": out["name"], "attach": attach,
+                "message": (f"Voice is live on this session. Keep typing here, or attach "
+                            f"another terminal with: {attach}") if attach else
+                           ("Voice is live on this session. Keep typing here — this backend "
+                            "has no terminal to attach a second view to.")}
+    return {"session_id": out["session_id"], "name": out["name"], "cwd": out["cwd"], "attach": attach,
+            "message": (f"Reopened '{out['name']}' under yapcode. Exit your old session "
+                        f"(Ctrl-D), then run: {attach}") if attach else
+                       (f"Reopened '{out['name']}' under yapcode, but this backend has no "
+                        "terminal to attach to — drive it by voice.")}
 
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
@@ -503,7 +555,11 @@ async def session_terminal(ws: WebSocket, handle: str) -> None:
         await ws.close(code=close_code)
         return
     await ws.accept()
-    pane = cli_pane_for(handle)
+    # container_or_none, not container(): the handshake is already accepted, so
+    # a not-yet-built container should reach the client as the same "no live
+    # terminal" message rather than an unhandled RuntimeError.
+    c = yuri_app.container_or_none()
+    pane = c.sessions.native_pane(handle) if c is not None else None
     if not pane:
         await ws.send_text("\r\n[no live terminal — this is not a running CLI session]\r\n")
         await ws.close()
@@ -654,6 +710,29 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
                                 f"{req.name} → {(result or {}).get('status', 'ok')}",
                                 session=sid, detail=result)
         return {"ok": True, "result": result}
+    except yuri_app.YuriUnavailable as exc:
+        # Degraded boot: every tool needs the Yuri layer. Hand the voice model
+        # the actionable reason as a SOFT error so it can tell the user what to
+        # fix, instead of the generic "failed unexpectedly" below.
+        log.warning("tool %s unavailable: %s", req.name, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
+        return {"ok": False, "error": str(exc)}
+    except NotImplementedError as exc:
+        # A capability this provider does not have -- set_mode on OpenCode,
+        # send_keys on the SDK backend. The message names the provider and what
+        # it cannot do, which is exactly what the model should relay; the
+        # generic handler below would replace all of it with "failed
+        # unexpectedly" and the user would hear nothing useful.
+        log.info("tool %s unsupported: %s", req.name, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
+        return {"ok": False, "error": str(exc)}
+    except (ProviderUnavailable, SearchUnavailable) as exc:
+        # Something that cannot serve wrote an actionable message about how to
+        # fix it; the generic handler below would throw that away. Soft, like
+        # YuriUnavailable above, so the model relays it instead of retrying.
+        log.warning("tool %s: provider unavailable: %s", req.name, exc)
+        event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
+        return {"ok": False, "error": str(exc)}
     except KeyError as exc:
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         raise HTTPException(status_code=404, detail=str(exc)) from exc

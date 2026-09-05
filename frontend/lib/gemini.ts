@@ -26,6 +26,10 @@ import {
   recomputeCost,
 } from "./voice";
 import { authHeaders } from "./auth";
+import {
+  forceDrain, hasPending, newSpeechQueue, noteInterrupted, noteTurnComplete,
+  noteTurnStart, reset, submit,
+} from "./speechqueue.ts";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -147,6 +151,18 @@ export class GeminiSession implements VoiceSession {
   private connectVoice?: string;
   private onSetupComplete?: () => void;
   private keepaliveTimer?: ReturnType<typeof setInterval>;
+  // Who speaks next. On this transport "add to the conversation" and "now
+  // respond" are the SAME message — a complete user turn — and a new turn
+  // preempts whatever the model is saying, so a background result landing
+  // mid-sentence used to cut her off in the middle of a word. The decision
+  // lives in lib/speechqueue.ts where it can be tested; this class owns only
+  // the socket and the timer.
+  private speech = newSpeechQueue();
+  // If turnComplete never arrives (a stalled session), release anyway. A queue
+  // that can deadlock is worse than one that gives up.
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  private static FORCE_DRAIN_MS = 45000;
+
   private lastSend = 0;             // ms timestamp of the last frame sent
   // An update that arrived while the socket was down (latest wins). Flushed on
   // reconnect so a Claude result completed during an outage isn't lost.
@@ -205,6 +221,12 @@ export class GeminiSession implements VoiceSession {
   stop(): void {
     this.stopped = true;  // user-initiated: the close handler must NOT reconnect
     this.stopKeepalive();
+    // A pending force-drain would fire into a dead socket after teardown.
+    if (this.drainTimer) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+    }
+    reset(this.speech);
     try {
       this.ws?.close();
     } catch {
@@ -283,7 +305,7 @@ export class GeminiSession implements VoiceSession {
     const buffered = this.bufferedInject;
     this.bufferedInject = undefined;
     if (buffered) {
-      // A Claude update landed while the socket was down. Deliver the freshest
+      // A narration update landed while the socket was down. Deliver the freshest
       // one now so the user hears the real current state — not a stale echo.
       this.injectUpdate(
         "[connection] You briefly lost the voice connection and just reconnected. " +
@@ -349,20 +371,80 @@ export class GeminiSession implements VoiceSession {
     this.lastSend = Date.now();
   }
 
-  injectUpdate(text: string): void {
+  // `opts.blocking` is accepted for interface parity and ignored: this
+  // transport sends every update immediately (no queue, so no bound and nothing
+  // to prioritize). Only RealtimeSession queues.
+  injectUpdate(text: string, _opts?: { blocking?: boolean }): void {
     // Socket down (e.g. mid-reconnect): hold the latest update and flush it once
     // we're back, so a result that completed during the outage isn't dropped.
     if (this.ws?.readyState !== WebSocket.OPEN) {
       this.bufferedInject = text;
       return;
     }
-    // A complete user turn nudges the model to respond about the update.
+    const { send, dropped } = submit(this.speech, text, _opts?.blocking);
+    if (dropped) {
+      // Back-pressure, not a bug: the dropped lines are texture, and a
+      // permission request can never be one of them.
+      console.warn(`[gemini] injection queue full — dropped ${dropped} older texture line(s)`);
+    }
+    if (send === null) {
+      this.armDrainTimer();
+      return;
+    }
+    this.sendInjection(send);
+  }
+
+  /** The wire send, with no queueing decision — call sites decide that. */
+  private sendInjection(text: string): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      this.bufferedInject = text;
+      return;
+    }
+    // A complete user turn nudges the model to respond about the update. On
+    // this transport that is also what preempts a turn in progress, which is
+    // why injectUpdate consults the queue before reaching here.
     this.ws.send(
       JSON.stringify({
         clientContent: {
           turns: [{ role: "user", parts: [{ text }] }],
           turnComplete: true,
         },
+      }),
+    );
+    this.lastSend = Date.now();
+  }
+
+  private armDrainTimer(): void {
+    if (this.drainTimer) return;
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
+      this.release(forceDrain(this.speech));
+    }, GeminiSession.FORCE_DRAIN_MS);
+  }
+
+  /** Put a released update on the wire, and keep the timer armed if more wait. */
+  private release(text: string | null): void {
+    if (this.drainTimer) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+    }
+    if (text !== null) this.sendInjection(text);
+    if (hasPending(this.speech)) this.armDrainTimer();
+  }
+
+  sendText(text: string): void {
+    // Unlike injectUpdate there is no buffer-and-flush-later here: a typed turn
+    // the user is waiting on must not be delivered minutes late after a
+    // reconnect. Failing loudly lets the composer keep the draft and say so.
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      throw new Error("Voice isn't connected — reconnect and try again.");
+    }
+    // Same wire shape injectUpdate uses, because on this transport a complete
+    // user turn IS how you both add content and ask for a reply — turnComplete
+    // is Gemini's response.create.
+    this.ws.send(
+      JSON.stringify({
+        clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: true },
       }),
     );
     this.lastSend = Date.now();
@@ -465,6 +547,9 @@ export class GeminiSession implements VoiceSession {
       const sc = msg.serverContent;
       if (sc.interrupted) {
         this.stopAllPlayback();
+        // Deliberately releases nothing — see noteInterrupted. The user cut
+        // in, so they want the floor; the backlog waits for the next turn.
+        noteInterrupted(this.speech);
         emit({ type: "state", state: "listening" });
       }
       if (sc.inputTranscription?.text) {
@@ -478,6 +563,11 @@ export class GeminiSession implements VoiceSession {
       const parts = sc.modelTurn?.parts || [];
       for (const p of parts) {
         if (p.inlineData?.data) {
+          // She has started speaking, so nothing may preempt her until the
+          // turn closes. Marked here and not only on send: a turn the USER
+          // started must hold the queue too, or a background result cuts off
+          // her answer to them.
+          noteTurnStart(this.speech);
           emit({ type: "state", state: "speaking" });
           this.playPcm(p.inlineData.data);
         }
@@ -492,6 +582,9 @@ export class GeminiSession implements VoiceSession {
           this.assistantText = "";
         }
         emit({ type: "state", state: "listening" });
+        // The turn is closed: she finished the sentence. Exactly one held
+        // update goes out, so each still gets its own spoken response.
+        this.release(noteTurnComplete(this.speech));
       }
     }
 

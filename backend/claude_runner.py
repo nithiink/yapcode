@@ -14,12 +14,13 @@ callback can block and be resolved from a different coroutine without deadlock.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 from uuid import uuid4
 
 import claude_agent_sdk as sdk
@@ -32,35 +33,13 @@ log = logging.getLogger("yapcode.runner")
 
 Status = Literal["running", "needs_permission", "needs_choice", "completed", "error"]
 
-_ALLOW_WORDS = {
-    "allow", "yes", "approve", "approved", "y", "ok", "okay", "sure",
-    "go", "go ahead", "do it", "yep", "yeah", "confirm", "accept",
-    "proceed",  # natural "yes" for the ExitPlanMode plan-approval prompt
-}
+# The allow/deny vocabulary and the gate now live in yuri/providers/consent.py
+# so every provider shares one copy -- see that module for why. Re-exported
+# here because five call sites (and the tests) already import it from here.
+from yuri.providers.consent import (  # noqa: E402
+    _ALLOW_WORDS, _DENY_PHRASES, _DENY_WORDS, decide_permission)
 
-# Bare declines (no feedback attached) for the plan-approval dialog.
-_DENY_WORDS = {"deny", "no", "nope", "decline", "declined", "cancel", "reject", "rejected", "n"}
-
-# Negations that aren't single tokens (caught as substrings, not word matches).
-_DENY_PHRASES = ("don't", "do not", "stop")
-
-
-def decide_permission(choice: str) -> Optional[str]:
-    """Resolve a binary permission answer to "allow", "deny", or None (ambiguous).
-
-    A SECURITY gate that fails CLOSED: matching is word-level (not the old
-    `startswith`, which let "y" match "your"), any negation wins, and anything
-    that isn't a clean allow/deny returns None so the caller re-asks.
-    """
-    c = (choice or "").strip().lower()
-    if not c:
-        return None
-    tokens = set(re.findall(r"[a-z']+", c))
-    if tokens & _DENY_WORDS or any(p in c for p in _DENY_PHRASES):
-        return "deny"
-    if c in _ALLOW_WORDS or (tokens & _ALLOW_WORDS):
-        return "allow"
-    return None
+__all_consent__ = (decide_permission, _ALLOW_WORDS, _DENY_WORDS, _DENY_PHRASES)
 
 
 @dataclass
@@ -71,6 +50,11 @@ class Prompt:
     tool_name: str
     multi_select: bool = False  # AskUserQuestion: select many vs. one
     request_id: str = field(default_factory=lambda: str(uuid4()))
+    # The tool's arguments, so risk_for() can see WHAT is being asked and not
+    # just which tool. Without it a poll-path approval for `rm -rf /` scored
+    # `confirm` where the observer path scored `dangerous` -- harmless while
+    # risk only labels, load-bearing the moment it drives policy.
+    tool_input: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,6 +86,7 @@ class AdvanceResult:
                 "tool_name": self.prompt.tool_name,
                 "multi_select": self.prompt.multi_select,
                 "request_id": self.prompt.request_id,
+                "tool_input": self.prompt.tool_input,
             }
         return d
 
@@ -119,8 +104,23 @@ def normalize_mode(mode: str | None) -> str:
 
 
 class ClaudeRunner(ABC):
+    # Optional observer for runtime signals (Yuri's ClaudeCodeProvider installs
+    # one): called as on_event(handle, native_kind, raw_dict) from the runner's
+    # own sync/async paths. Never awaited; must not raise. None = no observer.
+    on_event: "Callable[[str, str, dict[str, Any]], None] | None" = None
+
+    def _notify(self, handle: str, kind: str, raw: dict[str, Any]) -> None:
+        cb = self.on_event
+        if cb is None:
+            return
+        try:
+            cb(handle, kind, raw)
+        except Exception:  # an observer bug must never break a turn
+            logging.getLogger("yapcode.runner").exception("on_event observer failed")
+
     @abstractmethod
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str: ...
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str: ...
     @abstractmethod
     async def advance(self, handle: str, message: str) -> AdvanceResult: ...
     @abstractmethod
@@ -190,6 +190,31 @@ class _Session:
         self._pending_results: list[AdvanceResult] = []
 
 
+def _agents_for_sdk(agents_json: str) -> dict[str, Any] | None:
+    """Turn the materialiser's `--agents` JSON into the SDK's AgentDefinition
+    map. Both carry the same fields, so this is a shape change rather than a
+    translation — but AgentDefinition REQUIRES description and prompt, and one
+    missing either raises inside the SDK at connect time, where the error names
+    neither the specialist nor the field. Drop such a definition here instead;
+    ClaudeCodeProvider decides whether a persona-less start is acceptable.
+    """
+    try:
+        raw = json.loads(agents_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    for name, d in raw.items():
+        if not isinstance(d, dict) or not d.get("description") or not d.get("prompt"):
+            continue
+        out[name] = sdk.AgentDefinition(
+            description=str(d["description"]), prompt=str(d["prompt"]),
+            **({"tools": list(d["tools"])} if d.get("tools") else {}),
+            **({"model": str(d["model"])} if d.get("model") else {}))
+    return out or None
+
+
 class SDKClaudeRunner(ClaudeRunner):
     def __init__(self, default_model: str | None = None):
         self._default_model = default_model or os.getenv("CLAUDE_MODEL", "opus")
@@ -199,7 +224,8 @@ class SDKClaudeRunner(ClaudeRunner):
 
     # --- lifecycle --------------------------------------------------------
 
-    async def start(self, cwd: str, model: str | None = None, mode: str = "default") -> str:
+    async def start(self, cwd: str, model: str | None = None, mode: str = "default",
+                    agent_slug: str | None = None, agents_json: str | None = None) -> str:
         # Re-assert the directory sandbox at the sink so a session can't start outside
         # ALLOWED_PROJECT_ROOTS even if a caller bypasses resolve_project_path.
         cwd = config.resolve_within_roots(cwd)
@@ -210,12 +236,20 @@ class SDKClaudeRunner(ClaudeRunner):
         async def _cb(tool_name: str, tool_input: dict[str, Any], context: Any):
             return await self._can_use_tool(s, tool_name, tool_input, context)
 
+        # A specialist's persona, when one was requested. The SDK takes the same
+        # two things the CLI does — a map of agent definitions and the name of
+        # the one to run — so an SDK-backed session carries a persona exactly
+        # as a CLI-backed one does. Forwarding this was once skipped behind a
+        # signature check, which silently produced persona-less sessions while
+        # list_native() still reported the persona as applied.
+        agents = _agents_for_sdk(agents_json) if agents_json else None
         opts = sdk.ClaudeAgentOptions(
             model=s.model,
             cwd=cwd,
             permission_mode=s.mode,      # risky tools route to can_use_tool in default/plan
             can_use_tool=_cb,
             session_id=handle,           # ask SDK to use our id (verify; we also capture)
+            **({"agents": agents} if agents else {}),
         )
         client = sdk.ClaudeSDKClient(opts)
         await client.connect()
@@ -470,6 +504,8 @@ class SDKClaudeRunner(ClaudeRunner):
                             s._transcript.append(b.text)
                         elif isinstance(b, sdk.ToolUseBlock):
                             s.tools_used.append(b.name)
+                            self._notify(s.handle, "tool",
+                                        {"tool_name": b.name, "tool_input": b.input})
                             log_event("claude", "backend", "hook", f"tool: {b.name}",
                                       session=s.session_id or s.handle[:8],
                                       detail={"handle": s.handle, "tool_name": b.name,
@@ -487,14 +523,18 @@ class SDKClaudeRunner(ClaudeRunner):
                             "session %s cumulative cost $%.4f",
                             s.session_id, s.cost_usd,
                         )
+                        self._notify(s.handle, "cost", {"cost_usd": s.cost_usd, "model": s.model})
                     if msg.is_error:
                         s.status = "error"
                         s.error = (msg.errors or ["unknown error"])[0]
+                        self._notify(s.handle, "error", {"message": s.error})
                         log_event("backend", "voice", "error", s.error or "error",
                                   session=s.session_id or s.handle[:8])
                     else:
                         s.status = "completed"
                         txt = "".join(s._delta)
+                        self._notify(s.handle, "turn_complete",
+                                    {"assistant_text": txt, "tools_used": list(s.tools_used)})
                         if txt:
                             log_event("claude", "backend", "assistant", txt,
                                       session=s.session_id or s.handle[:8],
@@ -506,6 +546,7 @@ class SDKClaudeRunner(ClaudeRunner):
         except Exception as e:
             s.status = "error"
             s.error = str(e)
+            self._notify(s.handle, "error", {"message": s.error})
             s._stop.set()
 
     async def _can_use_tool(self, s: _Session, tool_name: str,
@@ -531,6 +572,12 @@ class SDKClaudeRunner(ClaudeRunner):
                           session=s.session_id or s.handle[:8],
                           detail={"handle": s.handle, "tool_name": tool_name})
                 s._stop.set()              # let advance/answer return with the prompt
+                p = s.pending
+                self._notify(s.handle,
+                             "needs_choice" if kind == "question" else "needs_permission",
+                             {"request_id": p.request_id, "tool_name": tool_name,
+                              "tool_input": tool_input, "text": p.text,
+                              "options": list(p.options), "multi_select": p.multi_select})
                 choice = await fut         # parked until answer() resolves
                 # Re-ask an ambiguous binary permission (fail closed); questions
                 # and the plan dialog have their own non-binary handling.
@@ -571,12 +618,14 @@ class SDKClaudeRunner(ClaudeRunner):
         if kind == "question":
             text, options, multi = _parse_question(tool_input)
             return Prompt(kind="choice", text=text, options=options,
-                          tool_name=tool_name, multi_select=multi)
+                          tool_name=tool_name, multi_select=multi,
+                          tool_input=tool_input)
         return Prompt(
             kind="permission",
             text=_summarize_tool(tool_name, tool_input),
             options=["allow", "deny"],
             tool_name=tool_name,
+            tool_input=tool_input,
         )
 
     def _map_decision(self, kind: str, tool_name: str,

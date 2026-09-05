@@ -1,205 +1,689 @@
 :root {
-  --bg: #1a1917;
-  --panel: #211f1d;
-  --panel2: #272421;
-  --ink: #e9e3d8;
-  --mut: #928c81;
-  --dim: #6f6a61;
-  --acc: #dd8a6a;
-  --acc-ink: #241813;
-  --line: #322f2b;
-  --line2: #3c3833;
-  --good: #9cc7a4;
-  --warn: #d8b07a;
-  --danger: #d98a8a;
-  --plan: #93a6c9;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  --disp: var(--font-display), "Arial Narrow", sans-serif;
-  --body: var(--font-body), ui-sans-serif, system-ui, -apple-system, sans-serif;
+   --bg: #1a1917;
+   --panel: #211f1d;
+   --panel2: #272421;
+   --ink: #e9e3d8;
+   --mut: #928c81;
+   --dim: #6f6a61;
+   --acc: #dd8a6a;
+   --acc-ink: #241813;
+   --line: #322f2b;
+   --line2: #3c3833;
+   --good: #9cc7a4;
+   --warn: #d8b07a;
+   --danger: #d98a8a;
+   --plan: #93a6c9;
+   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+   --disp: var(--font-display), "Arial Narrow", sans-serif;
+   --body: var(--font-body), ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+* {
+   box-sizing: border-box;
+}
+
+html,
 body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--body);
-  line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
+   margin: 0;
+   padding: 0;
 }
 
-.app { max-width: 1080px; margin: 0 auto; padding: 30px 28px 80px; }
+body {
+   background: var(--bg);
+   color: var(--ink);
+   font-family: var(--body);
+   line-height: 1.55;
+   -webkit-font-smoothing: antialiased;
+}
 
-/* ---- top status bar ---- */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid var(--line); gap: 16px; }
-.brand { display: flex; align-items: center; gap: 10px; }
-.logo { font-family: var(--disp); font-size: 24px; text-transform: uppercase; letter-spacing: 0.01em; }
-.logo .sep { color: var(--acc); }
-/* Speaking dot: a small equalizer that's always animating, so the brand always
-   shows the voice signal. Always in the accent color; going live just adds the
-   soft glow. */
-.brand .speakdot { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 22px; height: 20px; flex: none; }
-.brand .speakdot i { width: 3px; border-radius: 2px; background: var(--acc); transition: box-shadow 0.3s ease; animation: speak 1.05s ease-in-out infinite; transform-origin: center; }
-.brand .speakdot i:nth-child(1) { height: 9px; animation-delay: 0s; }
-.brand .speakdot i:nth-child(2) { height: 18px; animation-delay: 0.16s; }
-.brand .speakdot i:nth-child(3) { height: 11px; animation-delay: 0.32s; }
-.brand.live .speakdot i { box-shadow: 0 0 8px rgba(221,138,106,0.5); }
-@keyframes speak { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
-@media (prefers-reduced-motion: reduce) { .brand .speakdot i { animation: none; } }
-.topmeta { font-size: 12.5px; color: var(--mut); text-align: right; letter-spacing: 0.01em; }
-.topmeta b { color: var(--ink); font-weight: 600; }
-.cost { font-variant-numeric: tabular-nums; }
+.app {
+   max-width: 1080px;
+   margin: 0 auto;
+   padding: 30px 28px 80px;
+}
 
-/* ---- hero ---- */
-.hero { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 48px; align-items: center; padding: 60px 0; border-bottom: 1px solid var(--line); }
-@media (max-width: 840px) { .hero { grid-template-columns: 1fr; gap: 34px; } }
-.kick { font-size: 11px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--acc); margin-bottom: 18px; }
-.hero h1 { font-family: var(--disp); text-transform: uppercase; font-size: clamp(50px, 8vw, 104px); line-height: 0.86; margin: 0 0 22px; letter-spacing: -0.01em; }
-.hero h1 .c { color: var(--acc); }
-.lede-p { font-size: 17px; color: var(--mut); max-width: 42ch; margin: 0 0 30px; }
-.actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-.state-row { margin-top: 22px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mut); min-height: 16px; }
+/* ---- rail meta: connection status + the aggregate cost readout ---- */
+.topmeta {
+   font-size: 12.5px;
+   color: var(--mut);
+   text-align: right;
+   letter-spacing: 0.01em;
+}
 
-.talk { border: none; cursor: pointer; font: inherit; font-weight: 600; font-size: 15px; padding: 14px 32px; border-radius: 999px; color: var(--acc-ink); background: var(--acc); transition: filter 0.15s ease, transform 0.12s ease; }
-.talk:hover { filter: brightness(1.06); }
-.talk.stop { background: var(--panel2); color: var(--ink); border: 1px solid var(--line2); }
+.topmeta b {
+   color: var(--ink);
+   font-weight: 600;
+}
+
+.cost {
+   font-variant-numeric: tabular-nums;
+}
+
+.actions {
+   display: flex;
+   align-items: center;
+   gap: 18px;
+   flex-wrap: wrap;
+}
+
+.state-row {
+   margin-top: 22px;
+   font-size: 12px;
+   letter-spacing: 0.16em;
+   text-transform: uppercase;
+   color: var(--mut);
+   min-height: 16px;
+}
+
+.talk {
+   border: none;
+   cursor: pointer;
+   font: inherit;
+   font-weight: 600;
+   font-size: 15px;
+   padding: 14px 32px;
+   border-radius: 999px;
+   color: var(--acc-ink);
+   background: var(--acc);
+   transition: filter 0.15s ease, transform 0.12s ease;
+}
+
+.talk:hover {
+   filter: brightness(1.06);
+}
+
+.talk.stop {
+   background: var(--panel2);
+   color: var(--ink);
+   border: 1px solid var(--line2);
+}
+
 /* Connecting state: a spinner + label, non-interactive until the handshake
    completes. The ring sits on the accent button so it's drawn in acc-ink. */
-.talk.connecting { display: inline-flex; align-items: center; gap: 9px; cursor: default; }
-.talk.connecting:hover { filter: none; }
-.talk .spinner { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--acc-ink) 30%, transparent); border-top-color: var(--acc-ink); animation: spin 0.7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); padding: 13px 20px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
-.ghost:hover { border-color: var(--line2); }
-.ghost.mute.muted { color: var(--danger); border-color: var(--danger); }
-.textbtn { background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 15px; color: var(--ink); border-bottom: 1px solid var(--acc); }
+.talk.connecting {
+   display: inline-flex;
+   align-items: center;
+   gap: 9px;
+   cursor: default;
+}
+
+.talk.connecting:hover {
+   filter: none;
+}
+
+.talk .spinner {
+   width: 14px;
+   height: 14px;
+   flex: none;
+   border-radius: 50%;
+   border: 2px solid color-mix(in srgb, var(--acc-ink) 30%, transparent);
+   border-top-color: var(--acc-ink);
+   animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+   to {
+      transform: rotate(360deg);
+   }
+}
+
+.ghost {
+   background: transparent;
+   border: 1px solid var(--line);
+   color: var(--ink);
+   padding: 13px 20px;
+   border-radius: 999px;
+   cursor: pointer;
+   font: inherit;
+   font-size: 14px;
+}
+
+.ghost:hover {
+   border-color: var(--line2);
+}
+
+.ghost.mute.muted {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.textbtn {
+   background: transparent;
+   border: 0;
+   padding: 0;
+   cursor: pointer;
+   font: inherit;
+   font-size: 15px;
+   color: var(--ink);
+   border-bottom: 1px solid var(--acc);
+}
 
 /* ---- orb ---- */
-.orbwrap { display: grid; place-items: center; }
-.orbinner { display: grid; place-items: center; }
-.orb-glow { position: absolute; width: 180px; height: 180px; border-radius: 50%; filter: blur(40px); opacity: 0.45; background: var(--acc); transform: scale(calc(1 + var(--amp, 0) * 0.5)); transition: transform 0.14s ease-out; }
-.orb {
-  --amp: 0;
-  position: relative; width: 180px; height: 180px; border-radius: 50%;
-  background: radial-gradient(circle at 40% 36%, #f3d9c6, var(--acc) 55%, #8f4e36 100%);
-  box-shadow: 0 26px 60px -26px rgba(221,138,106,0.6);
-  transform: scale(calc(1 + var(--amp, 0) * 0.34));
-  /* Eased scale so volume changes glide; background cross-fades on state change. */
-  transition: transform 0.14s cubic-bezier(.22,.61,.36,1), background 0.5s ease, filter 0.4s ease, opacity 0.4s ease;
+.orbwrap {
+   display: grid;
+   place-items: center;
 }
-.orb::after { content: ""; position: absolute; inset: -20px; border-radius: 50%; border: 1px solid var(--line2); }
-.orb.idle { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; }
+
+.orbinner {
+   display: grid;
+   place-items: center;
+}
+
+.orb-glow {
+   position: absolute;
+   width: 180px;
+   height: 180px;
+   border-radius: 50%;
+   filter: blur(40px);
+   opacity: 0.45;
+   background: var(--acc);
+   transform: scale(calc(1 + var(--amp, 0) * 0.5));
+   transition: transform 0.14s ease-out;
+}
+
+.orb {
+   --amp: 0;
+   position: relative;
+   width: 180px;
+   height: 180px;
+   border-radius: 50%;
+   background: radial-gradient(circle at 40% 36%, #f3d9c6, var(--acc) 55%, #8f4e36 100%);
+   box-shadow: 0 26px 60px -26px rgba(221, 138, 106, 0.6);
+   transform: scale(calc(1 + var(--amp, 0) * 0.34));
+   /* Eased scale so volume changes glide; background cross-fades on state change. */
+   transition: transform 0.14s cubic-bezier(.22, .61, .36, 1), background 0.5s ease, filter 0.4s ease, opacity 0.4s ease;
+}
+
+.orb::after {
+   content: "";
+   position: absolute;
+   inset: -20px;
+   border-radius: 50%;
+   border: 1px solid var(--line2);
+}
+
+.orb.idle {
+   background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%);
+   opacity: 0.7;
+}
+
 /* While connecting, keep the orb the dim idle color (just breathing) — it should
    only warm to the accent gradient once a live state (listening/etc.) arrives,
    i.e. after it's fully connected. The base .orb `background` transition makes
    that switch cross-fade. */
-.orb.connecting { background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%); opacity: 0.7; animation: breathe 1.3s ease-in-out infinite; }
-.orb.listening { animation: breathe 5s ease-in-out infinite; }
+.orb.connecting {
+   background: radial-gradient(circle at 40% 36%, #4a463f, #2c2a25 55%, #211f1d 100%);
+   opacity: 0.7;
+   animation: breathe 1.3s ease-in-out infinite;
+}
+
+.orb.listening {
+   animation: breathe 5s ease-in-out infinite;
+}
+
 /* While connected the orb keeps one stable warm color — only its scale reacts to
    volume. (hearing/thinking/speaking no longer recolor the orb.) */
-.orb.muted { filter: grayscale(0.6); opacity: 0.55; }
+.orb.muted {
+   filter: grayscale(0.6);
+   opacity: 0.55;
+}
+
 /* Gentle baseline pulse for idle-ish states; kept subtle (1.02) so the
    volume-driven scale clearly dominates and the two don't visibly fight. */
-@keyframes breathe { 0%, 100% { transform: scale(calc(1 + var(--amp, 0) * 0.34)); } 50% { transform: scale(calc(1.02 + var(--amp, 0) * 0.34)); } }
-.orbcap { text-align: center; margin-top: 30px; font-size: 14px; color: var(--mut); max-width: 26ch; transition: opacity 0.3s ease, color 0.3s ease; }
+@keyframes breathe {
+
+   0%,
+   100% {
+      transform: scale(calc(1 + var(--amp, 0) * 0.34));
+   }
+
+   50% {
+      transform: scale(calc(1.02 + var(--amp, 0) * 0.34));
+   }
+}
+
+.orbcap {
+   text-align: center;
+   margin-top: 30px;
+   font-size: 14px;
+   color: var(--mut);
+   max-width: 26ch;
+   transition: opacity 0.3s ease, color 0.3s ease;
+}
 
 /* ---- controls row ---- */
 /* The section's bottom border lives on the caption/hint line below the row,
    so no divider cuts between the pickers and the "✓ Recommended" caption. */
-.controls-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end; padding: 24px 0 0; }
-.ctl .lab { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--mut); margin-bottom: 9px; }
-.seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
-.seg.locked { opacity: 0.6; }
-.segbtn { font-family: var(--body); font-weight: 500; font-size: 14px; background: transparent; color: var(--mut); border: 0; padding: 8px 18px; border-radius: 999px; cursor: pointer; }
-.segbtn.on { background: var(--panel2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
-.segbtn:disabled { cursor: default; }
+.controls-row {
+   display: flex;
+   gap: 26px;
+   flex-wrap: wrap;
+   align-items: flex-end;
+   padding: 24px 0 0;
+}
+
+.ctl .lab {
+   font-size: 11px;
+   letter-spacing: 0.18em;
+   text-transform: uppercase;
+   color: var(--mut);
+   margin-bottom: 9px;
+}
+
+.seg {
+   display: inline-flex;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 4px;
+}
+
+.seg.locked {
+   opacity: 0.6;
+}
+
+.segbtn {
+   font-family: var(--body);
+   font-weight: 500;
+   font-size: 14px;
+   background: transparent;
+   color: var(--mut);
+   border: 0;
+   padding: 8px 18px;
+   border-radius: 999px;
+   cursor: pointer;
+}
+
+.segbtn.on {
+   background: var(--panel2);
+   color: var(--ink);
+   box-shadow: inset 0 0 0 1px var(--line2);
+}
+
+.segbtn:disabled {
+   cursor: default;
+}
+
 /* Labeled picker groups: a micro-label naming each group's role (VOICE /
    ROUTE / CLAUDE), with an optional ⓘ popover for the choices that need a
    sentence of explanation. The recommended pairing lives in one short caption
    under the row (.ctrlcap) instead of badges on the buttons. */
-.grp { display: flex; flex-direction: column; gap: 7px; position: relative; }
-.grplab { display: flex; align-items: center; gap: 6px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); padding-left: 14px; }
-.ctrlcap { font-size: 11.5px; color: var(--dim); padding: 10px 0 22px; }
-.ctrlcap .ck { color: var(--good); }
-.ctrlcap b { color: var(--mut); font-weight: 600; }
-.infobtn { width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--line2); background: transparent; color: var(--dim); font-size: 9px; font-weight: 600; font-style: italic; cursor: pointer; line-height: 1; padding: 0; display: inline-grid; place-items: center; }
-.infobtn:hover { color: var(--ink); border-color: var(--mut); }
-.infopop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 308px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 4px 14px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
-.infopop .prow { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-.infopop .prow:last-child { border-bottom: 0; }
-.infopop .pname { flex: none; width: 40px; font-size: 12px; font-weight: 600; color: var(--ink); }
-.infopop .pname .r { display: block; font-size: 8px; font-weight: 700; letter-spacing: 0.08em; color: var(--good); text-transform: uppercase; margin-top: 2px; }
-.infopop .pdesc { font-size: 11.5px; color: var(--mut); line-height: 1.5; }
+.grp {
+   display: flex;
+   flex-direction: column;
+   gap: 7px;
+   position: relative;
+}
+
+.grplab {
+   display: flex;
+   align-items: center;
+   gap: 6px;
+   font-size: 9.5px;
+   font-weight: 600;
+   letter-spacing: 0.18em;
+   text-transform: uppercase;
+   color: var(--dim);
+   padding-left: 14px;
+}
+
+.ctrlcap {
+   font-size: 11.5px;
+   color: var(--dim);
+   padding: 10px 0 22px;
+}
+
+.ctrlcap .ck {
+   color: var(--good);
+}
+
+.ctrlcap b {
+   color: var(--mut);
+   font-weight: 600;
+}
+
+.infobtn {
+   width: 15px;
+   height: 15px;
+   border-radius: 50%;
+   border: 1px solid var(--line2);
+   background: transparent;
+   color: var(--dim);
+   font-size: 9px;
+   font-weight: 600;
+   font-style: italic;
+   cursor: pointer;
+   line-height: 1;
+   padding: 0;
+   display: inline-grid;
+   place-items: center;
+}
+
+.infobtn:hover {
+   color: var(--ink);
+   border-color: var(--mut);
+}
+
+.infopop {
+   position: absolute;
+   top: calc(100% + 8px);
+   left: 0;
+   z-index: 30;
+   width: 308px;
+   background: var(--panel2);
+   border: 1px solid var(--line2);
+   border-radius: 12px;
+   padding: 4px 14px;
+   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.infopop .prow {
+   display: flex;
+   gap: 12px;
+   padding: 10px 0;
+   border-bottom: 1px solid var(--line);
+}
+
+.infopop .prow:last-child {
+   border-bottom: 0;
+}
+
+.infopop .pname {
+   flex: none;
+   width: 40px;
+   font-size: 12px;
+   font-weight: 600;
+   color: var(--ink);
+}
+
+.infopop .pname .r {
+   display: block;
+   font-size: 8px;
+   font-weight: 700;
+   letter-spacing: 0.08em;
+   color: var(--good);
+   text-transform: uppercase;
+   margin-top: 2px;
+}
+
+.infopop .pdesc {
+   font-size: 11.5px;
+   color: var(--mut);
+   line-height: 1.5;
+}
+
 /* Model picker: a labeled, segmented pill ("Model │ value ⌄") sized to match
    the provider/backend toggle groups beside it. */
-.modelpick { display: inline-flex; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding-left: 16px; transition: border-color 0.15s ease; }
-.modelpick:hover, .modelpick:focus-within { border-color: var(--line2); }
-.modelpick.locked { opacity: 0.6; }
-.modelpick.locked .modelsel { cursor: default; }
-.modelpick-lab { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mut); white-space: nowrap; pointer-events: none; }
-.modelsel { font-family: var(--body); font-weight: 500; font-size: 14px; color: var(--ink); background-color: transparent; border: 0; border-left: 1px solid var(--line); margin-left: 14px; padding: 12px 34px 12px 15px; cursor: pointer; appearance: none; -webkit-appearance: none; outline: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23928c81' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
-.modelsel option { background: var(--panel2); color: var(--ink); }
-.togglehint { font-size: 11px; color: var(--dim); padding: 10px 0 22px; }
-.togglehint.warn { color: var(--warn); }
+.modelpick {
+   display: inline-flex;
+   align-items: center;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding-left: 16px;
+   transition: border-color 0.15s ease;
+}
+
+.modelpick:hover,
+.modelpick:focus-within {
+   border-color: var(--line2);
+}
+
+.modelpick.locked {
+   opacity: 0.6;
+}
+
+.modelpick.locked .modelsel {
+   cursor: default;
+}
+
+.modelpick-lab {
+   font-size: 10px;
+   font-weight: 600;
+   letter-spacing: 0.16em;
+   text-transform: uppercase;
+   color: var(--mut);
+   white-space: nowrap;
+   pointer-events: none;
+}
+
+.modelsel {
+   font-family: var(--body);
+   font-weight: 500;
+   font-size: 14px;
+   color: var(--ink);
+   background-color: transparent;
+   border: 0;
+   border-left: 1px solid var(--line);
+   margin-left: 14px;
+   padding: 12px 34px 12px 15px;
+   cursor: pointer;
+   appearance: none;
+   -webkit-appearance: none;
+   outline: none;
+   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23928c81' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+   background-repeat: no-repeat;
+   background-position: right 14px center;
+}
+
+.modelsel option {
+   background: var(--panel2);
+   color: var(--ink);
+}
+
+.togglehint {
+   font-size: 11px;
+   color: var(--dim);
+   padding: 10px 0 22px;
+}
+
+.togglehint.warn {
+   color: var(--warn);
+}
 
 /* ---- permission card ---- */
-.permcard { margin: 26px 0 0; border: 1px solid rgba(216,176,122,0.4); border-radius: 14px; padding: 16px 18px; background: rgba(216,176,122,0.05); }
-.permcard.choice { border-color: rgba(147,166,201,0.4); background: rgba(147,166,201,0.05); }
-.permcard .lead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--warn); margin-bottom: 6px; }
-.permcard.choice .lead { color: var(--plan); }
-.permcard .ask { font-size: 16px; margin-bottom: 12px; }
-.permcard .ask code { font-family: var(--mono); background: var(--panel2); padding: 2px 7px; border-radius: 6px; font-size: 14px; }
-.permbtns { display: flex; gap: 10px; flex-wrap: wrap; }
-.permbtns button { font: inherit; cursor: pointer; border-radius: 10px; padding: 9px 18px; border: 1px solid var(--line); background: var(--panel2); color: var(--ink); }
-.permbtns .allow { background: rgba(156,199,164,0.16); border-color: rgba(156,199,164,0.5); color: var(--good); }
-.permbtns .deny { background: rgba(217,138,138,0.14); border-color: rgba(217,138,138,0.45); color: var(--danger); }
-.permhint { font-size: 12px; color: var(--dim); margin-top: 8px; }
+.permcard {
+   margin: 26px 0 0;
+   border: 1px solid rgba(216, 176, 122, 0.4);
+   border-radius: 14px;
+   padding: 16px 18px;
+   background: rgba(216, 176, 122, 0.05);
+}
+
+.permcard.choice {
+   border-color: rgba(147, 166, 201, 0.4);
+   background: rgba(147, 166, 201, 0.05);
+}
+
+.permcard .lead {
+   font-size: 11px;
+   text-transform: uppercase;
+   letter-spacing: 0.12em;
+   color: var(--warn);
+   margin-bottom: 6px;
+}
+
+.permcard.choice .lead {
+   color: var(--plan);
+}
+
+.permcard .ask {
+   font-size: 16px;
+   margin-bottom: 12px;
+}
+
+.permcard .ask code {
+   font-family: var(--mono);
+   background: var(--panel2);
+   padding: 2px 7px;
+   border-radius: 6px;
+   font-size: 14px;
+}
+
+.permbtns {
+   display: flex;
+   gap: 10px;
+   flex-wrap: wrap;
+}
+
+.permbtns button {
+   font: inherit;
+   cursor: pointer;
+   border-radius: 10px;
+   padding: 9px 18px;
+   border: 1px solid var(--line);
+   background: var(--panel2);
+   color: var(--ink);
+}
+
+.permbtns .allow {
+   background: rgba(156, 199, 164, 0.16);
+   border-color: rgba(156, 199, 164, 0.5);
+   color: var(--good);
+}
+
+.permbtns .deny {
+   background: rgba(217, 138, 138, 0.14);
+   border-color: rgba(217, 138, 138, 0.45);
+   color: var(--danger);
+}
+
+.permhint {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 8px;
+}
 
 /* Formatted plan body inside a plan-approval card. */
-.planmd { margin-top: 12px; max-height: 320px; overflow-y: auto; padding: 14px 16px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; font-size: 13.5px; line-height: 1.55; color: var(--ink); }
-.planmd .mdh { font-weight: 700; margin: 12px 0 4px; }
-.planmd .mdh:first-child { margin-top: 0; }
-.planmd .mdh1 { font-size: 15px; }
-.planmd .mdh2 { font-size: 14px; }
-.planmd .mdh3, .planmd .mdh4 { font-size: 13.5px; color: var(--mut); }
-.planmd .mdli { display: flex; gap: 8px; margin: 3px 0; }
-.planmd .mdb { flex: none; color: var(--mut); }
-.planmd .mdp { margin: 4px 0; }
-.planmd .mdgap { height: 6px; }
-.planmd pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; margin: 8px 0; }
-.planmd code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+.planmd {
+   margin-top: 12px;
+   max-height: 320px;
+   overflow-y: auto;
+   padding: 14px 16px;
+   background: var(--panel2);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   font-size: 13.5px;
+   line-height: 1.55;
+   color: var(--ink);
+}
+
+.planmd .mdh {
+   font-weight: 700;
+   margin: 12px 0 4px;
+}
+
+.planmd .mdh:first-child {
+   margin-top: 0;
+}
+
+.planmd .mdh1 {
+   font-size: 15px;
+}
+
+.planmd .mdh2 {
+   font-size: 14px;
+}
+
+.planmd .mdh3,
+.planmd .mdh4 {
+   font-size: 13.5px;
+   color: var(--mut);
+}
+
+.planmd .mdli {
+   display: flex;
+   gap: 8px;
+   margin: 3px 0;
+}
+
+.planmd .mdb {
+   flex: none;
+   color: var(--mut);
+}
+
+.planmd .mdp {
+   margin: 4px 0;
+}
+
+.planmd .mdgap {
+   height: 6px;
+}
+
+.planmd pre {
+   background: var(--bg);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   padding: 10px 12px;
+   overflow-x: auto;
+   font-family: var(--mono);
+   font-size: 12px;
+   margin: 8px 0;
+}
+
+.planmd code {
+   font-family: var(--mono);
+   background: var(--bg);
+   padding: 1px 5px;
+   border-radius: 5px;
+   font-size: 12.5px;
+}
 
 /* ---- panels ---- */
-.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; padding-top: 36px; }
-@media (max-width: 840px) { .panels { grid-template-columns: 1fr; gap: 30px; } }
+.panels {
+   display: grid;
+   grid-template-columns: 1fr 1fr;
+   gap: 48px;
+   padding-top: 36px;
+}
+
+@media (max-width: 840px) {
+   .panels {
+      grid-template-columns: 1fr;
+      gap: 30px;
+   }
+}
+
 /* Pin each column to its 1fr track regardless of content. Without min-width: 0 a
    grid/flex item's automatic minimum is min-content, so a long unbroken string
    (a queued prompt, a path, a command) blows the track out and the whole column
    resizes with the content. min-width: 0 keeps the width screen-driven, not
    content-driven; inner text then wraps/ellipsizes instead of pushing wider. */
-.panel { min-width: 0; }
-.panel h2 { font-family: var(--disp); text-transform: uppercase; font-size: 17px; letter-spacing: 0.02em; font-weight: 400; margin: 0 0 6px; display: flex; justify-content: space-between; align-items: baseline; }
-.panel h2 .ct { font-family: var(--body); font-size: 12px; color: var(--mut); }
-.panel .rule { height: 1px; background: var(--line); margin-bottom: 18px; }
-.scroll { display: flex; flex-direction: column; gap: 10px; }
-/* Conversation (chat history) panel: make its height track the session-list
-   panel beside it instead of using a fixed cap. The two panels are siblings in
-   the same grid row, and grid stretches both cells to the row's (taller) height
-   — which the session list drives as sessions are added/removed. The min-height
-   is a FLOOR, not a cap: with no/few sessions the row stays at least this tall
-   (otherwise the conversation collapses to a sliver), while its own content
-   still can't grow the row — only the session list stretches it beyond the
-   floor, and the conversation follows. The scroll area then flexes to fill
-   whatever height the cell receives. */
-.conv-panel { display: flex; flex-direction: column; min-height: 700px; }
-.conv-panel .conv-wrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
-.conv-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding-right: 10px; }
-/* Keep items at their natural height and let the panel scroll. Without this, a
-   max-height flex column shrinks its children to fit: tool-call cards set
-   overflow:hidden, which makes their flex auto-min-height 0, so as the
-   conversation grows flexbox compresses them to a sliver ("horizontal line").
-   flex-shrink: 0 pins each child's height and scrolls the container instead. */
-.conv-scroll > * { flex-shrink: 0; }
+.panel {
+   min-width: 0;
+}
+
+.panel h2 {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 17px;
+   letter-spacing: 0.02em;
+   font-weight: 400;
+   margin: 0 0 6px;
+   display: flex;
+   justify-content: space-between;
+   align-items: baseline;
+}
+
+.panel h2 .ct {
+   font-family: var(--body);
+   font-size: 12px;
+   color: var(--mut);
+}
+
+.panel .rule {
+   height: 1px;
+   background: var(--line);
+   margin-bottom: 18px;
+}
+
+.scroll {
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+}
+
+
 
 /* Slim, theme-matched scrollbar shared by the secondary scroll areas so the
    native browser bar never clashes with the dark UI: transparent track, a
@@ -209,327 +693,3601 @@ body {
 .transcript,
 .tx-modal-body,
 .tc-code {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line2) transparent;
+   scrollbar-width: thin;
+   scrollbar-color: var(--line2) transparent;
 }
+
 .logscroll:hover,
 .transcript:hover,
 .tx-modal-body:hover,
 .tc-code:hover {
-  scrollbar-color: var(--mut) transparent;
+   scrollbar-color: var(--mut) transparent;
 }
+
 .logscroll::-webkit-scrollbar,
 .transcript::-webkit-scrollbar,
 .tx-modal-body::-webkit-scrollbar,
-.tc-code::-webkit-scrollbar { width: 8px; height: 8px; }
+.tc-code::-webkit-scrollbar {
+   width: 8px;
+   height: 8px;
+}
+
 .logscroll::-webkit-scrollbar-track,
 .transcript::-webkit-scrollbar-track,
 .tx-modal-body::-webkit-scrollbar-track,
-.tc-code::-webkit-scrollbar-track { background: transparent; }
+.tc-code::-webkit-scrollbar-track {
+   background: transparent;
+}
+
 .logscroll::-webkit-scrollbar-thumb,
 .transcript::-webkit-scrollbar-thumb,
 .tx-modal-body::-webkit-scrollbar-thumb,
 .tc-code::-webkit-scrollbar-thumb {
-  background: var(--line2);
-  border-radius: 999px;
-  /* inset the thumb from the edge so it reads as a slim pill */
-  border: 2px solid transparent;
-  background-clip: padding-box;
+   background: var(--line2);
+   border-radius: 999px;
+   /* inset the thumb from the edge so it reads as a slim pill */
+   border: 2px solid transparent;
+   background-clip: padding-box;
 }
+
 .logscroll::-webkit-scrollbar-thumb:hover,
 .transcript::-webkit-scrollbar-thumb:hover,
 .tx-modal-body::-webkit-scrollbar-thumb:hover,
-.tc-code::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
+.tc-code::-webkit-scrollbar-thumb:hover {
+   background: var(--mut);
+   background-clip: padding-box;
+}
 
 /* Conversation history (Option C): the panel always auto-scrolls to the latest
    message. Dynamic fade indicators hint at off-screen content — a top fade when
    there's more above, a bottom fade when there's more below — each painted as a
    --bg gradient overlay on the non-scrolling wrapper (so it stays pinned to the
    viewport, not the content) and animated via opacity for a smooth fade in/out.
-   JS toggles .more-above / .more-below on .conv-wrap from the scroll position. */
-.conv-wrap { position: relative; }
-.conv-wrap::before,
-.conv-wrap::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 104px;
-  pointer-events: none;
-  z-index: 2;
-  opacity: 0;
-  transition: opacity 0.35s ease;
+   JS toggles .more-above / .more-below on .dthread-wrap from the scroll position. */
+
+/* The dock's transcript reuses the same fades — same problem (a long thread
+   with no cue that there is more above), same solution. */
+.dthread-wrap::before,
+.dthread-wrap::after {
+   content: "";
+   position: absolute;
+   left: 0;
+   right: 0;
+   height: 104px;
+   pointer-events: none;
+   z-index: 2;
+   opacity: 0;
+   transition: opacity 0.35s ease;
 }
-.conv-wrap::before {
-  top: 0;
-  background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
+
+.dthread-wrap::before {
+   top: 0;
+   background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
 }
-.conv-wrap::after {
-  bottom: 0;
-  background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
+
+.dthread-wrap::after {
+   bottom: 0;
+   background: linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 44px, transparent 104px);
 }
-.conv-wrap.more-above::before { opacity: 1; }
-.conv-wrap.more-below::after { opacity: 1; }
+
+.dthread-wrap.more-above::before {
+   opacity: 1;
+}
+
+.dthread-wrap.more-below::after {
+   opacity: 1;
+}
 
 /* The scrollbar is theme-matched (no more clashing white OS bar) AND auto-hides:
    the thumb is transparent at rest and only paints in --line2/--mut when the
-   conversation section is hovered, or while the user is actively scrolling (a JS
-   handler toggles the .scrolling class, then clears it after a short idle). So
-   the bar appears on hover/scroll and fades out otherwise. */
-.conv-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 0.3s ease; }
-.conv-scroll.scrolling,
-.conv-scroll:hover { scrollbar-color: var(--line2) transparent; }
-.conv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-.conv-scroll::-webkit-scrollbar-track { background: transparent; }
-.conv-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  transition: background 0.3s ease;
+   dock's thread is hovered, or while the user is actively scrolling (Dock.tsx
+   toggles the .scrolling class, then clears it after a short idle). So the bar
+   appears on hover/scroll and fades out otherwise.
+
+   These rules were written for .conv-scroll, which no component has used since
+   the Yuri OS re-shell — meanwhile the dock kept toggling .scrolling with
+   nothing listening, so its themed auto-hiding scrollbar silently never
+   applied. Retargeted rather than deleted. */
+.dthread {
+   scrollbar-width: thin;
+   scrollbar-color: transparent transparent;
+   transition: scrollbar-color 0.3s ease;
 }
-.conv-scroll.scrolling::-webkit-scrollbar-thumb,
-.conv-scroll:hover::-webkit-scrollbar-thumb { background: var(--line2); background-clip: padding-box; }
-.conv-scroll::-webkit-scrollbar-thumb:hover { background: var(--mut); background-clip: padding-box; }
 
-.empty { color: var(--dim); font-size: 14px; padding: 6px 2px; }
+.dthread.scrolling,
+.dthread:hover {
+   scrollbar-color: var(--line2) transparent;
+}
 
-.bubble { font-size: 15px; line-height: 1.5; }
-.bubble .who { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--acc); margin-bottom: 2px; }
-.bubble.assistant .who { color: var(--mut); }
+.dthread::-webkit-scrollbar {
+   width: 8px;
+   height: 8px;
+}
+
+.dthread::-webkit-scrollbar-track {
+   background: transparent;
+}
+
+.dthread::-webkit-scrollbar-thumb {
+   background: transparent;
+   border-radius: 999px;
+   border: 2px solid transparent;
+   background-clip: padding-box;
+   transition: background 0.3s ease;
+}
+
+.dthread.scrolling::-webkit-scrollbar-thumb,
+.dthread:hover::-webkit-scrollbar-thumb {
+   background: var(--line2);
+   background-clip: padding-box;
+}
+
+.dthread::-webkit-scrollbar-thumb:hover {
+   background: var(--mut);
+   background-clip: padding-box;
+}
+
+.empty {
+   color: var(--dim);
+   font-size: 14px;
+   padding: 6px 2px;
+}
+
+.bubble {
+   font-size: 15px;
+   line-height: 1.5;
+}
+
+.bubble .who {
+   font-size: 11px;
+   letter-spacing: 0.1em;
+   text-transform: uppercase;
+   color: var(--acc);
+   margin-bottom: 2px;
+}
+
+.bubble.assistant .who {
+   color: var(--acc);
+}
+
 /* Tool calls are inline "action cards": a tool the voice assistant invoked.
    Collapsed = status dot · mono name · human summary · chevron. Click to expand
    structured input/output. An isolated call uses the full .card style; runs of
    consecutive calls condense into light .line rows inside one .tcall-group. */
-.tcall { overflow: hidden; transition: border-color 0.15s ease, background 0.15s ease; }
-.tcall > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; user-select: none; }
-.tcall > summary::-webkit-details-marker { display: none; }
+.tcall {
+   overflow: hidden;
+   transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tcall>summary {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   cursor: pointer;
+   list-style: none;
+   user-select: none;
+}
+
+.tcall>summary::-webkit-details-marker {
+   display: none;
+}
 
 /* Full card — a single isolated call. */
-.tcall.card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-.tcall.card:hover { border-color: var(--line2); }
-.tcall.card[open] { background: var(--panel2); border-color: var(--line2); }
-.tcall.card > summary { padding: 9px 12px; }
+.tcall.card {
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   background: var(--panel);
+}
+
+.tcall.card:hover {
+   border-color: var(--line2);
+}
+
+.tcall.card[open] {
+   background: var(--panel2);
+   border-color: var(--line2);
+}
+
+.tcall.card>summary {
+   padding: 9px 12px;
+}
 
 /* Grouped lines — a run of consecutive calls. The container owns the single
    border + rounded frame; each line is a light, divider-separated row. */
-.tcall-group { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
-.tcall.line { background: transparent; }
-.tcall.line > summary { padding: 6px 12px; }
-.tcall.line + .tcall.line { border-top: 1px solid var(--line); }
-.tcall.line:hover { background: var(--panel2); }
-.tcall.line[open] { background: var(--panel2); }
+.tcall-group {
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   background: var(--panel);
+   overflow: hidden;
+}
+
+.tcall.line {
+   background: transparent;
+}
+
+.tcall.line>summary {
+   padding: 6px 12px;
+}
+
+.tcall.line+.tcall.line {
+   border-top: 1px solid var(--line);
+}
+
+.tcall.line:hover {
+   background: var(--panel2);
+}
+
+.tcall.line[open] {
+   background: var(--panel2);
+}
 
 /* Semantic status dot with a soft halo; the working state gently pulses. */
-.tc-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
-.tc-dot.working { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent); animation: tc-pulse 1.4s ease-in-out infinite; }
-.tc-dot.error { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent); }
-@keyframes tc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.tc-dot {
+   width: 7px;
+   height: 7px;
+   border-radius: 50%;
+   flex: none;
+   background: var(--good);
+   box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent);
+}
 
-.tc-name { font-family: var(--mono); font-size: 12.5px; color: var(--ink); flex: none; }
-.tc-summary { font-size: 13px; color: var(--mut); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tcall.error .tc-summary { color: var(--danger); }
+.tc-dot.working {
+   background: var(--warn);
+   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent);
+   animation: tc-pulse 1.4s ease-in-out infinite;
+}
+
+.tc-dot.error {
+   background: var(--danger);
+   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+@keyframes tc-pulse {
+
+   0%,
+   100% {
+      opacity: 1;
+   }
+
+   50% {
+      opacity: 0.35;
+   }
+}
+
+.tc-name {
+   font-family: var(--mono);
+   font-size: 12.5px;
+   color: var(--ink);
+   flex: none;
+}
+
+.tc-summary {
+   font-size: 13px;
+   color: var(--mut);
+   min-width: 0;
+   flex: 1;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+.tcall.error .tc-summary {
+   color: var(--danger);
+}
+
 /* Base for all <Icon> usages: align inline icons with adjacent text and keep
    them from shrinking inside flex rows. Color is inherited (currentColor). */
-.icon { vertical-align: middle; flex: none; }
-.tc-chev { color: var(--dim); flex: none; margin-left: auto; transition: transform 0.18s ease, color 0.15s ease; }
-.tcall[open] .tc-chev { transform: rotate(180deg); }
-.tcall > summary:hover .tc-chev { color: var(--mut); }
+.icon {
+   vertical-align: middle;
+   flex: none;
+}
 
-.tc-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
-.tcall[open] .tc-body { animation: tc-reveal 0.18s ease both; }
-@keyframes tc-reveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
-.tc-label { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+.tc-chev {
+   color: var(--dim);
+   flex: none;
+   margin-left: auto;
+   transition: transform 0.18s ease, color 0.15s ease;
+}
+
+.tcall[open] .tc-chev {
+   transform: rotate(180deg);
+}
+
+.tcall>summary:hover .tc-chev {
+   color: var(--mut);
+}
+
+.tc-body {
+   padding: 0 12px 12px;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+}
+
+.tcall[open] .tc-body {
+   animation: tc-reveal 0.18s ease both;
+}
+
+@keyframes tc-reveal {
+   from {
+      opacity: 0;
+      transform: translateY(-3px);
+   }
+
+   to {
+      opacity: 1;
+      transform: none;
+   }
+}
+
+.tc-label {
+   font-size: 10px;
+   letter-spacing: 0.18em;
+   text-transform: uppercase;
+   color: var(--dim);
+   margin-bottom: 6px;
+}
 
 /* Flat args render as an aligned key/value grid — far more legible than JSON. */
-.tc-kv { display: grid; grid-template-columns: minmax(64px, max-content) 1fr; gap: 5px 14px; margin: 0; }
-.tc-kv-row { display: contents; }
-.tc-kv dt { font-family: var(--mono); font-size: 11.5px; color: var(--mut); }
-.tc-kv dd { font-size: 13px; color: var(--ink); margin: 0; word-break: break-word; white-space: pre-wrap; }
+.tc-kv {
+   display: grid;
+   grid-template-columns: minmax(64px, max-content) 1fr;
+   gap: 5px 14px;
+   margin: 0;
+}
 
-.tc-code { font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
-.tc-empty { color: var(--dim); font-size: 13px; }
+.tc-kv-row {
+   display: contents;
+}
+
+.tc-kv dt {
+   font-family: var(--mono);
+   font-size: 11.5px;
+   color: var(--mut);
+}
+
+.tc-kv dd {
+   font-size: 13px;
+   color: var(--ink);
+   margin: 0;
+   word-break: break-word;
+   white-space: pre-wrap;
+}
+
+.tc-code {
+   font-family: var(--mono);
+   font-size: 12px;
+   line-height: 1.5;
+   color: var(--ink);
+   background: var(--bg);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   padding: 9px 11px;
+   margin: 0;
+   white-space: pre-wrap;
+   word-break: break-word;
+   max-height: 260px;
+   overflow: auto;
+}
+
+.tc-empty {
+   color: var(--dim);
+   font-size: 13px;
+}
 
 /* ---- sessions ---- */
 /* Each session is an outlined card so they're easy to tell apart (no more
    hairline-divider runs). Transparent fill + a brighter hairline border; the
    inner status strip keeps its --panel fill, so it reads inside the card. */
-.sess { background: transparent; border: 1px solid var(--line2); border-radius: 14px; padding: 15px 16px; }
-.sess .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.sess .name { font-family: var(--disp); text-transform: uppercase; font-size: 18px; }
-.sess .namebtn { background: transparent; border: 0; padding: 0; color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; letter-spacing: inherit; }
-.sess .namebtn .penicon { display: inline-flex; align-items: center; color: var(--dim); opacity: 0; transition: opacity 0.14s, color 0.12s; }
-.sess .namebtn:hover .penicon { opacity: 1; color: var(--acc); }
-.sess .nameedit { font-family: var(--disp); text-transform: uppercase; font-size: 18px; color: var(--ink); background: var(--panel); border: 1px solid var(--acc); border-radius: 8px; padding: 2px 9px; outline: none; max-width: 240px; }
-.bk { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--mut); }
-.badge { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--mut); margin-left: auto; }
-.badge.completed { color: var(--good); }
-.badge.needs_permission, .badge.needs_choice { color: var(--warn); }
-.badge.running { color: var(--acc); }
-.badge.error { color: var(--danger); }
-.sess .path { font-size: 13px; color: var(--mut); margin: 8px 0 11px; word-break: break-all; }
-.sess .shead { display: flex; align-items: center; gap: 9px; }
+.sess {
+   background: transparent;
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+}
+
+.sess .head {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   flex-wrap: wrap;
+}
+
+.sess .name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 18px;
+}
+
+.sess .namebtn {
+   background: transparent;
+   border: 0;
+   padding: 0;
+   color: var(--ink);
+   cursor: pointer;
+   display: inline-flex;
+   align-items: center;
+   gap: 7px;
+   letter-spacing: inherit;
+}
+
+.sess .namebtn .penicon {
+   display: inline-flex;
+   align-items: center;
+   color: var(--dim);
+   opacity: 0;
+   transition: opacity 0.14s, color 0.12s;
+}
+
+.sess .namebtn:hover .penicon {
+   opacity: 1;
+   color: var(--acc);
+}
+
+.sess .nameedit {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 18px;
+   color: var(--ink);
+   background: var(--panel);
+   border: 1px solid var(--acc);
+   border-radius: 8px;
+   padding: 2px 9px;
+   outline: none;
+   max-width: 240px;
+}
+
+.bk {
+   font-size: 11px;
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 3px 9px;
+   color: var(--mut);
+}
+
+.badge {
+   font-size: 11px;
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 3px 10px;
+   color: var(--mut);
+   margin-left: auto;
+}
+
+.badge.completed {
+   color: var(--good);
+}
+
+.badge.needs_permission,
+.badge.needs_choice {
+   color: var(--warn);
+}
+
+.badge.running {
+   color: var(--acc);
+}
+
+.badge.error {
+   color: var(--danger);
+}
+
+.sess .path {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 11px;
+   word-break: break-all;
+}
+
+.sess .shead {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+}
 
 /* Option F "status strip": leads with what the session is doing right now. */
-.statusline { display: flex; align-items: center; gap: 9px; margin: 10px 0 0; padding: 9px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-.sdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--good); }
-.sdot.working { background: var(--acc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent); animation: qpulse 1.3s ease-in-out infinite; }
-.sdot.attn { background: var(--warn); }
-.sdot.error { background: var(--danger); }
-.statusline .lead { font-size: 12px; font-weight: 600; flex: none; }
-.statusline.working .lead { color: var(--acc); }
-.statusline.ready .lead { color: var(--good); }
-.statusline.attn .lead { color: var(--warn); }
-.statusline.error .lead { color: var(--danger); }
-.statusline .task { font-size: 12.5px; color: var(--mut); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.statusline .qmore { font-size: 10.5px; letter-spacing: 0.03em; color: var(--dim); flex: none; white-space: nowrap; }
+.statusline {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   margin: 10px 0 0;
+   padding: 9px 12px;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+}
+
+.sdot {
+   width: 8px;
+   height: 8px;
+   border-radius: 50%;
+   flex: none;
+   background: var(--good);
+}
+
+.sdot.working {
+   background: var(--acc);
+   box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent);
+   animation: qpulse 1.3s ease-in-out infinite;
+}
+
+.sdot.attn {
+   background: var(--warn);
+}
+
+.sdot.error {
+   background: var(--danger);
+}
+
+.statusline .lead {
+   font-size: 12px;
+   font-weight: 600;
+   flex: none;
+}
+
+.statusline.working .lead {
+   color: var(--acc);
+}
+
+.statusline.ready .lead {
+   color: var(--good);
+}
+
+.statusline.attn .lead {
+   color: var(--warn);
+}
+
+.statusline.error .lead {
+   color: var(--danger);
+}
+
+.statusline .task {
+   font-size: 12.5px;
+   color: var(--mut);
+   flex: 1;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.statusline .qmore {
+   font-size: 10.5px;
+   letter-spacing: 0.03em;
+   color: var(--dim);
+   flex: none;
+   white-space: nowrap;
+}
 
 /* mode control on its own row; session actions on a separate row below */
-.moderow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.actionrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.moderow {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   margin-top: 12px;
+}
+
+.actionrow {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin-top: 10px;
+}
 
 /* segmented permission-mode control (single source of truth for mode) */
-.modeseg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
-.modeseg button { font: inherit; font-size: 12px; font-weight: 500; padding: 4px 11px; border-radius: 999px; border: 0; background: transparent; color: var(--mut); cursor: pointer; white-space: nowrap; }
-.modeseg button:hover:not(:disabled) { color: var(--ink); }
-.modeseg button.on { background: var(--acc); color: var(--acc-ink); font-weight: 600; }
-.modeseg button:disabled { opacity: 0.5; cursor: default; }
+.modeseg {
+   display: inline-flex;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 3px;
+   gap: 2px;
+}
 
-.modechip { font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); }
-.modechip.plan { color: var(--plan); border-color: var(--plan); }
-.modechip.acceptEdits { color: var(--good); border-color: var(--good); }
-.modechip.auto { color: var(--acc); border-color: var(--acc); }
+.modeseg button {
+   font: inherit;
+   font-size: 12px;
+   font-weight: 500;
+   padding: 4px 11px;
+   border-radius: 999px;
+   border: 0;
+   background: transparent;
+   color: var(--mut);
+   cursor: pointer;
+   white-space: nowrap;
+}
+
+.modeseg button:hover:not(:disabled) {
+   color: var(--ink);
+}
+
+.modeseg button.on {
+   background: var(--acc);
+   color: var(--acc-ink);
+   font-weight: 600;
+}
+
+.modeseg button:disabled {
+   opacity: 0.5;
+   cursor: default;
+}
+
+.modechip {
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+}
+
+.modechip.plan {
+   color: var(--plan);
+   border-color: var(--plan);
+}
+
+.modechip.acceptEdits {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.modechip.auto {
+   color: var(--acc);
+   border-color: var(--acc);
+}
 
 /* live work-pipeline chips (running / queued / pending) */
-.qchip { font-size: 11px; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); display: inline-flex; align-items: center; gap: 5px; }
-.qchip.run { color: var(--acc); border-color: var(--acc); }
-.qchip.queued { color: var(--warn); border-color: var(--warn); }
-.qchip.pending { color: var(--good); border-color: var(--good); }
-.qdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: qpulse 1.2s ease-in-out infinite; }
-@keyframes qpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.qchip {
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+   display: inline-flex;
+   align-items: center;
+   gap: 5px;
+}
+
+.qchip.run {
+   color: var(--acc);
+   border-color: var(--acc);
+}
+
+.qchip.queued {
+   color: var(--warn);
+   border-color: var(--warn);
+}
+
+.qchip.pending {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.qdot {
+   width: 6px;
+   height: 6px;
+   border-radius: 50%;
+   background: currentColor;
+   animation: qpulse 1.2s ease-in-out infinite;
+}
+
+@keyframes qpulse {
+
+   0%,
+   100% {
+      opacity: 1;
+   }
+
+   50% {
+      opacity: 0.25;
+   }
+}
 
 /* the actual running/queued turns under a session (with message text) */
-.queuelist { margin: 2px 0 11px; display: flex; flex-direction: column; gap: 4px; }
-.qitem { display: flex; gap: 9px; align-items: baseline; font-size: 12.5px; }
-.qitem .qmark { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; min-width: 62px; }
-.qitem.running .qmark { color: var(--acc); }
-.qitem.queued .qmark { color: var(--warn); }
-.qitem .qtext { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-.qitem.queued .qtext { color: var(--mut); }
+.queuelist {
+   margin: 2px 0 11px;
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+}
+
+.qitem {
+   display: flex;
+   gap: 9px;
+   align-items: baseline;
+   font-size: 12.5px;
+}
+
+.qitem .qmark {
+   font-size: 10px;
+   letter-spacing: 0.04em;
+   text-transform: uppercase;
+   white-space: nowrap;
+   min-width: 62px;
+}
+
+.qitem.running .qmark {
+   color: var(--acc);
+}
+
+.qitem.queued .qmark {
+   color: var(--warn);
+}
+
+.qitem .qtext {
+   color: var(--ink);
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.qitem.queued .qtext {
+   color: var(--mut);
+}
 
 /* activity / pipeline log panel */
-.debugpanel { margin-top: 18px; }
-.loghead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.logctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.logsearch { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 4px 9px; font-size: 12px; outline: none; min-width: 110px; }
-.logsearch:focus { border-color: var(--acc); }
-.textbtn.on { color: var(--acc); }
-/* overflow: auto on both axes — rows size to content (width: max-content) so
-   long lines scroll horizontally instead of truncating; min-width: 100% keeps
-   short rows full-width for the divider. */
-.logscroll { margin-top: 10px; max-height: 380px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
-.logrow { display: flex; gap: 9px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid rgba(50,47,43,0.45); white-space: nowrap; width: max-content; min-width: 100%; }
-.logrow .lt { color: var(--dim); flex: none; }
-.logrow .lhop { flex: none; display: inline-flex; gap: 3px; align-items: center; }
-.logrow .harr { color: var(--dim); }
-.logrow .htag { text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
-.htag.voice { color: var(--plan); }
-.htag.backend { color: var(--mut); }
-.htag.claude { color: var(--acc); }
-.htag.user { color: var(--good); }
-.logrow .lk { color: var(--dim); flex: none; min-width: 74px; }
-.logrow .lsess { color: var(--mut); flex: none; }
-.logrow .lsum { color: var(--ink); flex: none; }
-.logrow.k-error .lsum { color: var(--danger); }
-.logrow.k-send .lsum { color: var(--acc); }
-.logrow.k-assistant .lsum { color: var(--good); }
-.logrow.k-transcript .lsum { color: var(--plan); }
-.logrow.k-inject .lsum { color: var(--warn); }
+.debugpanel {
+   margin-top: 18px;
+}
 
-.modebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
-.modelbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
-.modepill { font: inherit; font-weight: 500; font-size: 12.5px; padding: 5px 13px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--mut); cursor: pointer; }
-.modepill:hover:not(:disabled) { color: var(--ink); border-color: var(--line2); }
-.modepill.on { background: var(--acc); color: var(--acc-ink); border-color: transparent; font-weight: 600; }
-.modepill:disabled { opacity: 0.5; cursor: default; }
+.loghead {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 12px;
+   flex-wrap: wrap;
+}
 
-.txtoggle { background: transparent; border: 1px solid var(--line); color: var(--mut); font: inherit; font-size: 11.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
-.txtoggle:hover { color: var(--ink); border-color: var(--line2); }
-.txtoggle.primary { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 55%, var(--line)); }
-.txtoggle.primary:hover { color: var(--acc); background: color-mix(in srgb, var(--acc) 12%, transparent); }
+.logctl {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   flex-wrap: wrap;
+}
+
+.logsearch {
+   background: var(--panel2);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   color: var(--ink);
+   padding: 4px 9px;
+   font-size: 12px;
+   outline: none;
+   min-width: 110px;
+}
+
+.logsearch:focus {
+   border-color: var(--acc);
+}
+
+.textbtn.on {
+   color: var(--acc);
+}
+
+/* No vertical cap here on purpose: .vpanel is already the scroll container
+   (overflow-y: auto, see the shell section below) for every view, and giving
+   this its own max-height nested a second scrollbar inside the first — a short,
+   fixed-height box with dead space under it even though the panel itself is
+   full-height. One scroll owner (the panel) instead of two. overflow-x stays,
+   since rows size to content (width: max-content) so long lines scroll
+   horizontally instead of truncating; min-width: 100% keeps short rows
+   full-width for the divider. */
+.logscroll {
+   margin-top: 10px;
+   overflow-x: auto;
+   font-family: var(--mono);
+   font-size: 12px;
+   line-height: 1.55;
+}
+
+.logrow {
+   display: flex;
+   gap: 9px;
+   align-items: baseline;
+   padding: 2px 0;
+   border-bottom: 1px solid rgba(50, 47, 43, 0.45);
+   white-space: nowrap;
+   width: max-content;
+   min-width: 100%;
+}
+
+.logrow .lt {
+   color: var(--dim);
+   flex: none;
+}
+
+.logrow .lhop {
+   flex: none;
+   display: inline-flex;
+   gap: 3px;
+   align-items: center;
+}
+
+.logrow .harr {
+   color: var(--dim);
+}
+
+.logrow .htag {
+   text-transform: uppercase;
+   font-size: 10px;
+   letter-spacing: 0.04em;
+}
+
+.htag.voice {
+   color: var(--plan);
+}
+
+.htag.backend {
+   color: var(--mut);
+}
+
+.htag.claude {
+   color: var(--acc);
+}
+
+.htag.user {
+   color: var(--good);
+}
+
+/* Yuri's domain events, mirrored into the Activity feed by
+   yuri.events.bus.bridge_to_event_log — those rows are "yuri" → "ui", and
+   both halves of the hop need a colour or the row renders uncoloured. */
+.htag.yuri {
+   color: var(--warn);
+}
+
+.htag.ui {
+   color: var(--dim);
+}
+
+.logrow .lk {
+   color: var(--dim);
+   flex: none;
+   min-width: 74px;
+}
+
+.logrow .lsess {
+   color: var(--mut);
+   flex: none;
+}
+
+.logrow .lsum {
+   color: var(--ink);
+   flex: none;
+}
+
+.logrow.k-error .lsum {
+   color: var(--danger);
+}
+
+.logrow.k-send .lsum {
+   color: var(--acc);
+}
+
+.logrow.k-assistant .lsum {
+   color: var(--good);
+}
+
+.logrow.k-transcript .lsum {
+   color: var(--plan);
+}
+
+.logrow.k-inject .lsum {
+   color: var(--warn);
+}
+
+.modebar {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin: 0 0 4px;
+}
+
+.modelbl {
+   font-size: 10px;
+   letter-spacing: 0.12em;
+   text-transform: uppercase;
+   color: var(--dim);
+   margin-right: 2px;
+}
+
+.modepill {
+   font: inherit;
+   font-weight: 500;
+   font-size: 12.5px;
+   padding: 5px 13px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   background: transparent;
+   color: var(--mut);
+   cursor: pointer;
+}
+
+.modepill:hover:not(:disabled) {
+   color: var(--ink);
+   border-color: var(--line2);
+}
+
+.modepill.on {
+   background: var(--acc);
+   color: var(--acc-ink);
+   border-color: transparent;
+   font-weight: 600;
+}
+
+.modepill:disabled {
+   opacity: 0.5;
+   cursor: default;
+}
+
+.txtoggle {
+   background: transparent;
+   border: 1px solid var(--line);
+   color: var(--mut);
+   font: inherit;
+   font-size: 11.5px;
+   padding: 5px 12px;
+   border-radius: 999px;
+   cursor: pointer;
+   white-space: nowrap;
+}
+
+.txtoggle:hover {
+   color: var(--ink);
+   border-color: var(--line2);
+}
+
+.txtoggle:disabled {
+   opacity: 0.5;
+   cursor: default;
+}
+
+.txtoggle:disabled:hover {
+   color: var(--mut);
+   border-color: var(--line);
+}
+
+.txtoggle.primary {
+   color: var(--acc);
+   border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+}
+
+.txtoggle.primary:hover {
+   color: var(--acc);
+   background: color-mix(in srgb, var(--acc) 12%, transparent);
+}
+
+.txtoggle.danger {
+   color: var(--danger);
+   border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+}
+
+.txtoggle.danger:hover {
+   color: var(--danger);
+   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
 
 /* "Continue in your terminal" — the reframed handoff: a collapsible section with
    two clearly-explained choices (take the keyboard / reopen anywhere). */
-details.handoff { margin-top: 13px; border-top: 1px solid var(--line); padding-top: 11px; }
-details.handoff > summary { list-style: none; cursor: pointer; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--dim); display: inline-flex; align-items: center; gap: 7px; }
-details.handoff > summary::-webkit-details-marker { display: none; }
-details.handoff > summary .chev { font-size: 9px; transition: transform 0.15s ease; }
-details.handoff[open] > summary .chev { transform: rotate(90deg); }
-details.handoff:hover > summary { color: var(--mut); }
-.handoff .hopt { margin-top: 12px; }
-.handoff .htitle { font-size: 12.5px; color: var(--ink); font-weight: 600; }
-.handoff .hwhy { font-size: 11.5px; color: var(--mut); margin: 1px 0 6px; }
-.handoff .hcmd { display: flex; align-items: center; gap: 8px; }
-.handoff .hcmd code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; background: var(--panel); border: 1px solid var(--line); padding: 7px 9px; border-radius: 8px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.copybtn { display: inline-grid; place-items: center; background: var(--panel); border: 1px solid var(--line); color: var(--mut); cursor: pointer; padding: 7px; border-radius: 8px; line-height: 0; flex: none; transition: color 0.12s, border-color 0.12s; }
-.copybtn svg { display: block; }
-.copybtn:hover { color: var(--acc); border-color: var(--line2); }
-.copybtn.done { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+details.handoff {
+   margin-top: 13px;
+   border-top: 1px solid var(--line);
+   padding-top: 11px;
+}
+
+details.handoff>summary {
+   list-style: none;
+   cursor: pointer;
+   font-size: 11px;
+   letter-spacing: 0.07em;
+   text-transform: uppercase;
+   color: var(--dim);
+   display: inline-flex;
+   align-items: center;
+   gap: 7px;
+}
+
+details.handoff>summary::-webkit-details-marker {
+   display: none;
+}
+
+details.handoff>summary .chev {
+   font-size: 9px;
+   transition: transform 0.15s ease;
+}
+
+details.handoff[open]>summary .chev {
+   transform: rotate(90deg);
+}
+
+details.handoff:hover>summary {
+   color: var(--mut);
+}
+
+.handoff .hopt {
+   margin-top: 12px;
+}
+
+.handoff .htitle {
+   font-size: 12.5px;
+   color: var(--ink);
+   font-weight: 600;
+}
+
+.handoff .hwhy {
+   font-size: 11.5px;
+   color: var(--mut);
+   margin: 1px 0 6px;
+}
+
+.handoff .hcmd {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+}
+
+.handoff .hcmd code {
+   flex: 1;
+   min-width: 0;
+   font-family: var(--mono);
+   font-size: 11px;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   padding: 7px 9px;
+   border-radius: 8px;
+   color: var(--mut);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+.copybtn {
+   display: inline-grid;
+   place-items: center;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   color: var(--mut);
+   cursor: pointer;
+   padding: 7px;
+   border-radius: 8px;
+   line-height: 0;
+   flex: none;
+   transition: color 0.12s, border-color 0.12s;
+}
+
+.copybtn svg {
+   display: block;
+}
+
+.copybtn:hover {
+   color: var(--acc);
+   border-color: var(--line2);
+}
+
+.copybtn.done {
+   color: var(--good);
+   border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+}
 
 /* ---- transcript timeline ---- */
-.transcript { margin: 11px 0; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
-.tx { font-size: 13px; line-height: 1.5; }
-.tx .who { display: inline-block; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mut); margin-right: 6px; }
-.tx.user { color: var(--ink); }
-.tx.assistant { color: #d6cfc2; }
-.tx.tool { font-family: var(--mono); font-size: 12px; color: var(--warn); }
-.tx.tool .tag { color: var(--ink); }
-.tx.result { font-family: var(--mono); font-size: 12px; color: var(--dim); padding-left: 10px; white-space: pre-wrap; }
-.tx.result.err { color: var(--danger); }
+.transcript {
+   margin: 11px 0;
+   padding: 12px;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   max-height: 300px;
+   overflow-y: auto;
+   display: flex;
+   flex-direction: column;
+   gap: 7px;
+}
+
+.tx {
+   font-size: 13px;
+   line-height: 1.5;
+}
+
+.tx .who {
+   display: inline-block;
+   font-size: 10px;
+   letter-spacing: 0.06em;
+   text-transform: uppercase;
+   color: var(--mut);
+   margin-right: 6px;
+}
+
+.tx.user {
+   color: var(--ink);
+}
+
+.tx.assistant {
+   color: #d6cfc2;
+}
+
+.tx.tool {
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--warn);
+}
+
+.tx.tool .tag {
+   color: var(--ink);
+}
+
+.tx.result {
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--dim);
+   padding-left: 10px;
+   white-space: pre-wrap;
+}
+
+.tx.result.err {
+   color: var(--danger);
+}
 
 /* ---- live terminal ---- */
-.liveterm-wrap { position: relative; width: 100%; height: 100%; }
-.liveterm { width: 100%; height: 100%; overflow: hidden; }
-.term-scrollbtns { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 6px; z-index: 5; }
-.term-scrollbtns button { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--line2); background: rgba(33,31,29,0.85); color: var(--mut); font-size: 15px; line-height: 1; cursor: pointer; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-.term-scrollbtns button:hover { color: var(--ink); border-color: var(--acc); }
-.term-scrollbtns button:active { background: rgba(45,43,40,0.95); }
+.liveterm-wrap {
+   position: relative;
+   width: 100%;
+   height: 100%;
+}
+
+.liveterm {
+   width: 100%;
+   height: 100%;
+   overflow: hidden;
+}
+
+.term-scrollbtns {
+   position: absolute;
+   right: 8px;
+   bottom: 8px;
+   display: flex;
+   flex-direction: column;
+   gap: 6px;
+   z-index: 5;
+}
+
+.term-scrollbtns button {
+   width: 36px;
+   height: 36px;
+   border-radius: 9px;
+   border: 1px solid var(--line2);
+   background: rgba(33, 31, 29, 0.85);
+   color: var(--mut);
+   font-size: 15px;
+   line-height: 1;
+   cursor: pointer;
+   backdrop-filter: blur(4px);
+   -webkit-backdrop-filter: blur(4px);
+}
+
+.term-scrollbtns button:hover {
+   color: var(--ink);
+   border-color: var(--acc);
+}
+
+.term-scrollbtns button:active {
+   background: rgba(45, 43, 40, 0.95);
+}
+
 /* Embedded live terminal: a header bar sits flush on top of the CLI (✕ close on
    the left, ⛶ full screen on the right), with the terminal filling the rest. */
-.liveterm-box { height: 320px; margin: 11px 0; background: #14130f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
-.liveterm-bar { display: flex; align-items: center; gap: 9px; flex: none; padding: 5px 7px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); }
-.liveterm-bar .ltbar-title { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
-.ltbtn { background: transparent; border: 0; color: var(--mut); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 7px; border-radius: 6px; display: inline-grid; place-items: center; transition: color 0.12s, background 0.12s; }
-.ltbtn:hover { color: var(--ink); background: rgba(255,255,255,0.07); }
-.ltbtn.right { margin-left: auto; }
+.liveterm-box {
+   height: 320px;
+   margin: 11px 0;
+   background: #14130f;
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   overflow: hidden;
+   display: flex;
+   flex-direction: column;
+}
+
+.liveterm-bar {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   flex: none;
+   padding: 5px 7px;
+   border-bottom: 1px solid var(--line);
+   background: rgba(255, 255, 255, 0.02);
+}
+
+.liveterm-bar .ltbar-title {
+   font-size: 10.5px;
+   letter-spacing: 0.14em;
+   text-transform: uppercase;
+   color: var(--dim);
+}
+
+.ltbtn {
+   background: transparent;
+   border: 0;
+   color: var(--mut);
+   cursor: pointer;
+   font-size: 13px;
+   line-height: 1;
+   padding: 4px 7px;
+   border-radius: 6px;
+   display: inline-grid;
+   place-items: center;
+   transition: color 0.12s, background 0.12s;
+}
+
+.ltbtn:hover {
+   color: var(--ink);
+   background: rgba(255, 255, 255, 0.07);
+}
+
+.ltbtn.right {
+   margin-left: auto;
+}
+
 /* Clip the terminal area to the box so only xterm's own viewport scrollbar
    shows. Without overflow:hidden here the height:100% chain (.liveterm-wrap →
    .liveterm) can over-resolve inside this flex item and spill past the box,
    producing a second, stray scrollbar on top of xterm's native one. */
-.liveterm-inner { flex: 1; min-height: 0; padding: 6px; overflow: hidden; }
+.liveterm-inner {
+   flex: 1;
+   min-height: 0;
+   padding: 6px;
+   overflow: hidden;
+}
 
 /* ---- fullscreen overlay ---- */
-.tx-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(12,11,9,0.78); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 3vh 3vw; }
-.tx-modal { position: relative; width: min(1000px, 100%); height: 94vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); overflow: hidden; }
-.tx-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); font-family: var(--disp); text-transform: uppercase; font-size: 14px; letter-spacing: 0.04em; color: var(--mut); }
-.tx-modal-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.tx-modal-body .tx { font-size: 14px; }
-.tx-modal-body .tx.tool, .tx-modal-body .tx.result { font-size: 13px; }
-.tx-modal-body.term { padding: 8px; gap: 0; background: #14130f; }
+/* Rendered through <Portal> (components/ui/Portal.tsx) straight onto
+   document.body — NOT inside .vpanel. .vpanel is `position: absolute` with an
+   explicit z-index, which makes it a stacking context of its own; a
+   `position: fixed` overlay nested inside it still paints within that
+   context, capped at vpanel's z-index among its stage siblings, so .top/
+   .orbhome/.dock (higher z-index, but outside vpanel's context) painted over
+   it even though this rule's own inset:0 sized it to the full viewport. See
+   the "position: fixed and stacking" section of docs/yuri/design/GUIDE.md. */
+.tx-overlay {
+   position: fixed;
+   inset: 0;
+   z-index: 50;
+   background: rgba(12, 11, 9, 0.78);
+   backdrop-filter: blur(4px);
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   padding: 3vh 3vw;
+}
+
+/* A CLI is 220 columns — it wants width, not a narrow centered column. Fill
+   the padded overlay (100%) up to a generous cap so an ultrawide monitor
+   doesn't stretch the terminal past what's comfortable to read. */
+.tx-modal {
+   position: relative;
+   width: min(1600px, 100%);
+   height: 94vh;
+   display: flex;
+   flex-direction: column;
+   background: var(--panel);
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+   overflow: hidden;
+}
+
+.tx-modal-head {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   padding: 14px 16px;
+   border-bottom: 1px solid var(--line);
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 14px;
+   letter-spacing: 0.04em;
+   color: var(--mut);
+}
+
+.tx-modal-body {
+   flex: 1;
+   overflow-y: auto;
+   padding: 16px;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+}
+
+.tx-modal-body .tx {
+   font-size: 14px;
+}
+
+.tx-modal-body .tx.tool,
+.tx-modal-body .tx.result {
+   font-size: 13px;
+}
+
+.tx-modal-body.term {
+   padding: 8px;
+   gap: 0;
+   background: #14130f;
+}
+
 /* Fullscreen live view: attach-to-terminal action in the header + its popover. */
-.tx-head-actions { display: flex; align-items: center; gap: 10px; }
+.tx-head-actions {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+}
+
 /* The modal head sets a display/uppercase font; .txtoggle inherits it via
    `font: inherit`, which made the Close button mismatch the body-font attach
    button beside it. Pin the header buttons to the body font so they match. */
-.tx-head-actions .txtoggle { font-family: var(--body); font-weight: 500; text-transform: none; letter-spacing: normal; }
-.attachbtn { display: inline-flex; align-items: center; gap: 7px; background: color-mix(in srgb, var(--acc) 13%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 55%, var(--line)); color: var(--acc); font-family: var(--body); font-weight: 500; text-transform: none; letter-spacing: normal; font-size: 11.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; transition: background 0.12s, border-color 0.12s; }
-.attachbtn:hover { background: color-mix(in srgb, var(--acc) 22%, transparent); }
-.attach-pop { position: absolute; top: 56px; right: 16px; z-index: 3; width: 340px; background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px; padding: 14px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); }
-.attach-pop .ap-title { font-size: 12.5px; color: var(--ink); font-weight: 600; margin: 0 0 2px; }
-.attach-pop .ap-why { font-size: 11.5px; color: var(--mut); margin: 0 0 10px; line-height: 1.5; }
+.tx-head-actions .txtoggle {
+   font-family: var(--body);
+   font-weight: 500;
+   text-transform: none;
+   letter-spacing: normal;
+}
+
+.attachbtn {
+   display: inline-flex;
+   align-items: center;
+   gap: 7px;
+   background: color-mix(in srgb, var(--acc) 13%, transparent);
+   border: 1px solid color-mix(in srgb, var(--acc) 55%, var(--line));
+   color: var(--acc);
+   font-family: var(--body);
+   font-weight: 500;
+   text-transform: none;
+   letter-spacing: normal;
+   font-size: 11.5px;
+   padding: 5px 12px;
+   border-radius: 999px;
+   cursor: pointer;
+   white-space: nowrap;
+   transition: background 0.12s, border-color 0.12s;
+}
+
+.attachbtn:hover {
+   background: color-mix(in srgb, var(--acc) 22%, transparent);
+}
+
+.attach-pop {
+   position: absolute;
+   top: 56px;
+   right: 16px;
+   z-index: 3;
+   width: 340px;
+   background: var(--panel2);
+   border: 1px solid var(--line2);
+   border-radius: 12px;
+   padding: 14px;
+   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+.attach-pop .ap-title {
+   font-size: 12.5px;
+   color: var(--ink);
+   font-weight: 600;
+   margin: 0 0 2px;
+}
+
+.attach-pop .ap-why {
+   font-size: 11.5px;
+   color: var(--mut);
+   margin: 0 0 10px;
+   line-height: 1.5;
+}
+
 /* The command as a single text-field-like box with the copy button embedded
    inside it (rather than two separate bordered chips). */
-.cmdfield { display: flex; align-items: center; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 4px 5px 4px 11px; }
-.cmdfield code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); background: transparent; border: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cmdfield .copybtn { background: transparent; border: 0; padding: 6px; border-radius: 6px; }
-.cmdfield .copybtn:hover { background: rgba(255,255,255,0.06); }
+.cmdfield {
+   display: flex;
+   align-items: center;
+   gap: 4px;
+   background: var(--bg);
+   border: 1px solid var(--line);
+   border-radius: 9px;
+   padding: 4px 5px 4px 11px;
+}
+
+.cmdfield code {
+   flex: 1;
+   min-width: 0;
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--ink);
+   background: transparent;
+   border: 0;
+   padding: 0;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
+.cmdfield .copybtn {
+   background: transparent;
+   border: 0;
+   padding: 6px;
+   border-radius: 6px;
+}
+
+.cmdfield .copybtn:hover {
+   background: rgba(255, 255, 255, 0.06);
+}
+
+/* ---- Yuri OS shell: icon rail | stage (canvas + panel + dock) ----
+   The stage is a positioned container and everything on it is absolutely
+   placed over the orb's canvas. That is the design's whole point: a view
+   appears BESIDE Yuri rather than replacing the space she occupies, so she is
+   never hidden and never has to be re-introduced.
+   See docs/yuri/design/README.md. */
+.shell {
+   display: grid;
+   grid-template-columns: 56px 1fr;
+   height: 100vh;
+   min-height: 600px;
+}
+
+/* min-width: 0 on both tracks — see the note at the .panel rule above. Without
+   it a long path or queued prompt blows out a track and resizes the layout. */
+.shell>* {
+   min-width: 0;
+}
+
+.stage {
+   position: relative;
+   min-width: 0;
+   overflow: hidden;
+}
+
+.orb-canvas {
+   position: absolute;
+   inset: 0;
+   width: 100%;
+   height: 100%;
+   display: block;
+   pointer-events: none;
+}
+
+/* ---- icon rail ---- */
+.rail {
+   border-right: 1px solid var(--line);
+   background: var(--bg);
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   padding: 14px 0;
+   gap: 2px;
+   min-width: 0;
+}
+
+.rail-mark {
+   font-family: var(--disp);
+   color: var(--acc);
+   font-size: 20px;
+   line-height: 1;
+   margin-bottom: 16px;
+   letter-spacing: .02em;
+   text-decoration: none;
+}
+
+.ric {
+   position: relative;
+   width: 38px;
+   height: 38px;
+   border: 0;
+   background: none;
+   border-radius: 9px;
+   color: var(--dim);
+   display: grid;
+   place-items: center;
+   padding: 0;
+}
+
+.ric:hover {
+   background: var(--panel2);
+   color: var(--mut);
+}
+
+.ric[aria-current="true"] {
+   color: var(--acc);
+   background: var(--panel2);
+}
+
+.ric:focus-visible {
+   outline: 2px solid var(--acc);
+   outline-offset: 1px;
+}
+
+.ric svg {
+   width: 19px;
+   height: 19px;
+   fill: none;
+   stroke: currentColor;
+   stroke-width: 1.6;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+}
+
+/* The badge sits on the icon rather than beside it: there is no room for a
+   number in a 56px rail, and a count the user cannot see is the failure this
+   shell inherited from Phase 6. */
+.ric-badge {
+   position: absolute;
+   top: 1px;
+   right: 0;
+   min-width: 15px;
+   height: 15px;
+   padding: 0 4px;
+   border-radius: 999px;
+   background: var(--acc);
+   color: var(--acc-ink);
+   font-size: 9.5px;
+   font-weight: 700;
+   display: grid;
+   place-items: center;
+   font-variant-numeric: tabular-nums;
+}
+
+/* ---- top strip ---- */
+.top {
+   position: absolute;
+   top: 0;
+   left: 0;
+   right: 0;
+   height: 62px;
+   display: flex;
+   align-items: center;
+   gap: 16px;
+   padding: 0 20px;
+   z-index: 5;
+   pointer-events: none;
+}
+
+/* Controls opt back in: the transparent band between them must not eat a click. */
+.top>*,
+.top button,
+.top .seg {
+   pointer-events: auto;
+}
+
+.wordmark {
+   font-family: var(--disp);
+   font-size: 19px;
+   letter-spacing: .16em;
+   color: var(--acc);
+}
+
+.wordmark sup {
+   font-size: 9px;
+   letter-spacing: 0;
+   vertical-align: super;
+   opacity: .65;
+}
+
+.top-mid {
+   flex: 1;
+   display: flex;
+   justify-content: center;
+   align-items: center;
+   gap: 8px;
+}
+
+.vpill {
+   display: inline-flex;
+   align-items: center;
+   gap: 9px;
+   background: rgba(33, 31, 29, .82);
+   border: 1px solid var(--line2);
+   border-radius: 999px;
+   padding: 7px 16px;
+   font-size: 11.5px;
+   letter-spacing: .13em;
+   text-transform: uppercase;
+   color: var(--mut);
+}
+
+.vpill .dot {
+   width: 9px;
+   height: 9px;
+   border-radius: 50%;
+   background: var(--dim);
+}
+
+.vpill[data-voice="live"] .dot {
+   background: var(--good);
+}
+
+.vpill[data-voice="muted"] .dot {
+   background: var(--warn);
+}
+
+.vpill[data-voice="speaking"] {
+   color: var(--acc);
+   border-color: rgba(221, 138, 106, .45);
+}
+
+.vpill[data-voice="speaking"] .dot {
+   background: var(--acc);
+   animation: orb-breathe 1.5s ease-in-out infinite;
+}
+
+@keyframes orb-breathe {
+
+   0%,
+   100% {
+      opacity: 1;
+      transform: scale(1);
+   }
+
+   50% {
+      opacity: .45;
+      transform: scale(.8);
+   }
+}
+
+.vmute {
+   background: rgba(33, 31, 29, .82);
+   border: 1px solid var(--line2);
+   border-radius: 999px;
+   padding: 7px 13px;
+   font-size: 10.5px;
+   letter-spacing: .11em;
+   text-transform: uppercase;
+   color: var(--mut);
+}
+
+.vmute[aria-pressed="true"] {
+   color: var(--warn);
+   border-color: rgba(216, 176, 122, .45);
+}
+
+.top .seg {
+   display: flex;
+   background: rgba(33, 31, 29, .82);
+   border: 1px solid var(--line2);
+   border-radius: 999px;
+   padding: 3px;
+}
+
+.top .seg button {
+   border: 0;
+   background: none;
+   color: var(--dim);
+   font-family: var(--body);
+   font-size: 10.5px;
+   letter-spacing: .11em;
+   text-transform: uppercase;
+   padding: 5px 11px;
+   border-radius: 999px;
+}
+
+.top .seg button[aria-pressed="true"] {
+   background: var(--acc);
+   color: var(--acc-ink);
+}
+
+.top .seg button:focus-visible {
+   outline: 2px solid var(--acc);
+   outline-offset: 1px;
+}
+
+.clock {
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--dim);
+   font-variant-numeric: tabular-nums;
+   min-width: 62px;
+   text-align: right;
+}
+
+/* ---- her name and her one line, at home ---- */
+/* Centred on --orb-x, which components/shell/Orb.tsx writes from target()'s
+   own home position every frame. Hard-coding 45% here instead worked until
+   target() began clamping her clear of the dock on narrower windows, at which
+   point her name sat under her left edge. The fallback is the unclamped
+   proportion, used only for the first paint before the canvas runs. */
+.naming {
+   position: absolute;
+   left: 0;
+   width: calc(var(--orb-x, 45%) * 2);
+   bottom: 96px;
+   z-index: 4;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 12px;
+   pointer-events: none;
+   transition: opacity .45s ease, transform .45s ease;
+}
+
+.naming[data-away="true"] {
+   opacity: 0;
+   transform: translateY(14px);
+}
+
+.sname {
+   font-family: var(--disp);
+   font-size: 15px;
+   letter-spacing: .42em;
+   text-indent: .42em;
+   color: var(--ink);
+   opacity: .92;
+}
+
+.smeta {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--dim);
+   letter-spacing: .04em;
+   text-align: center;
+   padding: 0 16px;
+   max-width: 46ch;
+}
+
+.hint {
+   position: absolute;
+   left: 18px;
+   bottom: 22px;
+   z-index: 6;
+   font-size: 11px;
+   color: var(--dim);
+   letter-spacing: .04em;
+   transition: opacity .45s ease;
+}
+
+.hint[data-away="true"] {
+   opacity: 0;
+}
+
+/* The hit target over the orb's corner position — the canvas itself takes no
+   pointer events, so clicking her home needs a real control. */
+/* Centred on the orb's corner target: lib/orb.ts CORNER is (W-92, 130), so a
+   128px circle needs right: 92-64 and top: 130-64. Keep these in step. */
+.orbhome {
+   position: absolute;
+   top: 66px;
+   right: 28px;
+   width: 128px;
+   height: 128px;
+   border-radius: 50%;
+   border: 0;
+   background: none;
+   z-index: 6;
+   opacity: 0;
+   pointer-events: none;
+   transition: opacity .3s ease;
+}
+
+.orbhome[data-shown="true"] {
+   opacity: 1;
+   pointer-events: auto;
+}
+
+.orbhome:focus-visible {
+   outline: 2px solid var(--acc);
+   outline-offset: 2px;
+}
+
+.orbhome span {
+   position: absolute;
+   left: 50%;
+   bottom: -4px;
+   transform: translateX(-50%);
+   font-family: var(--disp);
+   font-size: 9px;
+   letter-spacing: .24em;
+   color: var(--dim);
+   white-space: nowrap;
+}
+
+.orbhome:hover span {
+   color: var(--acc);
+}
+
+/* ---- the view panel: every route renders in here ---- */
+.vpanel {
+   position: absolute;
+   left: 26px;
+   top: 80px;
+   width: min(620px, calc(100% - 500px));
+   bottom: 26px;
+   z-index: 4;
+   background: rgba(26, 25, 23, .93);
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 20px 22px;
+   overflow-y: auto;
+   opacity: 0;
+   transform: translateX(-16px);
+   pointer-events: none;
+   transition: opacity .4s ease, transform .4s ease;
+}
+
+.vpanel[data-open="true"] {
+   opacity: 1;
+   transform: none;
+   pointer-events: auto;
+}
+
+.vpanel-close {
+   position: absolute;
+   top: 14px;
+   right: 16px;
+   width: 26px;
+   height: 26px;
+   border-radius: 7px;
+   border: 1px solid var(--line2);
+   background: none;
+   color: var(--mut);
+   padding: 0;
+   display: grid;
+   place-items: center;
+   font-size: 14px;
+   line-height: 1;
+   z-index: 2;
+}
+
+.vpanel-close:hover {
+   color: var(--ink);
+   background: var(--panel2);
+}
+
+/* ---- the session dock ---- */
+.dock {
+   position: absolute;
+   right: 18px;
+   bottom: 18px;
+   width: 432px;
+   max-width: calc(100% - 36px);
+   z-index: 7;
+   background: rgba(26, 25, 23, .95);
+   border: 1px solid var(--line2);
+   border-radius: 13px;
+   overflow: hidden;
+   display: flex;
+   flex-direction: column;
+   max-height: calc(100vh - 210px);
+}
+
+.dtabs {
+   display: flex;
+   align-items: center;
+   gap: 2px;
+   border-bottom: 1px solid var(--line);
+   padding: 0 10px 0 6px;
+   overflow-x: auto;
+   flex: 0 0 auto;
+}
+
+.dtabs::-webkit-scrollbar {
+   height: 0;
+}
+
+.dtabs .tab {
+   display: inline-flex;
+   align-items: center;
+   gap: 7px;
+   border: 0;
+   background: none;
+   color: var(--dim);
+   font-family: var(--body);
+   font-size: 11px;
+   letter-spacing: .1em;
+   text-transform: uppercase;
+   padding: 12px 9px;
+   border-bottom: 2px solid transparent;
+   margin-bottom: -1px;
+   white-space: nowrap;
+}
+
+.dtabs .tab[aria-selected="true"] {
+   color: var(--ink);
+   border-bottom-color: var(--acc);
+}
+
+.dtabs .tab:focus-visible {
+   outline: 2px solid var(--acc);
+   outline-offset: -4px;
+}
+
+.tab-hue {
+   width: 7px;
+   height: 7px;
+   border-radius: 50%;
+   flex: 0 0 auto;
+}
+
+.dtab-empty {
+   font-size: 11px;
+   letter-spacing: .1em;
+   text-transform: uppercase;
+   color: var(--dim);
+   padding: 12px 9px;
+}
+
+.dlive {
+   margin-left: auto;
+   width: 7px;
+   height: 7px;
+   border-radius: 50%;
+   flex: 0 0 auto;
+   background: var(--dim);
+}
+
+.dlive.working {
+   background: var(--good);
+}
+
+.dlive.attn {
+   background: var(--danger);
+}
+
+.dstatus {
+   font-size: 11.5px;
+   color: var(--mut);
+   padding: 8px 14px 0;
+   flex: 0 0 auto;
+}
+
+.dstatus b {
+   color: var(--ink);
+   font-weight: 600;
+}
+
+.dstatus.attn b {
+   color: var(--danger);
+}
+
+.dstatus.error b {
+   color: var(--danger);
+}
+
+.dstatus.working b {
+   color: var(--good);
+}
+
+/* Makes the wrap both a flex item (so it
+   takes the dock's remaining height) and a flex container for its own scroller.
+   The fade overlay is .dthread-wrap::before/::after, below. */
+.dthread-wrap {
+   flex: 1 1 auto;
+   min-height: 90px;
+   display: flex;
+   flex-direction: column;
+   position: relative;
+}
+
+.dthread {
+   flex: 1 1 0;
+   min-height: 0;
+   overflow-y: auto;
+   padding: 12px 14px;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+}
+
+.dthread-empty {
+   font-size: 12.5px;
+   color: var(--dim);
+}
+
+.dsend-error {
+   font-size: 12px;
+   color: var(--danger);
+   padding: 0 14px 8px;
+}
+
+.comp {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   border-top: 1px solid var(--line);
+   padding: 10px 12px;
+   flex: 0 0 auto;
+}
+
+.comp .chip {
+   width: 20px;
+   height: 20px;
+   border-radius: 6px;
+   flex: 0 0 auto;
+}
+
+.comp input {
+   flex: 1;
+   min-width: 0;
+   background: none;
+   border: 0;
+   color: var(--ink);
+   font-family: var(--body);
+   font-size: 13px;
+   outline: none;
+}
+
+.comp input::placeholder {
+   color: var(--dim);
+}
+
+.comp .send {
+   width: 28px;
+   height: 28px;
+   border-radius: 8px;
+   border: 0;
+   background: var(--acc);
+   color: var(--acc-ink);
+   display: grid;
+   place-items: center;
+   padding: 0;
+   flex: 0 0 auto;
+}
+
+.comp .send:disabled {
+   background: var(--line2);
+   color: var(--dim);
+}
+
+.comp .send svg {
+   width: 14px;
+   height: 14px;
+   fill: none;
+   stroke: currentColor;
+   stroke-width: 2.2;
+   stroke-linecap: round;
+   stroke-linejoin: round;
+}
+
+.dock-settings {
+   border-top: 1px solid var(--line);
+   flex: 0 0 auto;
+}
+
+.dock-settings>summary {
+   font-size: 10.5px;
+   letter-spacing: .11em;
+   text-transform: uppercase;
+   color: var(--dim);
+   padding: 9px 14px;
+   cursor: pointer;
+}
+
+.dock-settings>summary:hover {
+   color: var(--mut);
+}
+
+.dock-settings .controls-row {
+   padding: 4px 14px 12px;
+}
+
+.modellock {
+   font-size: 11.5px;
+   color: var(--warn);
+   padding: 0 14px 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+   .naming,
+   .vpanel,
+   .orbhome,
+   .hint {
+      transition: none;
+   }
+}
+
+/* One breakpoint. Below it the stage stacks and scrolls, the orb's canvas and
+   her naming block drop out (there is no stage for her to hold), and the dock
+   becomes the app: transcript, prompt card and composer — the away-from-desk
+   case. Desktop-first by decision. */
+@media (max-width: 900px) {
+   .shell {
+      grid-template-columns: 1fr;
+      height: auto;
+   }
+
+   .rail {
+      flex-direction: row;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+      padding: 8px 10px;
+   }
+
+   .rail-mark {
+      margin: 0 10px 0 0;
+   }
+
+   .stage {
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+   }
+
+   .orb-canvas,
+   .naming,
+   .hint,
+   .orbhome {
+      display: none;
+   }
+
+   .top {
+      position: static;
+      height: auto;
+      padding: 14px;
+      flex-wrap: wrap;
+   }
+
+   /* relative, NOT static: .vpanel-close is absolutely positioned, and a static
+     panel makes it resolve against .stage instead — the ✕ then floats up beside
+     the top bar, nowhere near the panel it closes. */
+   .vpanel {
+      position: relative;
+      inset: auto;
+      width: auto;
+      margin: 0 14px 14px;
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+      max-height: none;
+   }
+
+   .vpanel[aria-hidden="true"] {
+      display: none;
+   }
+
+   .dock {
+      position: static;
+      width: auto;
+      margin: 0 14px 14px;
+      max-height: none;
+   }
+}
+
+/* Every route's heading. It sits inside .vpanel now, with the close button to
+   its right — the padding-right keeps a long title off the ✕. */
+.viewtitle {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 19px;
+   letter-spacing: .05em;
+   font-weight: 400;
+   margin: 0 0 16px;
+   padding-right: 34px;
+   color: var(--ink);
+}
+
+/* ---- approvals view + ApprovalCard (shared with the Dashboard) ---- */
+.apr-view {
+   min-width: 0;
+}
+
+.apr-list {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.apr-error {
+   font-size: 13px;
+   color: var(--danger);
+   background: color-mix(in srgb, var(--danger) 10%, transparent);
+   border: 1px solid var(--danger);
+   border-radius: 10px;
+   padding: 9px 12px;
+   margin-bottom: 14px;
+}
+
+.apr-subhead {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 14px;
+   font-weight: 400;
+   color: var(--mut);
+   margin: 26px 0 10px;
+}
+
+.apr {
+   background: transparent;
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   min-width: 0;
+}
+
+.apr.dangerous {
+   border-color: var(--danger);
+}
+
+.apr-head {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.apr-title {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 16px;
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.apr-meta {
+   font-size: 12.5px;
+   color: var(--mut);
+   margin: 8px 0 0;
+}
+
+.riskchip {
+   flex: none;
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+}
+
+.riskchip.good {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.riskchip.warn {
+   color: var(--warn);
+   border-color: var(--warn);
+}
+
+.riskchip.danger {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.apr-input {
+   margin-top: 12px;
+   min-width: 0;
+}
+
+.apr-kv {
+   display: flex;
+   flex-direction: column;
+   gap: 5px;
+   margin: 0;
+   font-size: 12.5px;
+   min-width: 0;
+}
+
+.apr-kv-row {
+   display: grid;
+   grid-template-columns: max-content 1fr;
+   gap: 4px 12px;
+   min-width: 0;
+}
+
+.apr-kv-row dt {
+   color: var(--mut);
+   min-width: 0;
+}
+
+.apr-kv-row dd {
+   margin: 0;
+   color: var(--ink);
+   overflow-wrap: anywhere;
+   min-width: 0;
+}
+
+.apr-code {
+   margin: 0;
+   font-family: var(--mono);
+   font-size: 11.5px;
+   line-height: 1.5;
+   color: var(--mut);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   padding: 10px 12px;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+   min-width: 0;
+}
+
+.apr-actions {
+   display: flex;
+   gap: 8px;
+   margin-top: 14px;
+}
+
+.apr-btn {
+   border: 1px solid var(--line);
+   background: transparent;
+   color: var(--ink);
+   font: inherit;
+   font-size: 13px;
+   font-weight: 600;
+   padding: 8px 20px;
+   border-radius: 999px;
+   cursor: pointer;
+   transition: filter 0.15s ease;
+}
+
+.apr-btn:disabled {
+   opacity: 0.5;
+   cursor: default;
+}
+
+.apr-btn.allow {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.apr-btn.allow:hover:not(:disabled) {
+   background: color-mix(in srgb, var(--good) 14%, transparent);
+}
+
+.apr-btn.deny {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.apr-btn.deny:hover:not(:disabled) {
+   background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.apr-hist {
+   display: flex;
+   flex-direction: column;
+   gap: 2px;
+   min-width: 0;
+}
+
+.apr-hist-row {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   padding: 8px 4px;
+   border-bottom: 1px solid var(--line);
+   min-width: 0;
+}
+
+.apr-hist-title {
+   flex: 1;
+   min-width: 0;
+   font-size: 13px;
+   color: var(--ink);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.apr-hist-status {
+   flex: none;
+   font-size: 11.5px;
+   color: var(--dim);
+   text-transform: capitalize;
+}
+
+/* ---- Dashboard: the three "what needs you" bands ---- */
+.dash-view {
+   min-width: 0;
+}
+
+/* The error banner replaces the whole view rather than sitting above an
+   empty-looking dashboard — see the header comment in app/page.tsx. */
+.dash-loaderror {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 14px;
+}
+
+.dash-band {
+   min-width: 0;
+}
+
+.dash-band+.dash-band {
+   margin-top: 28px;
+}
+
+.dash-band-title {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 14px;
+   font-weight: 400;
+   color: var(--mut);
+   margin: 0 0 10px;
+}
+
+.dash-list {
+   display: flex;
+   flex-direction: column;
+   gap: 2px;
+   min-width: 0;
+}
+
+.dash-row {
+   display: flex;
+   flex-direction: column;
+   gap: 5px;
+   padding: 10px 4px;
+   border-bottom: 1px solid var(--line);
+   min-width: 0;
+}
+
+.dash-row:last-child {
+   border-bottom: 0;
+}
+
+.dash-row-top {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   min-width: 0;
+}
+
+.dash-row-title {
+   flex: 1;
+   min-width: 0;
+   font-size: 13.5px;
+   color: var(--ink);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.dash-row-meta {
+   flex: none;
+   font-size: 11.5px;
+   color: var(--dim);
+   text-transform: capitalize;
+}
+
+.dash-row-task {
+   font-size: 12.5px;
+   color: var(--mut);
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.dash-row-actions {
+   display: flex;
+   gap: 6px;
+}
+
+.dash-btn {
+   border: 1px solid var(--line);
+   background: transparent;
+   color: var(--ink);
+   font: inherit;
+   font-size: 12px;
+   font-weight: 600;
+   padding: 5px 14px;
+   border-radius: 999px;
+   cursor: pointer;
+   transition: filter 0.15s ease, border-color 0.15s ease;
+}
+
+.dash-btn:hover:not(:disabled) {
+   border-color: var(--line2);
+}
+
+.dash-btn:disabled {
+   opacity: 0.5;
+   cursor: default;
+}
+
+.dash-btn.danger {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.dash-btn.danger:hover:not(:disabled) {
+   background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* ---- Sessions view ---- */
+/* SessionCard used to render at half a panel's width, beside the Conversation
+   panel; here it gets the whole shell-main column, so the list is just a
+   single flex column at that width rather than a fixed max-width. */
+.sessions-view {
+   min-width: 0;
+}
+
+.sessions-list {
+   display: flex;
+   flex-direction: column;
+   gap: 18px;
+   min-width: 0;
+}
+
+.sesswrap {
+   display: flex;
+   flex-direction: column;
+   gap: 8px;
+   min-width: 0;
+}
+
+/* The per-card message box: lets a session be driven by typing, not just
+   voice. Sits in its own pill below the card rather than inside it, since
+   SessionCard (Task 2) takes no slot for extra controls. */
+.sess-msgbar {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   padding: 6px 8px 6px 14px;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   min-width: 0;
+}
+
+.sess-msgbox {
+   flex: 1;
+   min-width: 0;
+   font: inherit;
+   font-size: 13px;
+   color: var(--ink);
+   background: transparent;
+   border: 0;
+   padding: 6px 0;
+   outline: none;
+}
+
+.sess-msgbox::placeholder {
+   color: var(--dim);
+}
+
+.sess-msgbox:disabled {
+   opacity: 0.5;
+   cursor: not-allowed;
+}
+
+/* ---- Missions list + detail ---- */
+/* Rows reuse .dash-row/.dash-list/.dash-btn (Dashboard's blocked-band
+   styling) rather than duplicating them — same visual language for the same
+   controls, one place to restyle a mission row either view renders. */
+.miss-view {
+   min-width: 0;
+}
+
+.miss-row {
+   cursor: pointer;
+}
+
+.miss-row:hover {
+   background: var(--panel2);
+}
+
+a.miss-row {
+   text-decoration: none;
+   color: inherit;
+}
+
+.misschip {
+   flex: none;
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+   text-transform: capitalize;
+}
+
+.misschip.mut {
+   color: var(--mut);
+   border-color: var(--line2);
+}
+
+.misschip.plan {
+   color: var(--plan);
+   border-color: var(--plan);
+}
+
+.misschip.acc {
+   color: var(--acc);
+   border-color: var(--acc);
+}
+
+.misschip.warn {
+   color: var(--warn);
+   border-color: var(--warn);
+}
+
+.misschip.good {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.misschip.danger {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.miss-detail {
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+}
+
+.miss-back {
+   align-self: flex-start;
+   font-size: 12.5px;
+   color: var(--mut);
+   text-decoration: none;
+   margin-bottom: 10px;
+}
+
+.miss-back:hover {
+   color: var(--ink);
+}
+
+.miss-head {
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.miss-title {
+   margin: 0;
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.miss-goal {
+   font-size: 13.5px;
+   color: var(--mut);
+   margin: 0 0 6px;
+   max-width: 68ch;
+}
+
+.miss-actions {
+   margin: 4px 0 22px;
+}
+
+.miss-section {
+   min-width: 0;
+}
+
+.miss-section+.miss-section {
+   margin-top: 24px;
+}
+
+.miss-events {
+   display: flex;
+   flex-direction: column;
+   gap: 2px;
+   min-width: 0;
+}
+
+.miss-event-row {
+   display: flex;
+   align-items: baseline;
+   gap: 10px;
+   padding: 6px 4px;
+   border-bottom: 1px solid var(--line);
+   font-size: 12.5px;
+   min-width: 0;
+}
+
+.miss-event-row:last-child {
+   border-bottom: 0;
+}
+
+.miss-event-ts {
+   flex: none;
+   color: var(--dim);
+   font-family: var(--mono);
+   font-size: 11px;
+}
+
+.miss-event-type {
+   flex: none;
+   color: var(--mut);
+   font-family: var(--mono);
+   font-size: 11.5px;
+}
+
+.miss-event-payload {
+   flex: 1;
+   min-width: 0;
+   color: var(--dim);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+/* ---- Terminal view ---- */
+.term-view {
+   display: flex;
+   flex-direction: column;
+   height: 100%;
+   min-height: 0;
+}
+
+.term-toolbar {
+   flex: none;
+   margin-bottom: 18px;
+}
+
+.term-frame {
+   flex: 1;
+   min-height: 360px;
+   background: #14130f;
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   overflow: hidden;
+   padding: 8px;
+}
+
+.term-empty {
+   flex: 1;
+   min-height: 260px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   text-align: center;
+   color: var(--dim);
+   font-size: 14px;
+   max-width: 52ch;
+   margin: 0 auto;
+   padding: 40px 12px;
+}
+
+/* ---- Agents view ---- */
+/* Cards reuse the same outlined-panel language as .apr/.sess (transparent
+   fill, brighter hairline border) rather than inventing a new card look. */
+.agents-view {
+   min-width: 0;
+}
+
+.agents-list {
+   display: flex;
+   flex-direction: column;
+   gap: 14px;
+   min-width: 0;
+}
+
+.agent-card {
+   background: transparent;
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   min-width: 0;
+}
+
+.agent-head {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.agent-name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 16px;
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.agentchip {
+   flex: none;
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+}
+
+.agentchip.online {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.agentchip.offline {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+.agent-version {
+   flex: none;
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--dim);
+}
+
+.agent-detail {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 0;
+}
+
+.agent-meta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 6px;
+}
+
+/* the capabilities dict, as a labelled grid of ticks/crosses -- this is
+   where "Claude Code is one provider among several" stops being only a test
+   result. A non-boolean value (permission_modes is a list) shows its value
+   instead of a mark. */
+.agent-caps {
+   display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+   gap: 7px 16px;
+   margin-top: 14px;
+   padding-top: 12px;
+   border-top: 1px solid var(--line);
+   min-width: 0;
+}
+
+/* flex-wrap, not truncation: a value-bearing cap (permission_modes is a
+   list, and can run longer than the column) wraps its value onto its own
+   line rather than clipping either the label or the value. */
+.agent-cap {
+   display: flex;
+   align-items: baseline;
+   justify-content: space-between;
+   flex-wrap: wrap;
+   gap: 2px 8px;
+   font-size: 12px;
+   min-width: 0;
+}
+
+.agent-cap-label {
+   color: var(--mut);
+   min-width: 0;
+}
+
+.agent-cap-mark {
+   flex: none;
+   font-weight: 700;
+}
+
+.agent-cap-mark.yes {
+   color: var(--good);
+}
+
+.agent-cap-mark.no {
+   color: var(--dim);
+}
+
+.agent-cap-value {
+   flex: none;
+   max-width: 100%;
+   color: var(--ink);
+   font-family: var(--mono);
+   font-size: 11px;
+   text-align: right;
+   overflow-wrap: anywhere;
+}
+
+/* ---- Projects view ---- */
+/* Rows reuse .dash-row/.dash-list/.dash-btn (same visual language Missions
+   already uses for its list) -- one place to restyle a row either view
+   renders. */
+.projects-view {
+   min-width: 0;
+}
+
+.proj-form {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+   align-items: center;
+   margin-bottom: 20px;
+}
+
+.proj-input {
+   background: var(--panel2);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   color: var(--ink);
+   padding: 8px 12px;
+   font: inherit;
+   font-size: 13px;
+   outline: none;
+   min-width: 0;
+   transition: border-color 0.12s ease;
+}
+
+.proj-input::placeholder {
+   color: var(--dim);
+}
+
+.proj-input:focus {
+   border-color: var(--acc);
+}
+
+.proj-input:disabled {
+   opacity: 0.5;
+   cursor: not-allowed;
+}
+
+.proj-input-path {
+   flex: 2 1 260px;
+}
+
+.proj-input-name {
+   flex: 1 1 160px;
+}
+
+.projchip {
+   flex: none;
+   font-size: 11px;
+   letter-spacing: 0.02em;
+   padding: 3px 9px;
+   border-radius: 999px;
+   border: 1px solid var(--line);
+   color: var(--mut);
+}
+
+.projchip.registered {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.projchip.discovered {
+   color: var(--mut);
+   border-color: var(--line2);
+}
+
+/* ---- Activity view ---- */
+.activity-view {
+   min-width: 0;
+}
+
+.activity-view .debugpanel {
+   margin-top: 0;
+}
+
+/* The shown/total count beside a panel heading (Activity). Lowercase and mono
+   so it reads as a readout rather than part of the title. */
+.viewcount {
+   font-family: var(--mono);
+   font-size: 11.5px;
+   color: var(--dim);
+   text-transform: none;
+   letter-spacing: 0;
+   font-variant-numeric: tabular-nums;
+}
+/* A resolved approval's outcome, where its Allow/Deny used to be. Rendering
+   the buttons for something already decided offered a click that could only
+   return 409 — see lib/approvals.ts's outcomeOf. The space is more useful
+   saying what happened than holding a control that cannot work. */
+.apr-outcome { display: flex; align-items: baseline; gap: 9px; padding: 7px 0 1px; }
+.apr-outcome-label { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+                     color: var(--dim); }
+.apr-outcome.good .apr-outcome-label { color: var(--good); }
+.apr-outcome.danger .apr-outcome-label { color: var(--danger); }
+.apr-outcome-detail { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+
+/* --- Agents panel: section headings and Connected services (MCP) ---------
+   Reuses .agentchip, .txtoggle, .empty and .agent-version rather than
+   inventing a second look for the same things; only the layout below is new.
+   Every colour is a token -- see docs/yuri/design/GUIDE.md §1. */
+.sectitle {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   letter-spacing: 0.06em;
+   font-size: 12px;
+   color: var(--mut);
+   margin: 0 0 12px;
+}
+
+.mcp {
+   margin-top: 26px;
+   padding-top: 22px;
+   border-top: 1px solid var(--line);
+   min-width: 0;
+}
+
+.mcp-head {
+   display: flex;
+   align-items: baseline;
+   justify-content: space-between;
+   gap: 12px;
+   flex-wrap: wrap;
+}
+
+.mcp-head .sectitle {
+   margin-bottom: 0;
+}
+
+.mcp-blurb {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 14px;
+   max-width: 62ch;
+}
+
+.mcp-list {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.mcp-card {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 14px 16px;
+   min-width: 0;
+}
+
+.mcp-cardhead {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.mcp-name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 15px;
+   flex: 1;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+/* "Off" is not "Not working": a service the user turned off is a normal
+   state, and colouring it like a failure would say otherwise. */
+.agentchip.off {
+   color: var(--dim);
+   border-color: var(--line2);
+}
+
+.mcp-meta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 8px;
+}
+
+.mcp-tools {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--mut);
+   margin-top: 6px;
+   overflow-wrap: anywhere;
+}
+
+.mcp-note {
+   font-size: 12px;
+   color: var(--warn);
+   margin-top: 8px;
+}
+
+/* The failure reason, in full and selectable -- it is the only thing the
+   user can act on, so it is not truncated into a tooltip. It scrolls in its
+   own box rather than widening the panel (GUIDE §2). */
+.mcp-err,
+.mcp-verdict pre {
+   font-family: var(--mono);
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+   max-height: 160px;
+   overflow-y: auto;
+   margin: 8px 0 0;
+   padding: 8px 10px;
+   border-radius: 10px;
+   background: var(--panel);
+   color: var(--danger);
+}
+
+.mcp-configerr {
+   font-size: 12px;
+   color: var(--danger);
+   border: 1px solid var(--danger);
+   border-radius: 10px;
+   padding: 9px 11px;
+   margin-bottom: 14px;
+}
+
+.mcp-actions {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin-top: 12px;
+}
+
+/* --- the add form ------------------------------------------------------- */
+.mcp-form {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   margin-bottom: 14px;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.mcp-field {
+   display: flex;
+   flex-direction: column;
+   gap: 5px;
+   min-width: 0;
+}
+
+.mcp-field > span {
+   font-size: 12px;
+   color: var(--mut);
+}
+
+.mcp-field input,
+.mcp-field textarea {
+   font-family: var(--mono);
+   font-size: 12px;
+   color: var(--ink);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 8px 10px;
+   width: 100%;
+   resize: vertical;
+}
+
+.mcp-field input:focus,
+.mcp-field textarea:focus {
+   outline: none;
+   border-color: var(--acc);
+}
+
+.mcp-tiers {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+}
+
+/* Each choice says what it means, not what it is called, so it needs room
+   for a line of explanation -- not a segmented pill. */
+.mcp-tier {
+   flex: 1 1 220px;
+   text-align: left;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 12px;
+   padding: 10px 12px;
+   color: var(--ink);
+   cursor: pointer;
+   display: flex;
+   flex-direction: column;
+   gap: 4px;
+}
+
+.mcp-tier:hover {
+   border-color: var(--line2);
+}
+
+.mcp-tier.on {
+   border-color: var(--acc);
+   background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+.mcp-tier strong {
+   font-size: 13px;
+   font-weight: 500;
+}
+
+.mcp-tier em {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--mut);
+}
+
+/* Three verdicts, three looks: connected, connected-but-useless, and
+   didn't start. Collapsing any two of them would hide the difference the
+   verdicts exist to draw. */
+.mcp-verdict {
+   border-radius: 10px;
+   min-width: 0;
+}
+
+.mcp-verdict.good pre {
+   color: var(--good);
+}
+
+.mcp-verdict.warn pre {
+   color: var(--warn);
+}
+
+.mcp-verdict.bad pre {
+   color: var(--danger);
+}
+
+/* --- Agents panel: the roster (Your agents) -------------------------------
+   Shares .mcp-field/.mcp-tier/.mcp-actions with the Connected services form
+   rather than growing a second set of inputs that look nearly the same. */
+.roster,
+.engines {
+   min-width: 0;
+}
+
+.engines {
+   margin-top: 26px;
+   padding-top: 22px;
+   border-top: 1px solid var(--line);
+}
+
+.sp-list {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.sp-card {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 14px 16px;
+   min-width: 0;
+}
+
+.sp-head {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+/* The agent's own colour, which also marks its steps on the timeline, so the
+   two views are recognisably the same agent. */
+.sp-dot {
+   width: 10px;
+   height: 10px;
+   border-radius: 50%;
+   flex: none;
+}
+
+.sp-name {
+   font-family: var(--disp);
+   text-transform: uppercase;
+   font-size: 15px;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.sp-role {
+   flex: 1;
+   font-size: 12px;
+   color: var(--dim);
+}
+
+.sp-blurb {
+   font-size: 13px;
+   color: var(--mut);
+   margin: 8px 0 0;
+   max-width: 62ch;
+}
+
+.sp-meta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 8px;
+}
+
+.sp-caps {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+   margin-top: 9px;
+}
+
+.sp-cap {
+   font-size: 11px;
+   color: var(--mut);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 2px 8px;
+}
+
+/* Collapsed by default: the persona is the longest field on the card and the
+   least often needed, but hiding it entirely would make it unreviewable. */
+.sp-prompt {
+   margin-top: 10px;
+   font-size: 12px;
+}
+
+.sp-prompt summary {
+   color: var(--mut);
+   cursor: pointer;
+}
+
+.sp-prompt p {
+   color: var(--mut);
+   background: var(--panel);
+   border-radius: 10px;
+   padding: 9px 11px;
+   margin: 8px 0 0;
+   white-space: pre-wrap;
+   max-width: 70ch;
+}
+
+.sp-actions {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+   margin-top: 12px;
+}
+
+/* --- the roster form ---------------------------------------------------- */
+.sp-form {
+   border: 1px solid var(--line2);
+   border-radius: 14px;
+   padding: 15px 16px;
+   margin-bottom: 14px;
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   min-width: 0;
+}
+
+.sp-roles {
+   display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+   gap: 8px;
+}
+
+.sp-row {
+   display: flex;
+   gap: 14px;
+   flex-wrap: wrap;
+}
+
+.sp-row > .mcp-field {
+   flex: 1 1 180px;
+}
+
+.sp-capgrid {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+}
+
+.sp-captoggle {
+   font-size: 12px;
+   color: var(--mut);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 5px 11px;
+   cursor: pointer;
+}
+
+.sp-captoggle:hover {
+   border-color: var(--line2);
+}
+
+.sp-captoggle.on {
+   color: var(--acc);
+   border-color: var(--acc);
+   background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+.sp-colors {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+}
+
+.sp-swatch {
+   width: 26px;
+   height: 26px;
+   border-radius: 8px;
+   border: 2px solid transparent;
+   cursor: pointer;
+}
+
+.sp-swatch.on {
+   border-color: var(--ink);
+}
+
+.sp-form select {
+   font-size: 12px;
+   color: var(--ink);
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 8px 10px;
+}
+
+/* What the backend will actually store, so the slug is never a surprise. */
+.sp-slug,
+.sp-hint {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--dim);
+}
+
+.sp-err {
+   font-size: 11px;
+   font-style: normal;
+   color: var(--danger);
+}
+
+/* --- the workflow timeline ------------------------------------------------
+   Steps in dependency order. The status stripe is the fastest read on the
+   page, so it carries the state; the label spells it out in words. */
+.wf {
+   min-width: 0;
+}
+
+.wf-top {
+   display: flex;
+   align-items: baseline;
+   gap: 12px;
+   flex-wrap: wrap;
+   margin-bottom: 12px;
+   font-size: 12px;
+   color: var(--dim);
+}
+
+.wf-progress {
+   color: var(--mut);
+   font-variant-numeric: tabular-nums;
+}
+
+/* Said separately from the count, because "3 of 4" hides a blocked step. */
+.wf-needs {
+   color: var(--warn);
+}
+
+.wf-meta {
+   margin-left: auto;
+}
+
+.wf-list {
+   list-style: none;
+   margin: 0;
+   padding: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+   min-width: 0;
+}
+
+.wf-step {
+   border: 1px solid var(--line);
+   border-left: 3px solid var(--line2);
+   border-radius: 12px;
+   padding: 11px 14px;
+   min-width: 0;
+}
+
+.wf-stephead {
+   display: flex;
+   align-items: center;
+   gap: 9px;
+   flex-wrap: wrap;
+   min-width: 0;
+}
+
+.wf-n {
+   font-family: var(--mono);
+   font-size: 11px;
+   color: var(--dim);
+   flex: none;
+   font-variant-numeric: tabular-nums;
+}
+
+/* The agent's colour, the same one its roster card shows. */
+.wf-dot {
+   width: 8px;
+   height: 8px;
+   border-radius: 50%;
+   flex: none;
+}
+
+.wf-title {
+   flex: 1;
+   font-size: 14px;
+   min-width: 0;
+   overflow-wrap: anywhere;
+}
+
+.wf-status {
+   flex: none;
+   font-size: 11px;
+   color: var(--mut);
+}
+
+.wf-stepmeta {
+   font-size: 12px;
+   color: var(--dim);
+   margin-top: 5px;
+}
+
+.wf-err {
+   font-family: var(--mono);
+   font-size: 11px;
+   line-height: 1.5;
+   white-space: pre-wrap;
+   overflow-wrap: anywhere;
+   max-height: 140px;
+   overflow-y: auto;
+   margin: 8px 0 0;
+   padding: 7px 9px;
+   border-radius: 9px;
+   background: var(--panel);
+   color: var(--danger);
+}
+
+.wf-verdicts {
+   display: flex;
+   gap: 6px;
+   flex-wrap: wrap;
+   margin-top: 8px;
+}
+
+.wf-verdict {
+   font-size: 11px;
+   border: 1px solid var(--line);
+   border-radius: 999px;
+   padding: 2px 9px;
+   color: var(--mut);
+}
+
+.wf-verdict.good {
+   color: var(--good);
+   border-color: var(--good);
+}
+
+.wf-verdict.bad {
+   color: var(--danger);
+   border-color: var(--danger);
+}
+
+/* "could not run" is neither a pass nor a failure, and must not borrow
+   either colour — the backend does not count it as a pass either. */
+.wf-verdict.unknown {
+   color: var(--warn);
+   border-color: var(--warn);
+}
+
+.wf-verdict.pending {
+   color: var(--dim);
+}
+
+.wf-actions,
+.wf-assign {
+   display: flex;
+   gap: 7px;
+   flex-wrap: wrap;
+   margin-top: 10px;
+}
+
+/* One stripe colour per status. Every status in lib/workflow.ts's
+   TASK_STATUSES has a rule here; a missing one renders as the default
+   hairline, which reads as "no state at all". */
+.wf-step.tk-pending { border-left-color: var(--line2); }
+.wf-step.tk-ready { border-left-color: var(--mut); }
+.wf-step.tk-dispatched,
+.wf-step.tk-running { border-left-color: var(--acc); }
+.wf-step.tk-waiting_approval { border-left-color: var(--warn); }
+.wf-step.tk-verifying { border-left-color: var(--plan); }
+.wf-step.tk-completed { border-left-color: var(--good); }
+.wf-step.tk-skipped { border-left-color: var(--dim); }
+.wf-step.tk-failed,
+.wf-step.tk-blocked { border-left-color: var(--danger); }
+.wf-step.tk-cancelled { border-left-color: var(--dim); }
