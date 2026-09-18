@@ -12,7 +12,14 @@ import os
 SAFE_TOOLS: frozenset[str] = frozenset({
     "Read", "Grep", "Glob", "LS",
     "TodoWrite", "NotebookRead",
-    "WebSearch", "WebFetch",
+    # WebSearch reaches only the search provider (queries, not an attacker host),
+    # so it stays auto-approved. WebFetch is deliberately NOT here: it performs
+    # arbitrary outbound HTTP(S) to an agent-chosen URL, so it is neither
+    # read-only nor non-destructive — it is a data-exfiltration / SSRF channel
+    # (e.g. a prompt-injected fetch of an internal or metadata endpoint). It must
+    # go through the permission gate like any other risky tool, matching vanilla
+    # Claude Code, which prompts for WebFetch in default mode.
+    "WebSearch",
     "ToolSearch",  # loads tool schemas — pure metadata, runs nothing
 })
 

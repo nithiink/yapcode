@@ -192,12 +192,19 @@ export class RealtimeSession implements VoiceSession {
       console.warn("[realtime] injectUpdate dropped — data channel not open:", text.slice(0, 80));
       return;
     }
-    // Always add the system message to the conversation immediately so the
+    // Always add the update message to the conversation immediately so the
     // model sees it whenever it next responds. But only call response.create if
     // no response is in flight — otherwise queue it and fire on response.done.
+    // role:"user", NOT role:"system": these updates carry Claude/tool output that
+    // can include attacker-influenced content (repo files, browsed pages, command
+    // output). A role:"system" item would give that third-party text the highest
+    // instruction authority, so a prompt-injection payload could drive the
+    // side-effecting tools (set_mode, answer_prompt). Delivering it as a user turn
+    // matches the Gemini transport (lib/gemini.ts) and keeps it as data to
+    // summarize, not an instruction to obey.
     this.send({
       type: "conversation.item.create",
-      item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
+      item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
     });
     if (this.responseActive) {
       this.pendingInjections.push(text);
