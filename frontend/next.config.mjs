@@ -16,5 +16,26 @@ const nextConfig = {
     "10.*.*.*",
     "172.16.*.*",
   ],
+  // Security headers on every route. This app is the control surface for a
+  // backend that turns clicks into real host command execution (permission
+  // Approve/Deny, the "Auto" permission-mode toggle), so it must never be
+  // framable by another origin — otherwise a decoy overlay on an attacker page
+  // could clickjack an approval or a downgrade to auto mode (the same-origin
+  // CSRF guard in lib/proxyAuth.ts does not stop UI redressing, since a click
+  // inside the framed app is genuinely same-origin). The app is never
+  // legitimately framed, so frame-ancestors 'none' + X-Frame-Options: DENY have
+  // zero functional cost.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
+  },
 };
 export default nextConfig;
