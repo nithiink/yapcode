@@ -236,10 +236,41 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
+# True when the broad LAN / any-port regex is the built-in default (the operator
+# did not set VC_ALLOWED_ORIGIN_REGEX). The default regex is a convenience for
+# network mode only; it must NOT widen the origin allowlist in the default
+# tokenless loopback mode — see _regex_gate_active() / origin_allowed().
+_ORIGIN_REGEX_IS_DEFAULT = _origin_regex_raw is None
 ALLOWED_ORIGIN_REGEX: str | None = (
     _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
 )
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
+
+
+def _regex_gate_active() -> bool:
+    """Whether the Origin regex may widen the allowlist beyond the exact
+    ALLOWED_ORIGINS list.
+
+    The broad *default* regex (any private-LAN IP, any localhost port) is only
+    safe in network mode, where VC_AUTH_TOKEN — not the Origin — is the security
+    boundary. In the default tokenless loopback mode this in-app Origin check is
+    the ONLY gate between a page in the victim's browser and a command-executing
+    backend at localhost, so the broad default must be disabled there: otherwise
+    any LAN-hosted page (http://192.168.x.y) or other localhost-port page could
+    drive tool execution / inject terminal keystrokes over the WebSocket. An
+    explicitly configured VC_ALLOWED_ORIGIN_REGEX is an operator opt-in and stays
+    active in either mode."""
+    if _ORIGIN_REGEX_IS_DEFAULT and not AUTH_TOKEN:
+        return False
+    return _ORIGIN_RE is not None
+
+
+# Regex handed to the CORS middleware, gated identically to origin_allowed() so
+# the two layers agree — the browser is never told an origin is allowed (ACAO
+# reflected) that the in-app gate would then 403.
+CORS_ORIGIN_REGEX: str | None = (
+    None if (_ORIGIN_REGEX_IS_DEFAULT and not AUTH_TOKEN) else ALLOWED_ORIGIN_REGEX
+)
 
 
 def origin_allowed(origin: str | None) -> bool:
@@ -250,6 +281,10 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
-    # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
-    # the `$` anchor.
+    # The broad default regex is disabled in tokenless loopback mode (see
+    # _regex_gate_active); only the exact ALLOWED_ORIGINS match above applies
+    # there. fullmatch (not match) so a trailing newline / extra suffix can't
+    # sneak past the `$` anchor.
+    if not _regex_gate_active():
+        return False
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
