@@ -253,3 +253,22 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def origin_allowed_for_request(origin: str | None) -> bool:
+    """Origin policy for the in-app auth gate (HTTP + WebSocket).
+
+    When a token is configured the token is the real security boundary, so the
+    broad any-port/private-LAN convenience regex is fine here. But when NO token
+    is set (the default loopback `run.sh` / `yapcode up` mode) the Origin
+    allowlist is the ONLY thing standing between a loopback-trusted browser page
+    and the command-executing endpoints, so it must be strict: accept only the
+    exact configured frontend origins (localhost:3000 etc. / VC_ALLOWED_ORIGINS),
+    NOT the broad regex. Otherwise a co-resident localhost page on another port,
+    or a page served from any private-LAN IP, would satisfy the check and could
+    drive the backend cross-origin into arbitrary command execution."""
+    if not origin:
+        return False
+    if AUTH_TOKEN:
+        return origin_allowed(origin)
+    return origin in ALLOWED_ORIGINS

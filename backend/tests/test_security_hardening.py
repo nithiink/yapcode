@@ -98,5 +98,33 @@ class MintHostAllowlist(unittest.TestCase):
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
 
 
+class OriginAuthGate(unittest.TestCase):
+    """In the default tokenless (loopback) mode the Origin allowlist is the only
+    boundary guarding the command-executing endpoints, so it must accept ONLY the
+    exact configured frontend origins — not the broad any-port/private-LAN
+    convenience regex, which would let a co-resident localhost page or a LAN-hosted
+    page drive the backend cross-origin (CSRF -> RCE)."""
+
+    def test_tokenless_allows_exact_frontend_origin(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed_for_request("http://localhost:3000"))
+            self.assertTrue(config.origin_allowed_for_request("http://127.0.0.1:3000"))
+
+    def test_tokenless_blocks_coresident_and_lan_origins(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            for bad in ["http://localhost:5173", "http://192.168.1.50",
+                        "http://10.0.0.5:8080", "http://evil.com", None]:
+                self.assertFalse(config.origin_allowed_for_request(bad), bad)
+
+    def test_with_token_broad_regex_is_honored(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            # Token is the real boundary, so the LAN/any-port convenience is allowed.
+            self.assertTrue(config.origin_allowed_for_request("http://192.168.1.50"))
+            self.assertTrue(config.origin_allowed_for_request("http://localhost:5173"))
+            # Public internet origins are still rejected.
+            self.assertFalse(config.origin_allowed_for_request("http://evil.com"))
+            self.assertFalse(config.origin_allowed_for_request(None))
+
+
 if __name__ == "__main__":
     unittest.main()
