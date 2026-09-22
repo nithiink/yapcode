@@ -68,9 +68,58 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
+// --- DNS-rebinding defense (positive Host allowlist) ------------------------
+//
+// `Sec-Fetch-Site` / `Origin === Host` alone cannot stop a DNS-rebinding attack.
+// A page served from `http://attacker.example:3000` whose DNS is rebound to
+// 127.0.0.1 issues a request the browser labels `Sec-Fetch-Site: same-origin`
+// (the initiating page and the target share the identical textual origin, so the
+// browser — which derives this from hostnames, not resolved IPs — treats it as
+// same-origin), so isCrossSiteRequest() lets it through and the fallback
+// `Origin.host === Host` also matches. The load-bearing defense is a POSITIVE
+// Host allowlist: a rebound request necessarily carries `Host: attacker.example`,
+// which is not one of our expected local/LAN hosts, so we reject it regardless
+// of Sec-Fetch-Site. This mirrors the backend's config.origin_allowed allowlist,
+// which the proxy hop hides from the backend (undici drops the browser Origin,
+// so the backend never sees it for proxied requests).
+//
+// Hosts allowed by default: loopback (localhost / 127.0.0.1 / [::1]) and the
+// private-LAN ranges (10/8, 192.168/16, 172.16-31/12) on any port — mirroring
+// next.config.mjs's allowedDevOrigins so the phone/laptop can reach the app over
+// the LAN in network mode. Extend with VC_ALLOWED_HOSTS (comma-separated
+// host[:port]) for a deployment behind a custom hostname or reverse proxy.
+const HOST_ALLOWLIST_RE =
+  /^(?:localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d{1,5})?$/i;
+
+function extraAllowedHosts(): string[] {
+  return (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isAllowedHost(req: NextRequest): boolean {
+  // HTTP/1.1+ always carries a Host header; a missing/empty one is not a request
+  // from a normal browser reaching our own origin, so fail closed.
+  const host = (req.headers.get("host") || "").trim().toLowerCase();
+  if (!host) return false;
+  if (HOST_ALLOWLIST_RE.test(host)) return true;
+  return extraAllowedHosts().includes(host);
+}
+
 // Returns a 403 response if the request is cross-site, else null. Call at the
 // top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  // DNS-rebinding defense first: a rebound request looks same-origin to
+  // isCrossSiteRequest() (its textual origin matches the target), so it would
+  // pass the checks below. Validate the Host against a positive allowlist up
+  // front — a rebound request carries an attacker Host that is not allowlisted.
+  if (!isAllowedHost(req)) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
