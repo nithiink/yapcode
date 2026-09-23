@@ -80,6 +80,35 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenScoping(unittest.TestCase):
+    """The broad any-port LAN Origin regex must only widen the allowlist when a
+    token is configured. In the default tokenless loopback mode (loopback is
+    trusted), a co-located page on any other localhost/LAN port must NOT be
+    accepted, or it could drive the browser-direct endpoints (terminal WS / SSE)
+    via same-site CSRF. origin_allowed() reads AUTH_TOKEN at call time, so we
+    patch it directly rather than reload the module."""
+
+    def test_exact_frontend_origin_always_allowed(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_other_localhost_port_rejected_when_tokenless(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://localhost:8888"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.5:5173"))
+
+    def test_other_localhost_port_allowed_when_token_set(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            # Network-mode convenience: the token is the boundary there.
+            self.assertTrue(config.origin_allowed("http://192.168.1.5:5173"))
+
+    def test_offhost_origin_always_rejected(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed("http://evil.example.com"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
