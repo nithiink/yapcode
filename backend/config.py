@@ -224,9 +224,12 @@ ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
 # Private-LAN origins (any port) are allowed by default so the phone/laptop can
 # reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# allowedDevOrigins. This broad any-port regex is only a convenience for
+# legitimate same-network devices in network mode, where a token is the real
+# security boundary; it is NOT trusted as a boundary on its own (see
+# origin_allowed() and the CORS wiring in main.py, which only honor it when a
+# token is configured). Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it
+# empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -250,6 +253,15 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad any-port LAN regex only widens the allowlist when a token is
+    # configured, i.e. in network mode where the token — not the Origin — is the
+    # boundary. In the default tokenless loopback mode the only other gate is
+    # loopback-trust, and a same-machine browser page IS loopback; honoring the
+    # any-port regex there would let a co-located page on any other localhost/LAN
+    # port drive the browser-direct endpoints (terminal WS / SSE / debug) via
+    # CSRF. So tokenless mode accepts only the exact ALLOWED_ORIGINS above.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
