@@ -68,9 +68,34 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- Anti-DNS-rebinding Host allowlist --------------------------------------
+//
+// The Sec-Fetch-Site / Origin checks above are blind to DNS rebinding. A page
+// served from http://evil.com:3000 whose domain the attacker rebinds to
+// 127.0.0.1 issues requests the browser genuinely labels `same-origin` (the
+// page and the /api target share scheme+host+port), so isCrossSiteRequest()
+// returns false and the command-executing proxy is driven from a hostile page.
+// The one header that still names the attacker is Host: it stays `evil.com:3000`
+// (it derives from the URL the page uses, not the rebound IP). So pin Host to
+// the hostnames the app is actually served on. Loopback by default; the
+// private-LAN ranges (any port) mirror next.config.mjs allowedDevOrigins and the
+// backend origin allowlist so network mode keeps working (the token guards that
+// mode regardless; this is defense against the localhost drive-by).
+const LOCAL_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?$/;
+
+export function isAllowedHost(host: string | null): boolean {
+  if (!host) return false; // HTTP/1.1 always sends Host; a missing one is hostile.
+  return LOCAL_HOST_RE.test(host.trim());
+}
+
+// Returns a 4xx response if the request is cross-site OR carries an unexpected
+// Host (DNS-rebinding), else null. Call at the top of every /api/* route handler
+// before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  if (!isAllowedHost(req.headers.get("host"))) {
+    return NextResponse.json({ error: "invalid host" }, { status: 400 });
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },

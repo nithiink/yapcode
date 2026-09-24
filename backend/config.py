@@ -253,3 +253,46 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+# --- Host-header allowlist (anti-DNS-rebinding) ------------------------------
+# The token / Origin checks above are blind to DNS rebinding: a page served from
+# http://evil.com:8000 whose domain is rebound to 127.0.0.1 reaches the loopback
+# backend with requests the browser labels same-origin, and a same-origin GET
+# carries no Origin at all — so loopback trust is granted and the debug/event
+# endpoints leak. The one header that still names the attacker is Host (it stays
+# `evil.com:8000`). Pin it to the hostnames the backend is legitimately served
+# on: loopback by default, plus the private-LAN ranges (any port) mirroring the
+# origin regex so network mode keeps working. Extend with VC_ALLOWED_HOSTS
+# (comma-separated exact host[:port]) or override VC_ALLOWED_HOST_REGEX.
+_DEFAULT_HOST_REGEX = (
+    r"^("
+    r"localhost|127\.0\.0\.1|\[::1\]|::1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(:\d{1,5})?$"
+)
+_host_regex_raw = os.getenv("VC_ALLOWED_HOST_REGEX")
+ALLOWED_HOST_REGEX: str | None = (
+    _DEFAULT_HOST_REGEX if _host_regex_raw is None else (_host_regex_raw.strip() or None)
+)
+_HOST_RE = re.compile(ALLOWED_HOST_REGEX) if ALLOWED_HOST_REGEX else None
+ALLOWED_HOSTS: list[str] = [
+    h.strip() for h in (os.getenv("VC_ALLOWED_HOSTS") or "").split(",") if h.strip()
+]
+
+
+def host_allowed(host: str | None) -> bool:
+    """Whether the HTTP Host header names a hostname the backend is legitimately
+    served on. Fails closed on a missing/empty Host (every real HTTP/1.1 client
+    sends one), which defeats DNS rebinding: the rebound request keeps the
+    attacker's Host, which is not in the allowlist. Set VC_ALLOWED_HOSTS for a
+    hostname outside the default loopback/private-LAN ranges (e.g. an mDNS name)."""
+    if not host:
+        return False
+    h = host.strip()
+    if h in ALLOWED_HOSTS:
+        return True
+    # fullmatch so a trailing newline / extra suffix can't sneak past the `$`.
+    return bool(_HOST_RE and _HOST_RE.fullmatch(h))
