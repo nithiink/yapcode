@@ -4,6 +4,9 @@
 - py/path-injection:   session ids / cwds are validated against an allowlist at
                        the sink (session control dir, transcript glob, project root).
 - py/full-ssrf:        the realtime-token mint URL is pinned to an allowed host.
+- dns-rebinding:        the HTTP Host header is pinned to an allowlist so a
+                        rebound page (Host: evil.com) can't drive the loopback-
+                        trusted backend or read the debug/event endpoints.
 
     python -m unittest discover -s backend/tests
 """
@@ -96,6 +99,31 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class HostHeaderAllowlist(unittest.TestCase):
+    """Anti-DNS-rebinding: config.host_allowed pins the HTTP Host header."""
+
+    def test_loopback_hosts_allowed(self):
+        for h in ("localhost", "localhost:8000", "127.0.0.1:8000",
+                  "127.0.0.1:3000", "[::1]:8000"):
+            self.assertTrue(config.host_allowed(h), h)
+
+    def test_private_lan_hosts_allowed(self):
+        # Network mode is served on a LAN IP; the token still guards it, but the
+        # legitimate host must not be rejected.
+        for h in ("192.168.1.50:8000", "10.0.0.5:3000", "172.16.4.4:8000"):
+            self.assertTrue(config.host_allowed(h), h)
+
+    def test_rebinding_and_public_hosts_rejected(self):
+        # The rebound request keeps the attacker's Host; it must be refused.
+        for h in ("evil.com", "evil.com:8000", "attacker.example:3000",
+                  "172.15.0.1:8000", "172.32.0.1:8000"):
+            self.assertFalse(config.host_allowed(h), h)
+
+    def test_missing_host_fails_closed(self):
+        self.assertFalse(config.host_allowed(None))
+        self.assertFalse(config.host_allowed(""))
 
 
 if __name__ == "__main__":
