@@ -158,13 +158,45 @@ app = FastAPI(title="Yapcode", lifespan=lifespan,
 # of "*": a malicious web page in the user's browser can no longer read responses
 # from — or make non-simple cross-origin calls to — the backend it can reach at
 # localhost. See config.ALLOWED_ORIGINS / VC_ALLOWED_ORIGINS.
+#
+# The broad LAN/any-port regex is only trusted when VC_AUTH_TOKEN is set (network
+# mode), where a token separately authenticates the caller. In tokenless loopback
+# mode the regex is NOT a security boundary — loopback source IP is the only auth —
+# so exposing responses to any localhost:<any-port> page would let it read backend
+# state cross-origin. Restrict CORS to the exact frontend origins there.
+_CORS_ORIGIN_REGEX = config.ALLOWED_ORIGIN_REGEX if config.AUTH_TOKEN else None
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Header-less transports (the terminal WebSocket, the SSE debug stream) can only
+# carry the shared secret as a ?token= query param, which uvicorn's access log
+# would otherwise write verbatim to disk. Redact it so the long-lived credential
+# isn't persisted in logs. (Full remediation — short-lived per-connection tickets
+# instead of the long-lived secret in the URL — is tracked separately.)
+class _RedactTokenFilter(logging.Filter):
+    _RE = re.compile(r"(token=)[^&\s\"']+", re.IGNORECASE)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    self._RE.sub(r"\1[REDACTED]", a) if isinstance(a, str) else a
+                    for a in record.args
+                )
+            if isinstance(record.msg, str) and "token=" in record.msg.lower():
+                record.msg = self._RE.sub(r"\1[REDACTED]", record.msg)
+        except Exception:  # never let logging-hygiene break request logging
+            pass
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactTokenFilter())
+
 
 # Hosts treated as "local" when no VC_AUTH_TOKEN is configured.
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -201,6 +233,24 @@ def _access_ok(client_host: str | None, token: str | None) -> tuple[bool, str]:
     return False, "remote access requires VC_AUTH_TOKEN to be set on the server"
 
 
+def _origin_permitted(origin: str) -> bool:
+    """In-app Origin allowlist for a browser request carrying an Origin header.
+
+    When VC_AUTH_TOKEN is set, the token authenticates the caller and the broad
+    LAN/any-port regex (config.origin_allowed) is just a convenience for legit
+    same-network devices. When tokenless (the default loopback mode), that regex
+    is the ONLY CSRF boundary — and it accepts any http(s)://localhost:<any-port>
+    and private-LAN origin, which lets a page served from any other local port
+    drive the loopback-trusted backend (start_session -> set_mode auto ->
+    tell_claude == RCE). So in tokenless mode require an exact configured frontend
+    origin instead; _access_ok already refuses every non-loopback client there,
+    so the only legitimate browser caller is the same-machine frontend.
+    """
+    if config.AUTH_TOKEN:
+        return config.origin_allowed(origin)
+    return origin in config.ALLOWED_ORIGINS
+
+
 async def require_auth(request: Request) -> None:
     """FastAPI dependency guarding every sensitive HTTP endpoint."""
     # Origin allowlist, enforced in-app (not just via CORS response headers). A
@@ -210,7 +260,7 @@ async def require_auth(request: Request) -> None:
     # a loopback-trusted browser. The same-origin Next proxy and native clients
     # send no Origin; only real cross-origin browser requests carry one.
     origin = request.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not _origin_permitted(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
@@ -223,7 +273,7 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
     origin = ws.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not _origin_permitted(origin):
         return False, 4403  # forbidden origin
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)

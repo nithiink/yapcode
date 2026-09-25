@@ -7,6 +7,7 @@
 
     python -m unittest discover -s backend/tests
 """
+import logging
 import os
 import sys
 import tempfile
@@ -96,6 +97,50 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class OriginAllowlistCSRF(unittest.TestCase):
+    """The in-app Origin allowlist must not let a page on some other local port
+    drive the loopback-trusted backend when running tokenless (CSRF -> RCE)."""
+
+    def test_tokenless_rejects_other_local_and_lan_origins(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            # Legit frontend origins still work with zero config.
+            self.assertTrue(main._origin_permitted("http://localhost:3000"))
+            self.assertTrue(main._origin_permitted("http://127.0.0.1:3000"))
+            # Any other local port / LAN / internet origin is refused.
+            self.assertFalse(main._origin_permitted("http://localhost:8888"))
+            self.assertFalse(main._origin_permitted("http://192.168.1.50"))
+            self.assertFalse(main._origin_permitted("https://evil.com"))
+
+    def test_token_mode_keeps_lan_convenience(self):
+        # With a token set, the token is the boundary; the LAN regex is a
+        # convenience for legit same-network devices.
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cret"):
+            self.assertTrue(main._origin_permitted("http://localhost:3000"))
+            self.assertTrue(main._origin_permitted("http://192.168.1.50"))
+            self.assertFalse(main._origin_permitted("https://evil.com"))
+
+
+class AccessLogTokenRedaction(unittest.TestCase):
+    def test_token_query_param_redacted_in_access_log(self):
+        f = main._RedactTokenFilter()
+        rec = logging.LogRecord(
+            "uvicorn.access", logging.INFO, "", 0,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:5", "GET", "/sessions/a/terminal?token=SECRET&x=1", "1.1", 101),
+            None,
+        )
+        self.assertTrue(f.filter(rec))
+        msg = rec.getMessage()
+        self.assertNotIn("SECRET", msg)
+        self.assertIn("[REDACTED]", msg)
+
+    def test_non_token_paths_untouched(self):
+        f = main._RedactTokenFilter()
+        rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "%s", ("/health",), None)
+        self.assertTrue(f.filter(rec))
+        self.assertEqual(rec.getMessage(), "/health")
 
 
 if __name__ == "__main__":
