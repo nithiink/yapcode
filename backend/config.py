@@ -253,3 +253,23 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def origin_allowed_for_auth(origin: str | None) -> bool:
+    """Origin gate for the in-app auth checks (require_auth / the terminal-WS
+    handshake) — the layer that actually protects the command-executing endpoints.
+
+    When a token IS configured, the token is the security boundary, so the broad
+    private-LAN convenience regex is acceptable here (a matching origin still has
+    to present the token). When NO token is set (the default `yapcode up`
+    loopback-trust mode), this Origin allowlist is the ONLY thing standing between
+    a malicious cross-origin browser page and a backend that injects keystrokes /
+    runs commands, so it must be strict: permit only the exact trusted frontend
+    origins (ALLOWED_ORIGINS), never the any-localhost-port / any-LAN-host regex.
+    Otherwise a page from any other `localhost:<port>` or LAN host would pass the
+    allowlist and, being on loopback, need no credential — a cross-origin RCE."""
+    if not origin:
+        return False
+    if AUTH_TOKEN:
+        return origin_allowed(origin)
+    return origin in ALLOWED_ORIGINS
