@@ -4,6 +4,9 @@
 - py/path-injection:   session ids / cwds are validated against an allowlist at
                        the sink (session control dir, transcript glob, project root).
 - py/full-ssrf:        the realtime-token mint URL is pinned to an allowed host.
+- cross-origin RCE:    in the default tokenless mode the in-app Origin gate is
+                       strict (exact frontend origins only), so another
+                       localhost:PORT / LAN page can't drive the command backend.
 
     python -m unittest discover -s backend/tests
 """
@@ -96,6 +99,44 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class OriginAuthGate(unittest.TestCase):
+    """The in-app Origin allowlist used by require_auth / the terminal-WS
+    handshake. In tokenless (loopback-trust) mode it is the only cross-origin
+    boundary, so it must permit only the exact trusted frontend origins and
+    reject any other localhost:PORT / LAN origin (which would otherwise reach the
+    command-executing endpoints with no credential)."""
+
+    _FRONTEND = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    def test_tokenless_allows_exact_frontend_origin(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "ALLOWED_ORIGINS", self._FRONTEND):
+            self.assertTrue(config.origin_allowed_for_auth("http://localhost:3000"))
+
+    def test_tokenless_rejects_other_localhost_port(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "ALLOWED_ORIGINS", self._FRONTEND):
+            self.assertFalse(config.origin_allowed_for_auth("http://localhost:5173"))
+
+    def test_tokenless_rejects_lan_host(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "ALLOWED_ORIGINS", self._FRONTEND):
+            self.assertFalse(config.origin_allowed_for_auth("http://192.168.1.50:3000"))
+
+    def test_tokenless_rejects_empty_origin(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "ALLOWED_ORIGINS", self._FRONTEND):
+            self.assertFalse(config.origin_allowed_for_auth(None))
+
+    def test_token_mode_still_honors_lan_regex(self):
+        # With a token set, the token is the boundary, so the broad LAN/any-port
+        # convenience regex may still match here (the caller then also demands
+        # the token). A distinct localhost port is accepted only in this mode.
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cr3t"), \
+                mock.patch.object(config, "ALLOWED_ORIGINS", self._FRONTEND):
+            self.assertTrue(config.origin_allowed_for_auth("http://localhost:5173"))
 
 
 if __name__ == "__main__":

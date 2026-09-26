@@ -210,7 +210,7 @@ async def require_auth(request: Request) -> None:
     # a loopback-trusted browser. The same-origin Next proxy and native clients
     # send no Origin; only real cross-origin browser requests carry one.
     origin = request.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not config.origin_allowed_for_auth(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
@@ -223,7 +223,7 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
     origin = ws.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not config.origin_allowed_for_auth(origin):
         return False, 4403  # forbidden origin
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
