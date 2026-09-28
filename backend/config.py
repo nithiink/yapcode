@@ -250,6 +250,16 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN / any-port regex is only a convenience for legitimate
+    # same-network devices in network mode, where VC_AUTH_TOKEN — not the origin —
+    # is the real boundary. In tokenless loopback mode the backend trusts any
+    # loopback client with no token, so widening the allowlist to arbitrary
+    # sibling localhost ports / LAN hosts would let any such page the browser has
+    # open drive the command endpoints (and the terminal WS / SSE) via CSRF. So
+    # only consult the regex when a token is configured; otherwise accept only the
+    # exact ALLOWED_ORIGINS frontend origins checked above.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
