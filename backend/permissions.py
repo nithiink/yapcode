@@ -9,10 +9,15 @@ from __future__ import annotations
 import os
 
 # Read-only / non-destructive tools: auto-approved silently.
+#
+# Network-egress tools (WebFetch / WebSearch) are deliberately NOT here: they
+# reach attacker-influenceable URLs and can carry local data off the machine, so
+# a prompt-injected turn could silently exfiltrate secrets (Read a local file →
+# WebFetch it to an attacker host) without ever surfacing a permission prompt.
+# They are classified "risky" so egress routes through the user's yes/no gate.
 SAFE_TOOLS: frozenset[str] = frozenset({
     "Read", "Grep", "Glob", "LS",
     "TodoWrite", "NotebookRead",
-    "WebSearch", "WebFetch",
     "ToolSearch",  # loads tool schemas — pure metadata, runs nothing
 })
 

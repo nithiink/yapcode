@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import config  # noqa: E402
 import main  # noqa: E402
+import permissions  # noqa: E402
 import tmux_runner  # noqa: E402
 import transcript  # noqa: E402
 
@@ -96,6 +97,47 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class OriginAllowlistTokenless(unittest.TestCase):
+    """A browser-direct CSRF barrier: in tokenless loopback mode only the exact
+    frontend origins are trusted; the broad private-LAN/any-port regex is a
+    convenience that applies ONLY when VC_AUTH_TOKEN is set (there the token, not
+    the origin, is the boundary). See origin_allowed()."""
+
+    def test_tokenless_rejects_sibling_port_and_lan(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            # exact frontend origins still accepted
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+            self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+            # a sibling localhost port / LAN host must NOT be trusted tokenless
+            self.assertFalse(config.origin_allowed("http://localhost:9999"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.50"))
+            self.assertFalse(config.origin_allowed("http://evil.com"))
+            self.assertFalse(config.origin_allowed(None))
+
+    def test_token_mode_keeps_lan_regex_convenience(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cret"):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+            # regex convenience preserved when a token guards the request
+            self.assertTrue(config.origin_allowed("http://localhost:9999"))
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:5173"))
+            self.assertFalse(config.origin_allowed("http://evil.com"))
+
+
+class NetworkEgressToolsGated(unittest.TestCase):
+    """WebFetch/WebSearch must not auto-approve: network egress is a silent
+    exfiltration channel and has to route through the permission gate."""
+
+    def test_webfetch_and_websearch_are_risky(self):
+        self.assertEqual(permissions.classify("WebFetch"), "risky")
+        self.assertEqual(permissions.classify("WebSearch"), "risky")
+        self.assertNotIn("WebFetch", permissions.SAFE_TOOLS)
+        self.assertNotIn("WebSearch", permissions.SAFE_TOOLS)
+
+    def test_readonly_tools_stay_safe(self):
+        for t in ("Read", "Grep", "Glob", "LS", "ToolSearch"):
+            self.assertEqual(permissions.classify(t), "safe")
 
 
 if __name__ == "__main__":

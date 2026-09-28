@@ -68,9 +68,63 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- DNS-rebinding defense (Host allowlist) ---------------------------------
+//
+// The same-origin / Origin-host checks above are name-based, so they cannot tell
+// a rebound attacker hostname (evil.example, re-pointed at 127.0.0.1) apart from
+// our own server: under DNS rebinding the malicious page and the local server
+// share an origin, so `Sec-Fetch-Site: same-origin` and `Origin.host === Host`
+// both pass and the command-executing proxy would be driven from an arbitrary
+// site. DNS rebinding fundamentally requires a DNS *name* to rebind, so we
+// require the Host header to be a literal IP (loopback or LAN) or `localhost` —
+// which every legitimate access pattern uses (dev binds 127.0.0.1; network mode
+// is reached at a LAN IP), while a rebound domain name is rejected. Extra
+// hostnames (e.g. an mDNS `.local` name) can be allowed via VC_ALLOWED_HOSTS
+// (comma-separated hostnames, no port).
+const EXTRA_ALLOWED_HOSTS: Set<string> = new Set(
+  (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+function hostnameOf(hostHeader: string): string {
+  // Strip a :port suffix. IPv6 literals arrive bracketed ("[::1]:3000"); keep
+  // the bracketed form as the hostname after removing the port.
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) {
+    const end = h.indexOf("]");
+    return end === -1 ? h : h.slice(0, end + 1);
+  }
+  const colon = h.indexOf(":");
+  return colon === -1 ? h : h.slice(0, colon);
+}
+
+function isAllowedHost(hostHeader: string | null): boolean {
+  if (!hostHeader) return false; // HTTP/1.1 requires Host; treat absence as hostile
+  const host = hostnameOf(hostHeader);
+  if (!host) return false;
+  if (host === "localhost") return true;
+  if (host === "[::1]") return true; // bracketed IPv6 loopback
+  if (EXTRA_ALLOWED_HOSTS.has(host)) return true;
+  // IPv4 literal (dotted quad) — loopback or LAN.
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return true;
+  // Bracketed IPv6 literal, e.g. "[fe80::1]".
+  if (/^\[[0-9a-f:]+\]$/.test(host)) return true;
+  // Anything else is a DNS name — reject (defeats DNS rebinding).
+  return false;
+}
+
+// Returns a 403 response if the request is cross-site OR its Host header is not
+// an allowed literal-IP/localhost host (DNS-rebinding defense), else null. Call
+// at the top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  if (!isAllowedHost(req.headers.get("host"))) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
