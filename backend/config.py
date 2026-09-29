@@ -223,10 +223,18 @@ def _default_allowed_origins() -> list[str]:
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
 # Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# reach the browser-direct terminal WS / debug stream over the LAN in network
+# mode — mirrors next.config.mjs's allowedDevOrigins. Network mode ALWAYS sets
+# VC_AUTH_TOKEN (run-network.sh fails closed without it), so there the token —
+# not the Origin — is the security boundary and this regex is only a convenience.
+#
+# In the tokenless loopback-only default (`run.sh`) the regex is NOT applied: the
+# only legitimate browser origin is the localhost:3000 frontend, already covered
+# by ALLOWED_ORIGINS. Trusting arbitrary localhost/private-LAN origins on any
+# port there would let a co-resident localhost page (another dev server, or one
+# with an XSS) drive the command-executing backend cross-origin (CSRF→RCE) — the
+# very thing this allowlist exists to prevent. Opt into a custom pattern in
+# either mode with VC_ALLOWED_ORIGIN_REGEX (empty string disables it).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -235,10 +243,28 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
-_origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+
+
+def _resolve_origin_regex(auth_token: str, override: str | None) -> str | None:
+    """Decide the browser-Origin allowlist regex.
+
+    - An explicit VC_ALLOWED_ORIGIN_REGEX always wins (empty string disables it).
+    - Otherwise the permissive private-LAN / any-port-localhost default applies
+      ONLY when a token is configured (network mode), where the token is the
+      security boundary and the regex just lets legitimate LAN devices reach the
+      browser-direct terminal WS / debug stream.
+    - In tokenless loopback-only mode, return None: the sole legitimate browser
+      origin is the localhost:3000 frontend (already in ALLOWED_ORIGINS), so no
+      extra origin is trusted and a co-resident localhost page cannot drive the
+      command-executing backend cross-origin.
+    """
+    if override is not None:
+        return override.strip() or None
+    return _DEFAULT_ORIGIN_REGEX if auth_token else None
+
+
+ALLOWED_ORIGIN_REGEX: str | None = _resolve_origin_regex(
+    AUTH_TOKEN, os.getenv("VC_ALLOWED_ORIGIN_REGEX"))
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
