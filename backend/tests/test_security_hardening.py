@@ -80,6 +80,39 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistDefault(unittest.TestCase):
+    """The permissive any-port localhost/private-LAN Origin regex must apply only
+    in network mode (token set). In the tokenless loopback-only default it must
+    NOT be applied, so a co-resident localhost page can't drive the backend."""
+
+    def test_tokenless_mode_trusts_no_extra_origin_regex(self):
+        self.assertIsNone(config._resolve_origin_regex("", None))
+
+    def test_token_mode_keeps_lan_convenience_regex(self):
+        self.assertEqual(
+            config._resolve_origin_regex("a-secret", None), config._DEFAULT_ORIGIN_REGEX)
+
+    def test_explicit_override_wins_in_either_mode(self):
+        self.assertEqual(config._resolve_origin_regex("", r"^https://app$"), r"^https://app$")
+        self.assertEqual(config._resolve_origin_regex("tok", r"^https://app$"), r"^https://app$")
+
+    def test_explicit_empty_override_disables_regex(self):
+        self.assertIsNone(config._resolve_origin_regex("tok", ""))
+        self.assertIsNone(config._resolve_origin_regex("tok", "   "))
+
+    def test_configured_frontend_origin_always_allowed(self):
+        # Exact ALLOWED_ORIGINS entries pass regardless of the regex/mode.
+        self.assertTrue(config.origin_allowed("http://localhost:3000"))
+        self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+
+    @unittest.skipIf(config.AUTH_TOKEN, "requires tokenless import-time mode")
+    def test_foreign_localhost_origin_rejected_without_token(self):
+        # The module was imported without VC_AUTH_TOKEN (loopback-only default),
+        # so a foreign localhost origin must be rejected — this is the fix.
+        self.assertFalse(config.origin_allowed("http://localhost:5173"))
+        self.assertFalse(config.origin_allowed("http://192.168.1.50:8080"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
