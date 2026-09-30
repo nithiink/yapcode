@@ -46,7 +46,44 @@ export function forwardAuth(
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
 // ambient credentials — so they pass here and are left to the backend's own
 // token/loopback auth.
+// Absolute Host allowlist — the DNS-rebinding defense the relative checks below
+// cannot provide. `Sec-Fetch-Site` and a relative `Origin.host === Host`
+// comparison both report "same-origin" for a rebound attacker hostname
+// (evil.example -> 127.0.0.1), because the browser keys them on the hostname
+// STRING, not the resolved IP: after rebinding, a fetch from the evil.example
+// page to evil.example:3000 is genuinely same-origin. The one signal rebinding
+// cannot fake is the Host header itself — it is the hostname the page actually
+// used (evil.example), never `localhost`/`127.0.0.1`. So require Host to be a
+// name we actually serve on: loopback, or a private-LAN address in network mode.
+// Mirrors config.py's origin allowlist and next.config.mjs's allowedDevOrigins.
+const ALLOWED_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|::1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?$/;
+
+// Extra exact Host values (comma-separated) for custom deployments served behind
+// a non-loopback, non-private-LAN hostname (e.g. a tunnel). Such setups are
+// network-exposed, where VC_AUTH_TOKEN is required and remains the primary
+// boundary — this just lets the rebinding guard accept the real host.
+const EXTRA_ALLOWED_HOSTS = new Set(
+  (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isAllowedHost(host: string | null): boolean {
+  if (!host) return false; // a browser always sends Host; absence is not ours
+  const h = host.trim().toLowerCase();
+  return ALLOWED_HOST_RE.test(h) || EXTRA_ALLOWED_HOSTS.has(h);
+}
+
 export function isCrossSiteRequest(req: NextRequest): boolean {
+  // DNS-rebinding defense — must run BEFORE the relative same-origin signals
+  // below, which a rebound attacker hostname passes (see isAllowedHost). An
+  // unexpected Host means the request reached us via a name we don't serve on,
+  // so treat it as cross-site regardless of Sec-Fetch-Site / Origin.
+  if (!isAllowedHost(req.headers.get("host"))) {
+    return true;
+  }
   const site = req.headers.get("sec-fetch-site");
   if (site) {
     // The legitimate frontend ALWAYS calls these routes same-origin (a relative
