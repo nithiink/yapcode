@@ -170,6 +170,25 @@ app.add_middleware(
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
+def _host_is_loopback(host_header: str | None) -> bool:
+    """Whether the request's Host header names a loopback address.
+
+    DNS-rebinding defense for the tokenless loopback-trust mode: an attacker page
+    served from a domain they control (evil.example) and rebound to 127.0.0.1
+    still carries that public domain in the Host header, so pinning Host to a
+    loopback literal rejects the rebound request even though the peer IP is
+    loopback. Legitimate loopback access always uses localhost / 127.0.0.1 / ::1.
+    """
+    if not host_header:
+        return False
+    h = host_header.strip()
+    if h.startswith("["):  # bracketed IPv6, e.g. "[::1]:8000"
+        h = h[1:].split("]", 1)[0]
+    elif h.count(":") == 1:  # host:port (a bare IPv6 has multiple colons)
+        h = h.rsplit(":", 1)[0]
+    return h.lower() in _LOOPBACK_HOSTS
+
+
 def _token_from(headers, query) -> str | None:
     """Pull the shared-secret token from an Authorization: Bearer header, an
     X-VC-Token header, or a ?token= query param (EventSource/WebSocket can't set
@@ -183,20 +202,25 @@ def _token_from(headers, query) -> str | None:
     return query.get("token")
 
 
-def _access_ok(client_host: str | None, token: str | None) -> tuple[bool, str]:
+def _access_ok(client_host: str | None, token: str | None,
+               host_header: str | None = None) -> tuple[bool, str]:
     """Core access decision shared by HTTP and WebSocket paths.
 
     - If VC_AUTH_TOKEN is configured: a matching token is required from everyone
       (including loopback — so the same-origin Next proxy can't launder a remote
       request into a trusted localhost call).
-    - Otherwise: only loopback clients are allowed; remote callers are refused
-      until a token is set.
+    - Otherwise: only loopback clients are allowed AND the request Host must name
+      a loopback address, so a rebound public hostname (DNS rebinding) whose
+      socket happens to terminate on loopback can't reach the trusted path;
+      remote callers are refused until a token is set.
     """
     if config.AUTH_TOKEN:
         if config.token_matches(token):
             return True, ""
         return False, "missing or invalid auth token"
     if client_host in _LOOPBACK_HOSTS:
+        if not _host_is_loopback(host_header):
+            return False, "request Host is not a loopback address"
         return True, ""
     return False, "remote access requires VC_AUTH_TOKEN to be set on the server"
 
@@ -213,7 +237,8 @@ async def require_auth(request: Request) -> None:
     if origin and not config.origin_allowed(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
     token = _token_from(request.headers, request.query_params)
-    ok, reason = _access_ok(request.client.host if request.client else None, token)
+    ok, reason = _access_ok(request.client.host if request.client else None, token,
+                            request.headers.get("host"))
     if not ok:
         raise HTTPException(status_code=401 if config.AUTH_TOKEN else 403, detail=reason)
 
@@ -226,7 +251,8 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     if origin and not config.origin_allowed(origin):
         return False, 4403  # forbidden origin
     token = _token_from(ws.headers, ws.query_params)
-    ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
+    ok, _reason = _access_ok(ws.client.host if ws.client else None, token,
+                             ws.headers.get("host"))
     return (True, 0) if ok else (False, 4401)  # unauthorized
 
 
