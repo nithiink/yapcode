@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedLocalHost } from "./hostAllowlist";
 
 // Forward the browser-presented shared-secret token to the backend.
 //
@@ -68,10 +69,26 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
+// --- DNS-rebinding defense (Host-header allowlist) --------------------------
+//
+// Sec-Fetch-Site / Origin alone are NOT enough to protect this command-executing
+// proxy. Both describe the URL the browser believes it is talking to, not the
+// socket's real IP. Under DNS rebinding an attacker serves a page from a domain
+// they control (e.g. http://evil.example:3000), then rebinds that name to
+// 127.0.0.1. The victim's browser then reaches the local dev server while still
+// labeling the request `same-origin`, so isCrossSiteRequest() is fooled and the
+// request is laundered into the loopback-trusted backend. Pinning the request
+// Host to a local address (never a public domain) defeats the rebind. The pure
+// allowlist logic lives in ./hostAllowlist so it can be unit-tested.
+export function isAllowedHost(req: NextRequest): boolean {
+  return isAllowedLocalHost(req.headers.get("host"));
+}
+
+// Returns a 403 response if the request is cross-site OR arrives with a Host
+// outside the local allowlist (DNS-rebinding defense), else null. Call at the
 // top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
-  if (isCrossSiteRequest(req)) {
+  if (isCrossSiteRequest(req) || !isAllowedHost(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
       { status: 403 },

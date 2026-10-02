@@ -80,6 +80,43 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class LoopbackHostValidation(unittest.TestCase):
+    """DNS-rebinding defense: in tokenless loopback-trust mode the request Host
+    must name a loopback address, so a rebound public hostname whose socket lands
+    on loopback cannot reach the trusted path."""
+
+    def test_host_is_loopback_parsing(self):
+        for good in ["localhost", "localhost:8000", "127.0.0.1", "127.0.0.1:8000",
+                     "[::1]", "[::1]:8000", "LOCALHOST:3000"]:
+            self.assertTrue(main._host_is_loopback(good), good)
+        for bad in ["evil.example", "evil.example:3000", "10.0.0.5:8000",
+                    "example.com", "", None]:
+            self.assertFalse(main._host_is_loopback(bad), bad)
+
+    def test_tokenless_loopback_peer_with_rebound_host_rejected(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            ok, reason = main._access_ok("127.0.0.1", None, "evil.example:3000")
+            self.assertFalse(ok)
+            self.assertIn("Host", reason)
+
+    def test_tokenless_loopback_peer_with_loopback_host_allowed(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            ok, _ = main._access_ok("127.0.0.1", None, "localhost:3000")
+            self.assertTrue(ok)
+
+    def test_tokenless_missing_host_rejected(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            ok, _ = main._access_ok("127.0.0.1", None, None)
+            self.assertFalse(ok)
+
+    def test_token_mode_ignores_host(self):
+        # With a valid token, the Host (and the peer IP) are not the gate.
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"), \
+                mock.patch.object(config, "token_matches", lambda t: t == "secret"):
+            ok, _ = main._access_ok("1.2.3.4", "secret", "evil.example")
+            self.assertTrue(ok)
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
