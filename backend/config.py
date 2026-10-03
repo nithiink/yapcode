@@ -224,8 +224,9 @@ ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
 # Private-LAN origins (any port) are allowed by default so the phone/laptop can
 # reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# allowedDevOrigins. This broad regex is a convenience for legitimate
+# same-network devices in network mode, where the token (required even from
+# loopback once set) is the real security boundary.
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -235,10 +236,20 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
+# Tokenless loopback mode has NO token boundary, so the broad private-LAN/any-port
+# regex must not be trusted there: it would let a page on another localhost port
+# or a LAN device drive the command-executing backend cross-origin (CSRF -> RCE).
+# Legitimate tokenless traffic is same-origin via the Next proxy (no Origin) or
+# from the exact ALLOWED_ORIGINS entries, so the regex is pure attack surface
+# with no token set. Apply it only when a token is configured (network mode) or
+# when an operator explicitly opts in via VC_ALLOWED_ORIGIN_REGEX.
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+if _origin_regex_raw is not None:
+    ALLOWED_ORIGIN_REGEX: str | None = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 

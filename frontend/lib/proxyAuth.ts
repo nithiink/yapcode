@@ -68,10 +68,57 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- Host (DNS-rebinding) defense -------------------------------------------
+//
+// The cross-site check above trusts `Sec-Fetch-Site: same-origin`, but a DNS
+// rebinding attack produces a GENUINELY same-origin request: after an attacker
+// rebinds evil.com -> 127.0.0.1, the browser sends `fetch("/api/...")` with a
+// real `Sec-Fetch-Site: same-origin` and `Host: evil.com`, so the cross-site
+// gate passes and the request would be laundered into a trusted loopback call
+// to the command-executing backend. The reliable defense is a Host allowlist:
+// the proxy only ever legitimately serves the local app, reached at loopback or
+// (network mode) a private-LAN IP. Rebinding can only ever present a DOMAIN NAME
+// in Host (you cannot register a domain that is a raw private-IP literal), so
+// allowing only loopback + private-LAN IP literals defeats it while leaving both
+// localhost and LAN modes working. Operators fronting the app with a real
+// hostname can allowlist it via ALLOWED_PROXY_HOSTS (comma-separated).
+const _EXTRA_PROXY_HOSTS = new Set(
+  (process.env.ALLOWED_PROXY_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isTrustedProxyHost(req: NextRequest): boolean {
+  const hostHeader = req.headers.get("host");
+  if (!hostHeader) return false; // no Host -> cannot vouch for it
+  // Strip the port, handling bracketed IPv6 (e.g. "[::1]:3000").
+  let hostname: string;
+  if (hostHeader.startsWith("[")) {
+    const end = hostHeader.indexOf("]");
+    hostname = end === -1 ? hostHeader : hostHeader.slice(1, end);
+  } else {
+    const colon = hostHeader.lastIndexOf(":");
+    hostname = colon === -1 ? hostHeader : hostHeader.slice(0, colon);
+  }
+  hostname = hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+    return true;
+  }
+  if (_EXTRA_PROXY_HOSTS.has(hostname)) return true;
+  // Private-LAN IPv4 literals (network mode), mirroring the backend origin regex.
+  return (
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
+// Returns a 403 response if the request is cross-site OR arrives with an
+// untrusted Host (DNS rebinding / off-host access), else null. Call at the top
+// of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
-  if (isCrossSiteRequest(req)) {
+  if (!isTrustedProxyHost(req) || isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
       { status: 403 },
