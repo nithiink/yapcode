@@ -192,12 +192,19 @@ export class RealtimeSession implements VoiceSession {
       console.warn("[realtime] injectUpdate dropped — data channel not open:", text.slice(0, 80));
       return;
     }
-    // Always add the system message to the conversation immediately so the
-    // model sees it whenever it next responds. But only call response.create if
-    // no response is in flight — otherwise queue it and fire on response.done.
+    // Add the update to the conversation immediately so the model sees it whenever
+    // it next responds. But only call response.create if no response is in flight
+    // — otherwise queue it and fire on response.done.
+    //
+    // Use role "user", NOT "system": these updates relay Claude Code output that
+    // can echo untrusted content Claude was asked to read (files, web pages,
+    // issues). A "system" item is the highest-trust instruction channel, so
+    // relaying untrusted text there lets a prompt-injection payload override the
+    // base policy and auto-approve privileged tools. role "user" keeps it as
+    // lower-trust input; callers additionally fence the untrusted portion.
     this.send({
       type: "conversation.item.create",
-      item: { type: "message", role: "system", content: [{ type: "input_text", text }] },
+      item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
     });
     if (this.responseActive) {
       this.pendingInjections.push(text);

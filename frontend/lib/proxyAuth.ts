@@ -68,9 +68,51 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- DNS-rebinding defense (Host-header allowlist) --------------------------
+//
+// Sec-Fetch-Site alone is NOT enough: DNS rebinding lets an attacker page at
+// http://evil.com:3000 rebind evil.com -> 127.0.0.1 and issue a genuinely
+// *same-origin* fetch to our loopback server. The browser then labels it
+// same-origin (so isCrossSiteRequest passes), yet the request carries
+// `Host: evil.com` and is forwarded over loopback to the command-executing
+// backend -> drive-by RCE. We defeat this by requiring the Host header to name a
+// known-local host; a rebound request still carries the attacker's domain and is
+// rejected. Extend with ALLOWED_HOSTS (comma-separated) for custom network-mode
+// hostnames. Private-LAN IP *literals* are allowed for network mode because a
+// rebinding attack always presents a domain name in Host, never a bare IP.
+function hostAllowed(req: NextRequest): boolean {
+  const raw = (req.headers.get("host") || "").toLowerCase().trim();
+  if (!raw) return false; // no Host -> can't vouch for it
+  let hostname: string;
+  if (raw.startsWith("[")) {
+    hostname = raw.slice(1, raw.indexOf("]")); // IPv6 literal: [::1] / [::1]:port
+  } else {
+    hostname = raw.split(":")[0];
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+    return true;
+  }
+  // Private-LAN IP literals (network mode) — mirrors next.config.mjs allowedDevOrigins.
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  const extra = (process.env.ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return extra.includes(hostname);
+}
+
+// Returns a 403 response if the request is cross-site OR carries an unexpected
+// Host (DNS rebinding), else null. Call at the top of every /api/* route handler
+// before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  if (!hostAllowed(req)) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },

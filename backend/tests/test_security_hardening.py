@@ -80,6 +80,30 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistNoTokenMode(unittest.TestCase):
+    """In no-token (loopback-only) mode the Origin check is the only browser
+    boundary, so the broad any-port / LAN regex must not be honored there —
+    otherwise any localhost:<port> page could drive the command endpoints."""
+
+    def test_exact_frontend_origin_allowed_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_arbitrary_localhost_port_rejected_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://localhost:5173"))
+            self.assertFalse(config.origin_allowed("http://127.0.0.1:9999"))
+
+    def test_private_lan_origin_rejected_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:3000"))
+
+    def test_broad_regex_honored_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:3000"))
+            self.assertTrue(config.origin_allowed("http://localhost:5173"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")

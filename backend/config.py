@@ -250,6 +250,15 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN / any-port regex is a convenience for legitimate
+    # same-network devices in token-protected *network* mode. In no-token
+    # (loopback-only) mode the Origin check is the ONLY browser-facing boundary,
+    # so trusting arbitrary `localhost:<any-port>` / LAN origins there fails open:
+    # a malicious page served from any localhost port in the user's browser could
+    # drive the command-executing endpoints (CSRF -> RCE). Restrict to the exact
+    # ALLOWED_ORIGINS unless a token is configured.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
