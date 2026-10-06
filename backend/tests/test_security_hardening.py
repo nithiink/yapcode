@@ -80,6 +80,38 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlist(unittest.TestCase):
+    """The broad private-LAN/any-port Origin regex must only widen the allowlist
+    when a token is configured (network mode). In the tokenless loopback default,
+    the Origin allowlist is the sole in-app drive-by boundary, so only the exact
+    configured frontend origins are allowed."""
+
+    EXACT = "http://localhost:3000"           # a configured ALLOWED_ORIGINS entry
+    OTHER_PORT = "http://localhost:8080"       # matches the broad regex only
+    LAN = "http://192.168.1.50:9999"           # matches the broad regex only
+    PUBLIC = "http://evil.com"                 # matches nothing
+
+    def test_tokenless_rejects_broad_regex_origins(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed(self.EXACT))
+            self.assertFalse(config.origin_allowed(self.OTHER_PORT))
+            self.assertFalse(config.origin_allowed(self.LAN))
+            self.assertFalse(config.origin_allowed(self.PUBLIC))
+
+    def test_token_mode_allows_broad_regex_origins(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cret"):
+            self.assertTrue(config.origin_allowed(self.EXACT))
+            self.assertTrue(config.origin_allowed(self.OTHER_PORT))
+            self.assertTrue(config.origin_allowed(self.LAN))
+            self.assertFalse(config.origin_allowed(self.PUBLIC))
+
+    def test_empty_origin_always_rejected(self):
+        for tok in ("", "s3cret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed(None))
+                self.assertFalse(config.origin_allowed(""))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
