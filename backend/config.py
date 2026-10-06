@@ -222,10 +222,12 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# Private-LAN origins (any port) are allowed so the phone/laptop can reach the
+# backend over the LAN in network mode — mirrors next.config.mjs's
+# allowedDevOrigins. This regex is honored ONLY when VC_AUTH_TOKEN is set (network
+# mode), where the token is the independent security boundary; it is deliberately
+# NOT applied in the tokenless loopback default, where the Origin allowlist is the
+# only in-app drive-by boundary (see origin_allowed() / the CORS middleware).
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -250,6 +252,16 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN/any-port regex is only a convenience for same-network
+    # devices in network mode, where VC_AUTH_TOKEN is independently required and is
+    # the real security boundary. In the default tokenless loopback mode the Origin
+    # allowlist is the ONLY in-app cross-origin/drive-by boundary, so the broad regex
+    # must NOT widen it there — otherwise a page served from any other localhost port
+    # or any private-LAN origin could drive this command-executing backend from a
+    # victim's browser. Only the exact configured frontend origins are allowed when
+    # no token is set.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
