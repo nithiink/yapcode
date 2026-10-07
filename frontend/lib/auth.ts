@@ -17,15 +17,18 @@ function captureFromUrl(): string | null {
   if (typeof window === "undefined") return null;
   try {
     const hash = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
-    const query = new URLSearchParams(window.location.search);
-    const token = hash.get("vc_token") || query.get("vc_token");
+    // Accept the token ONLY from the URL fragment (#vc_token=), never the query
+    // string. A fragment is never transmitted to the server; a ?vc_token= query
+    // param, by contrast, is sent in the initial navigation request and recorded
+    // in the frontend server's access log BEFORE the client-side strip below can
+    // run. The documented flow has always used the fragment form.
+    const token = hash.get("vc_token");
     if (!token) return null;
     window.localStorage.setItem(KEY, token);
     // Remove the token from the visible URL (history, bookmarks, screen-share).
     hash.delete("vc_token");
-    query.delete("vc_token");
     const h = hash.toString();
-    const q = query.toString();
+    const q = window.location.search.replace(/^\?/, "");
     const url = window.location.pathname + (q ? `?${q}` : "") + (h ? `#${h}` : "");
     window.history.replaceState(null, "", url);
     return token;

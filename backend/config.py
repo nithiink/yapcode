@@ -222,10 +222,14 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# Private-LAN origins (any port) are allowed so the phone/laptop can reach the
+# backend over the LAN in network mode — mirrors next.config.mjs's
+# allowedDevOrigins. This broad regex is ONLY consulted when VC_AUTH_TOKEN is set
+# (see origin_allowed below): network mode fails closed without a token, so the
+# token — not this convenience regex — is the security boundary there. In the
+# default tokenless (loopback-only) mode the only legitimate origins are the exact
+# localhost frontend origins in ALLOWED_ORIGINS, so the regex must NOT widen the
+# CSRF/CSWSH boundary to every LAN IP / localhost port.
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -250,6 +254,14 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN/any-port regex is a convenience for same-network
+    # devices in token-protected network mode. In the default tokenless
+    # (loopback-only) mode there is no token, so this regex would be the SOLE
+    # CSRF/CSWSH boundary — and it trusts every LAN IP and localhost port, which a
+    # malicious page can hold. Fail closed: without a configured token, accept only
+    # the exact frontend origins above and never the broad regex.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
