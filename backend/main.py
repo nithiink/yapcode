@@ -161,7 +161,11 @@ app = FastAPI(title="Yapcode", lifespan=lifespan,
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    # Only honor the broad private-LAN regex when a token is configured. In the
+    # default tokenless (loopback-only) mode the regex would otherwise let any
+    # LAN/localhost-port page clear preflight for a side-effecting cross-origin
+    # call; require_auth's origin_allowed() is similarly gated. See config.py.
+    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX if config.AUTH_TOKEN else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )

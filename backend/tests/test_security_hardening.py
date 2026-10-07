@@ -80,6 +80,34 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenless(unittest.TestCase):
+    """In the default tokenless (loopback-only) mode the broad private-LAN/any-port
+    regex must NOT be the CSRF/CSWSH boundary — only the exact frontend origins are
+    accepted. When a token is configured (network mode), the regex is honored."""
+
+    def test_exact_frontend_origin_always_allowed(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_lan_origin_rejected_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://192.168.1.50"))
+            self.assertFalse(config.origin_allowed("http://10.0.0.5:9999"))
+
+    def test_localhost_other_port_rejected_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://localhost:9999"))
+
+    def test_lan_origin_allowed_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "sekret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50"))
+            self.assertTrue(config.origin_allowed("http://localhost:9999"))
+
+    def test_foreign_origin_rejected_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "sekret"):
+            self.assertFalse(config.origin_allowed("http://evil.example.com"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
