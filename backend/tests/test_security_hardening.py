@@ -98,5 +98,41 @@ class MintHostAllowlist(unittest.TestCase):
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
 
 
+class HostAllowlist(unittest.TestCase):
+    """DNS-rebinding defense: the backend's browser-direct endpoints (debug SSE,
+    terminal WS) are reachable via a rebound page unless the Host header is pinned
+    to a name the backend is actually served on. A rebinding request carries the
+    attacker's DOMAIN in Host; legitimate access uses loopback or a LAN IP."""
+
+    def test_loopback_hosts_allowed(self):
+        for h in ("localhost:8000", "127.0.0.1:8000", "localhost",
+                  "127.0.0.1", "[::1]:8000", "[::1]", "::1"):
+            self.assertTrue(config.host_allowed(h), h)
+
+    def test_private_lan_ip_allowed(self):
+        for h in ("192.168.1.50:8000", "10.0.0.5:3000", "172.16.4.9:8000",
+                  "172.31.255.255"):
+            self.assertTrue(config.host_allowed(h), h)
+
+    def test_rebinding_domain_rejected(self):
+        for h in ("attacker.com:8000", "evil.example.com", "localhost.evil.com:8000",
+                  "127.0.0.1.evil.com:8000"):
+            self.assertFalse(config.host_allowed(h), h)
+
+    def test_public_ip_rejected(self):
+        for h in ("8.8.8.8:8000", "172.32.0.1", "11.0.0.1:8000"):
+            self.assertFalse(config.host_allowed(h), h)
+
+    def test_empty_host_rejected(self):
+        self.assertFalse(config.host_allowed(""))
+        self.assertFalse(config.host_allowed(None))
+
+    def test_extra_allowed_hosts_env(self):
+        with mock.patch.dict(os.environ, {"VC_ALLOWED_HOSTS": "mybox.local:8000, myhost"}):
+            self.assertTrue(config.host_allowed("mybox.local:8000"))
+            self.assertTrue(config.host_allowed("MyHost"))  # case-insensitive
+            self.assertFalse(config.host_allowed("other.local:8000"))
+
+
 if __name__ == "__main__":
     unittest.main()

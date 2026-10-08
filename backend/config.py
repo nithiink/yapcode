@@ -253,3 +253,61 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+# --- DNS-rebinding defense (Host-header allowlist) ---------------------------
+#
+# origin_allowed() above only fires when an Origin header is PRESENT, and the
+# same-origin Next proxy intentionally drops Origin — so neither stops DNS
+# rebinding against the backend's browser-direct endpoints (the SSE debug stream,
+# /debug/recent, the terminal WebSocket). A page served at `attacker.com:8000`
+# rebound to 127.0.0.1 makes GENUINELY same-origin requests (a same-origin
+# GET/EventSource carries no Origin at all), so only the Host header distinguishes
+# it: a rebinding request carries the attacker's DOMAIN in Host, never a loopback
+# name or a private-LAN IP literal. We validate Host against an allowlist of the
+# names the backend is actually served on (mirrors the Next proxy's
+# isAllowedHost() in frontend/lib/proxyAuth.ts).
+#
+# Legitimate Hosts: loopback (default mode — both the proxied hop, which connects
+# to localhost:8000, and browser-direct connections) and private-LAN IP literals
+# (network mode, served at https://<lan-ip>:8000). Custom hostnames (a reverse
+# proxy, an mDNS name) can be allowlisted via VC_ALLOWED_HOSTS (comma-separated
+# host or host:port entries).
+_LOOPBACK_HOSTNAMES: frozenset[str] = frozenset(
+    {"localhost", "127.0.0.1", "::1", "[::1]"})
+_PRIVATE_LAN_IP_RE = re.compile(
+    r"^(?:"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")$"
+)
+
+
+def _extra_allowed_hosts() -> set[str]:
+    """Full host entries (host or host:port) from VC_ALLOWED_HOSTS, matched
+    against the raw Host header (case-insensitive)."""
+    raw = os.getenv("VC_ALLOWED_HOSTS") or ""
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def host_allowed(host_header: str | None) -> bool:
+    """Whether a request's Host header names a host the backend is legitimately
+    served on. Rejects DNS-rebinding requests (which carry the attacker's domain
+    in Host) while allowing loopback, private-LAN IP literals, and explicit
+    VC_ALLOWED_HOSTS entries. An empty/absent Host is rejected (fail closed)."""
+    raw = (host_header or "").strip().lower()
+    if not raw:
+        return False
+    if raw in _extra_allowed_hosts():
+        return True
+    # Strip the port to classify the hostname; keep a bracketed IPv6 literal whole.
+    if raw.startswith("["):
+        hostname = raw[: raw.find("]") + 1] if "]" in raw else raw
+    elif raw.count(":") == 1:
+        hostname = raw.rsplit(":", 1)[0]  # host:port
+    else:
+        hostname = raw  # bare IPv6 (no brackets) or no port
+    if hostname in _LOOPBACK_HOSTNAMES:
+        return True
+    return bool(_PRIVATE_LAN_IP_RE.match(hostname))

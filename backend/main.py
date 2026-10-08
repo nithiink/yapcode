@@ -203,6 +203,14 @@ def _access_ok(client_host: str | None, token: str | None) -> tuple[bool, str]:
 
 async def require_auth(request: Request) -> None:
     """FastAPI dependency guarding every sensitive HTTP endpoint."""
+    # DNS-rebinding defense: reject any request whose Host header is not a name the
+    # backend is legitimately served on. The Origin check below only fires when an
+    # Origin is present — a same-origin GET/EventSource sends none, and the
+    # same-origin Next proxy drops Origin — so Host is the only signal that stops a
+    # rebinding page (attacker.com -> 127.0.0.1) reaching the loopback-trusted
+    # browser-direct endpoints (/debug/stream, /debug/recent). See config.host_allowed.
+    if not config.host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="host not allowed")
     # Origin allowlist, enforced in-app (not just via CORS response headers). A
     # cross-origin POST is still delivered to the app even when CORS hides the
     # response — and FastAPI parses a JSON body regardless of Content-Type — so a
@@ -222,6 +230,10 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     """Authorize a WebSocket handshake (CORS middleware does not apply to WS).
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
+    # DNS-rebinding defense (mirrors require_auth): the terminal WS injects raw
+    # keystrokes into the live Claude TUI, so a rebound page must not reach it.
+    if not config.host_allowed(ws.headers.get("host")):
+        return False, 4403  # forbidden host
     origin = ws.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         return False, 4403  # forbidden origin
