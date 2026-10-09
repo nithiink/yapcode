@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hostIsAllowed } from "./hostAllow";
 
 // Forward the browser-presented shared-secret token to the backend.
 //
@@ -68,9 +69,30 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- Host-header allowlist (DNS-rebinding defense) --------------------------
+//
+// `isCrossSiteRequest` relies on `Sec-Fetch-Site` / `Origin`, which DNS
+// rebinding does not FORGE — it makes the request GENUINELY same-origin (see
+// hostAllow.ts for the full attack). The surviving signal is the `Host` header,
+// which still carries the attacker's hostname, so we pin it to the local/LAN
+// addresses the app is actually served on. The pure check lives in hostAllow.ts
+// (no Next dependency) so it stays unit-testable.
+export function isAllowedHost(req: NextRequest): boolean {
+  return hostIsAllowed(req.headers.get("host"));
+}
+
+// Returns a 403 response if the request must not be proxied, else null. Call at
+// the top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  // Network-layer Host pin FIRST: closes DNS rebinding, which the same-origin
+  // signals checked by isCrossSiteRequest cannot (a rebound request is a genuine
+  // same-origin request to a non-local Host).
+  if (!isAllowedHost(req)) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
