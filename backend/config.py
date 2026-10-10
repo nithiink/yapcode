@@ -236,6 +236,10 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
+# Whether the active regex is our built-in permissive LAN default, as opposed to
+# an explicit operator-provided VC_ALLOWED_ORIGIN_REGEX. The default is suppressed
+# in tokenless loopback-only mode — see origin_allowed() for why.
+_ORIGIN_REGEX_IS_DEFAULT: bool = _origin_regex_raw is None
 ALLOWED_ORIGIN_REGEX: str | None = (
     _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
 )
@@ -250,6 +254,17 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The permissive LAN/localhost regex is a convenience for network mode, where
+    # VC_AUTH_TOKEN is the real security boundary. In tokenless loopback-only mode
+    # the Origin allowlist is the SOLE gate on the browser-direct WS/SSE endpoints
+    # (the terminal WebSocket, /debug/stream): the victim's own browser always
+    # satisfies the loopback client check, so an arbitrary 127.0.0.1 / RFC1918
+    # origin must NOT be trusted here — a page on any such origin could otherwise
+    # drive the keystroke-injecting terminal socket. Fall back to the exact
+    # ALLOWED_ORIGINS list only. An explicitly operator-set VC_ALLOWED_ORIGIN_REGEX
+    # is still honored (opt-in), since that is a deliberate configuration choice.
+    if _ORIGIN_REGEX_IS_DEFAULT and not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))

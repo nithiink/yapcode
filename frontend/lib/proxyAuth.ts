@@ -68,12 +68,55 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- DNS-rebinding defense (Host-header allowlist) --------------------------
+//
+// Sec-Fetch-Site / Origin checks CANNOT stop DNS rebinding: after an attacker
+// rebinds their own hostname to 127.0.0.1, the victim's browser truthfully
+// labels a relative `fetch("/api/...")` as same-origin and sends the attacker's
+// hostname in the Host header, while the rebound TCP connection lands on the
+// victim's local Next frontend — so the request sails past isCrossSiteRequest()
+// and is proxied to the loopback backend (which trusts any loopback caller when
+// VC_AUTH_TOKEN is unset) = drive-by command execution. The standard mitigation
+// for a loopback service is to validate the Host against a fixed allowlist, which
+// the attacker's public hostname can't satisfy.
+//
+// Allowed by default: loopback (localhost / 127.0.0.1 / [::1]) and private-LAN
+// hosts (so network mode on a phone/laptop LAN IP keeps working) — mirrors the
+// backend's ALLOWED_ORIGIN_REGEX and next.config.mjs's allowedDevOrigins. Any
+// other host (a public rebinding domain) is rejected. Add exact extra hosts
+// (e.g. a tunnel/MagicDNS name, "host" or "host:port") with VC_ALLOWED_HOSTS.
+const TRUSTED_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?$/;
+
+const EXTRA_ALLOWED_HOSTS: ReadonlySet<string> = new Set(
+  (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+// True when the request's Host header is NOT one we expect — the DNS-rebinding
+// signal. The legitimate frontend is always reached at a loopback or LAN host.
+export function isUntrustedHost(req: NextRequest): boolean {
+  const host = (req.headers.get("host") || "").trim().toLowerCase();
+  if (!host) return true; // a real browser always sends Host; absence is suspicious
+  if (EXTRA_ALLOWED_HOSTS.has(host)) return false;
+  return !TRUSTED_HOST_RE.test(host);
+}
+
+// Returns a 403 response if the request is cross-site OR carries an unexpected
+// Host (DNS rebinding), else null. Call at the top of every /api/* route handler
+// before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
+      { status: 403 },
+    );
+  }
+  if (isUntrustedHost(req)) {
+    return NextResponse.json(
+      { error: "untrusted host" },
       { status: 403 },
     );
   }
