@@ -80,6 +80,38 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenlessMode(unittest.TestCase):
+    """In tokenless loopback-only mode the Origin allowlist is the sole gate on the
+    browser-direct WS/SSE endpoints, so the permissive LAN/localhost default regex
+    must NOT be trusted there (a drive-by page on any 127.0.0.1/RFC1918 origin could
+    otherwise drive the keystroke-injecting terminal WebSocket)."""
+
+    def test_lan_origin_rejected_when_tokenless_and_default_regex(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "_ORIGIN_REGEX_IS_DEFAULT", True):
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:1234"))
+            self.assertFalse(config.origin_allowed("http://127.0.0.1:9999"))
+
+    def test_exact_frontend_origin_still_allowed_when_tokenless(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "_ORIGIN_REGEX_IS_DEFAULT", True):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+            self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+
+    def test_lan_origin_allowed_when_token_set(self):
+        # Network mode: VC_AUTH_TOKEN is the real boundary, so the LAN regex stays a
+        # convenience for legitimate same-network devices.
+        with mock.patch.object(config, "AUTH_TOKEN", "a-shared-secret"), \
+                mock.patch.object(config, "_ORIGIN_REGEX_IS_DEFAULT", True):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:1234"))
+
+    def test_explicit_operator_regex_honored_even_when_tokenless(self):
+        # An operator who explicitly set VC_ALLOWED_ORIGIN_REGEX opted in; honor it.
+        with mock.patch.object(config, "AUTH_TOKEN", ""), \
+                mock.patch.object(config, "_ORIGIN_REGEX_IS_DEFAULT", False):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:1234"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
