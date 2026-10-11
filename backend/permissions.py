@@ -9,10 +9,17 @@ from __future__ import annotations
 import os
 
 # Read-only / non-destructive tools: auto-approved silently.
+#
+# WebFetch/WebSearch are deliberately NOT here. They are outbound-network
+# channels to arbitrary, caller-chosen URLs, not read-only operations. If they
+# were auto-approved, a prompt injection reaching the agent (via any file or
+# page it ingests through the other auto-approved tools) could chain Read ->
+# WebFetch to exfiltrate secrets, or fetch internal/loopback/metadata URLs
+# (SSRF), all without the spoken yes/no that is this system's safety control.
+# They therefore classify as "risky" and route through the permission prompt.
 SAFE_TOOLS: frozenset[str] = frozenset({
     "Read", "Grep", "Glob", "LS",
     "TodoWrite", "NotebookRead",
-    "WebSearch", "WebFetch",
     "ToolSearch",  # loads tool schemas — pure metadata, runs nothing
 })
 
