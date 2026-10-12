@@ -212,6 +212,14 @@ async def require_auth(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
+    # DNS-rebinding defence (tokenless mode only). A browser same-origin GET sends
+    # no Origin header, so the allowlist above can't see it; pin the Host header to
+    # the loopback/private-LAN addresses the backend actually serves on, so an
+    # attacker domain rebound to 127.0.0.1 is rejected before it can read endpoints
+    # like /debug/recent or /debug/stream. When a token is configured it is the
+    # boundary (required even from loopback), so this is skipped.
+    if not config.AUTH_TOKEN and not config.host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="host not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
     if not ok:
@@ -225,6 +233,9 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     origin = ws.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         return False, 4403  # forbidden origin
+    # DNS-rebinding defence (tokenless mode only); see require_auth().
+    if not config.AUTH_TOKEN and not config.host_allowed(ws.headers.get("host")):
+        return False, 4403  # forbidden host
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
     return (True, 0) if ok else (False, 4401)  # unauthorized
