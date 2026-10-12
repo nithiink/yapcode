@@ -235,10 +235,27 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
-_origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+
+
+def _resolve_origin_regex() -> str | None:
+    """Pick the active Origin regex.
+
+    An explicit VC_ALLOWED_ORIGIN_REGEX always wins (empty string disables it).
+    Otherwise the any-port private-LAN regex is applied ONLY when a token is
+    configured: as the comment above says, it is a convenience for
+    token-authenticated LAN devices, not the security boundary. In tokenless
+    (loopback-only) mode there is no token, so leaving the wide any-port regex on
+    would make it the de-facto cross-origin boundary and let any other local
+    origin (e.g. a second dev server on another port) drive the backend. There we
+    fall back to the exact ALLOWED_ORIGINS list instead.
+    """
+    raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
+    if raw is not None:
+        return raw.strip() or None
+    return _DEFAULT_ORIGIN_REGEX if AUTH_TOKEN else None
+
+
+ALLOWED_ORIGIN_REGEX: str | None = _resolve_origin_regex()
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
@@ -253,3 +270,38 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+# Hosts the backend legitimately serves on in tokenless (loopback-only) mode:
+# loopback plus private-LAN addresses, on any port. Used to pin the HTTP Host
+# header so a request for an attacker-controlled domain that has been DNS-rebound
+# to 127.0.0.1 is rejected even when it carries no Origin header (a browser sends
+# no Origin on a same-origin GET). When a token is configured the token is the
+# boundary, so Host pinning is not applied (the deployment may sit behind an
+# arbitrary reverse-proxy host).
+_DEFAULT_HOST_REGEX = (
+    r"^("
+    r"localhost|127\.0\.0\.1|\[::1\]|::1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(:\d{1,5})?$"
+)
+_HOST_RE = re.compile(_DEFAULT_HOST_REGEX)
+
+# Exact host[:port] values derived from the configured frontend origins, so a
+# custom VC_ALLOWED_ORIGINS entry's host is also accepted as a Host header.
+_ALLOWED_HOSTS_EXACT = {re.sub(r"^https?://", "", o) for o in ALLOWED_ORIGINS}
+
+
+def host_allowed(host_header: str | None) -> bool:
+    """Whether the HTTP Host header targets an address the backend actually
+    serves on (loopback / private-LAN on any port, plus the configured frontend
+    hosts). An empty or otherwise-unrecognised Host is rejected — the standard
+    DNS-rebinding defence for a browser request that carries no Origin header."""
+    if not host_header:
+        return False
+    host = host_header.strip()
+    if host in _ALLOWED_HOSTS_EXACT:
+        return True
+    return bool(_HOST_RE.fullmatch(host))
