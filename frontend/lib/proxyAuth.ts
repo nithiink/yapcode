@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isTrustedHost } from "./trustedHost";
 
 // Forward the browser-presented shared-secret token to the backend.
 //
@@ -68,10 +69,12 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// Returns a 403 response if the request is cross-site OR its Host header is not
+// a name the server legitimately listens on (DNS-rebinding defense — see
+// lib/trustedHost.ts), else null. Call at the top of every /api/* route handler
+// before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
-  if (isCrossSiteRequest(req)) {
+  if (isCrossSiteRequest(req) || !isTrustedHost(req.headers.get("host"))) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
       { status: 403 },

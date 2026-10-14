@@ -495,6 +495,7 @@ The [first-run wizard](#first-run-setup-wizard) writes this file; `yapcode confi
 | --- | --- | --- |
 | `VC_ALLOWED_ORIGINS` | empty | Extra exact cross-origin browser origins (comma-separated). |
 | `VC_ALLOWED_ORIGIN_REGEX` | _(LAN regex)_ | Overrides the default private-LAN origin regex (localhost/127.0.0.1/::1 + 10.x/192.168.x/172.16–31.x); set empty to disable LAN origins. |
+| `VC_ALLOWED_HOSTS` | _(loopback + private-LAN)_ | Extra `Host` header values the Next `/api/*` proxy accepts (comma-separated), read frontend-side. The proxy trusts loopback and the private-LAN ranges by default and rejects any other Host as a DNS-rebinding defense; set this only for non-standard fronting (e.g. a tunnel hostname). |
 | `VC_SESSION_STORE` | `<repo>/.yapcode/tmux` | Session control-dir root (tmux sessions, `meta.json`, `events.jsonl`, …). |
 | `VC_COST_LOG_PATH` | `<repo>/cost-log.jsonl` | Append-only cost log. |
 | `VC_PRICING_JSON` | _(built-in rates)_ | JSON object overriding per-model list pricing, e.g. `{"opus":{"input":5,"output":25}}` (USD per 1M tokens, matched by model-id substring). The CLI backend has no dollar figure in its transcript (Max subscription), so the displayed "Claude $…" is reconstructed from per-message token usage × these rates; cache reads bill at 0.1× input, 5-min cache writes at 1.25×, 1-hour writes at 2×. |
