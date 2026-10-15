@@ -224,12 +224,19 @@ ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
 # Private-LAN origins (any port) are allowed by default so the phone/laptop can
 # reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# allowedDevOrigins. The token is still required there (see _access_ok), so this
+# regex is a convenience for legitimate same-network devices, not the security
+# boundary. Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+#
+# Loopback origins are deliberately NOT matched here: port-wildcarding localhost
+# would let a co-resident page on any *other* local port (a second dev server, a
+# local tool UI with reflected/stored content) drive this command-executing backend
+# directly at :8000 via CSRF in the default no-token mode — exactly what the Next
+# /api/* proxy refuses (see frontend/lib/proxyAuth.ts). Loopback is instead pinned
+# to the exact frontend origin(s) by ALLOWED_ORIGINS (localhost:3000 by default;
+# add others with VC_ALLOWED_ORIGINS), so the allowed port is not wildcarded.
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
-    r"localhost|127\.0\.0\.1|\[::1\]|"
     r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
     r"192\.168\.\d{1,3}\.\d{1,3}|"
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"

@@ -80,6 +80,36 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistPortPinning(unittest.TestCase):
+    """The browser-Origin gate must not wildcard the port for loopback: a
+    co-resident localhost page on another port must not be able to drive the
+    command-executing backend directly (CSRF on the backend-direct path in the
+    default no-token mode). Loopback is pinned to the exact frontend origin via
+    ALLOWED_ORIGINS; the regex only covers token-gated private-LAN devices."""
+
+    def test_frontend_loopback_origin_allowed(self):
+        for o in ("http://localhost:3000", "http://127.0.0.1:3000",
+                  "https://localhost:3000", "https://127.0.0.1:3000"):
+            self.assertTrue(config.origin_allowed(o), o)
+
+    def test_other_loopback_port_rejected(self):
+        # The crux of the finding: a different local port must NOT be trusted.
+        for o in ("http://localhost:9999", "http://127.0.0.1:8080",
+                  "http://localhost:3001", "http://[::1]:9999"):
+            self.assertFalse(config.origin_allowed(o), o)
+
+    def test_private_lan_any_port_still_allowed(self):
+        # Convenience for same-network devices; token-gated in network mode.
+        for o in ("http://192.168.1.5:3000", "http://10.0.0.2:8000",
+                  "http://172.16.3.4:5173"):
+            self.assertTrue(config.origin_allowed(o), o)
+
+    def test_remote_and_empty_origin_rejected(self):
+        for o in ("https://evil.example.com", "http://localhost.evil.com:3000",
+                  "", None):
+            self.assertFalse(config.origin_allowed(o), repr(o))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
