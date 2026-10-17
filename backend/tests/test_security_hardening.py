@@ -4,6 +4,8 @@
 - py/path-injection:   session ids / cwds are validated against an allowlist at
                        the sink (session control dir, transcript glob, project root).
 - py/full-ssrf:        the realtime-token mint URL is pinned to an allowed host.
+- dns-rebinding:        the Host header is validated against an allowlist so an
+                       Origin-less same-origin GET can't reach the loopback backend.
 
     python -m unittest discover -s backend/tests
 """
@@ -96,6 +98,56 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class HostHeaderAllowlist(unittest.TestCase):
+    """DNS-rebinding defense: the Host header is validated so an Origin-less
+    same-origin GET from a rebound attacker page can't reach a loopback-trusted
+    (tokenless) backend. See backend/main.py require_auth / _ws_access_ok."""
+
+    def _reload_config(self, env):
+        import importlib
+        with mock.patch.dict(os.environ, env, clear=False):
+            importlib.reload(config)
+            return config
+
+    def tearDown(self):
+        import importlib
+        for var in ("VC_ALLOWED_HOSTS", "VC_ALLOWED_HOST_REGEX"):
+            os.environ.pop(var, None)
+        importlib.reload(config)
+
+    def test_loopback_and_lan_hosts_allowed(self):
+        for host in ["localhost", "localhost:8000", "127.0.0.1:8000",
+                     "[::1]:8000", "192.168.1.5:3000", "10.0.0.2:8000",
+                     "172.16.3.4:8000"]:
+            self.assertTrue(config.host_allowed(host), host)
+
+    def test_rebinding_attacker_host_rejected(self):
+        for host in ["evil.com", "evil.com:8000", "attacker.example:8000",
+                     "127.0.0.1.evil.com:8000"]:
+            self.assertFalse(config.host_allowed(host), host)
+
+    def test_missing_host_not_blocked(self):
+        # HTTP/1.1 clients always send Host and the rebinding vector always
+        # carries one; a missing Host is a non-browser edge client.
+        self.assertTrue(config.host_allowed(None))
+        self.assertTrue(config.host_allowed(""))
+
+    def test_extra_hosts_via_env(self):
+        cfg = self._reload_config({"VC_ALLOWED_HOSTS": "my.tunnel.example"})
+        try:
+            self.assertTrue(cfg.host_allowed("my.tunnel.example:8000"))
+            self.assertFalse(cfg.host_allowed("evil.com:8000"))
+        finally:
+            self.tearDown()
+
+    def test_check_disabled_when_regex_empty_and_no_hosts(self):
+        cfg = self._reload_config({"VC_ALLOWED_HOST_REGEX": ""})
+        try:
+            self.assertTrue(cfg.host_allowed("evil.com:8000"))
+        finally:
+            self.tearDown()
 
 
 if __name__ == "__main__":
