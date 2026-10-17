@@ -253,3 +253,72 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+# --- Host-header allowlist (DNS-rebinding defense) --------------------------
+#
+# The Origin allowlist above cannot stop a DNS-rebinding attack: browsers OMIT
+# the Origin header on same-origin GET/HEAD requests, so an attacker page that
+# has rebound its own hostname to 127.0.0.1 can issue Origin-less GETs that reach
+# a loopback-trusted (tokenless) backend and read its responses same-origin. The
+# canonical defense is to validate the Host header against the hostnames the
+# backend is actually served under — a rebinding request carries the attacker's
+# hostname (e.g. "evil.com"), which never matches.
+#
+# Loopback and private-LAN hosts are allowed by default (mirroring the host part
+# of ALLOWED_ORIGIN_REGEX, so legitimate localhost + LAN access keeps working).
+# Extend with VC_ALLOWED_HOSTS (comma-separated exact hostnames, port optional)
+# for a custom domain/tunnel, or override VC_ALLOWED_HOST_REGEX (set it empty to
+# disable the check entirely).
+_DEFAULT_HOST_REGEX = (
+    r"^("
+    r"localhost|127\.0\.0\.1|::1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")$"
+)
+_host_regex_raw = os.getenv("VC_ALLOWED_HOST_REGEX")
+ALLOWED_HOST_REGEX: str | None = (
+    _DEFAULT_HOST_REGEX if _host_regex_raw is None else (_host_regex_raw.strip() or None)
+)
+_HOST_RE = re.compile(ALLOWED_HOST_REGEX) if ALLOWED_HOST_REGEX else None
+
+
+def _host_only(host_header: str) -> str:
+    """Extract the hostname from a Host header value, dropping any port and
+    IPv6 brackets ("[::1]:8000" -> "::1", "localhost:8000" -> "localhost")."""
+    h = host_header.strip()
+    if h.startswith("["):  # [IPv6] or [IPv6]:port
+        end = h.find("]")
+        return h[1:end] if end != -1 else h
+    # hostname or IPv4, optionally with a single ":port" suffix. A bare IPv6
+    # literal (multiple colons, no brackets) is left as-is.
+    if h.count(":") == 1:
+        return h.rsplit(":", 1)[0]
+    return h
+
+
+ALLOWED_HOSTS: set[str] = {
+    _host_only(h).lower()
+    for h in (os.getenv("VC_ALLOWED_HOSTS") or "").split(",")
+    if h.strip()
+}
+
+
+def host_allowed(host_header: str | None) -> bool:
+    """Whether the request's Host header names a hostname the backend is served
+    under. Defends against DNS rebinding, which the Origin allowlist can't cover
+    (browsers omit Origin on same-origin GETs). Returns True when the check has
+    been explicitly disabled (empty regex and no VC_ALLOWED_HOSTS)."""
+    if _HOST_RE is None and not ALLOWED_HOSTS:
+        return True  # check disabled by configuration
+    if not host_header:
+        # HTTP/1.1 clients always send Host, and a DNS-rebinding attack always
+        # carries one; a missing Host is a non-browser edge client, not the
+        # rebinding vector, so don't break it.
+        return True
+    host = _host_only(host_header).lower()
+    if host in ALLOWED_HOSTS:
+        return True
+    return bool(_HOST_RE and _HOST_RE.fullmatch(host))
