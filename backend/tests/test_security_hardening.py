@@ -80,6 +80,40 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenGating(unittest.TestCase):
+    """The broad private-LAN/any-port Origin regex must only be honored when a
+    token is also required (network mode). In tokenless loopback mode — the
+    zero-config default — the Origin check is the sole CSRF boundary, so only the
+    exact trusted frontend origins may pass."""
+
+    def test_exact_frontend_origin_always_allowed(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertTrue(config.origin_allowed("http://localhost:3000"))
+                self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+
+    def test_tokenless_rejects_other_localhost_port_and_lan(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            # Another localhost port (e.g. a malicious local dev server) and any
+            # LAN IP must NOT be trusted when no token gates access.
+            self.assertFalse(config.origin_allowed("http://localhost:5173"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:8080"))
+            self.assertFalse(config.origin_allowed("http://10.0.0.5"))
+
+    def test_token_mode_allows_lan_regex(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            # With a token required, the broad regex is a convenience for
+            # legitimate same-network devices.
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:8080"))
+            self.assertTrue(config.origin_allowed("http://localhost:5173"))
+
+    def test_public_internet_origin_always_rejected(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed("https://evil.example.com"))
+                self.assertFalse(config.origin_allowed(None))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
