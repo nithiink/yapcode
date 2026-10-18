@@ -226,6 +226,9 @@ ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 # reach the backend over the LAN in network mode — mirrors next.config.mjs's
 # allowedDevOrigins. The token is still required there, so this regex is a
 # convenience for legitimate same-network devices, not the security boundary.
+# It is therefore only honored when a token is configured (see origin_allowed);
+# in tokenless loopback mode the Origin check IS the boundary and this broad
+# regex is ignored.
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -250,6 +253,15 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN / any-port regex below is only safe when a token is
+    # ALSO required (network mode) — there the token, not the Origin, is the
+    # security boundary. In the tokenless default (loopback) mode the Origin check
+    # is the ONLY CSRF / drive-by boundary, so the broad regex must NOT apply:
+    # otherwise a page served on any other localhost port, or on any LAN IP, would
+    # be able to drive the command-executing backend cross-origin. Restrict to the
+    # exact trusted frontend origins (ALLOWED_ORIGINS, matched above) in that mode.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))

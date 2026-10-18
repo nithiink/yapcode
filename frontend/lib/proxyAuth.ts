@@ -46,7 +46,44 @@ export function forwardAuth(
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
 // ambient credentials — so they pass here and are left to the backend's own
 // token/loopback auth.
+// Hosts the app is legitimately served on: loopback and the private-LAN ranges
+// (mirrors next.config.mjs's `allowedDevOrigins` and the backend's
+// VC_ALLOWED_ORIGIN_REGEX). Used to defeat DNS rebinding — see isCrossSiteRequest.
+// Extra hosts can be allowed via VC_ALLOWED_HOSTS (comma-separated, host[:port]).
+function isAllowedHost(hostHeader: string | null): boolean {
+  if (!hostHeader) return false;
+  let hostname: string;
+  try {
+    // Parse via URL so the port and IPv6 brackets are handled robustly.
+    hostname = new URL(`http://${hostHeader}`).hostname
+      .replace(/^\[|\]$/g, "")
+      .toLowerCase();
+  } catch {
+    return false; // unparseable Host -> treat as hostile
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
+    return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  const extra = (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  // Accept either the bare hostname or the full host[:port] the operator listed.
+  return extra.includes(hostname) || extra.includes(hostHeader.trim().toLowerCase());
+}
+
 export function isCrossSiteRequest(req: NextRequest): boolean {
+  // DNS-rebinding defense. `Sec-Fetch-Site` is derived from the URL origin, not
+  // the resolved IP, so a page served from http://attacker.example:3000 whose DNS
+  // is rebound to 127.0.0.1 fetches its own origin and the browser truthfully
+  // labels it `same-origin` — bypassing the check below. But the legitimate app
+  // is only ever served on loopback or a private-LAN address, so a request whose
+  // Host header is any other (public) hostname did not reach us legitimately.
+  // Reject it regardless of what the browser labels the request.
+  if (!isAllowedHost(req.headers.get("host"))) return true;
+
   const site = req.headers.get("sec-fetch-site");
   if (site) {
     // The legitimate frontend ALWAYS calls these routes same-origin (a relative
