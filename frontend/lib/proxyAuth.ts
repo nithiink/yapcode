@@ -68,10 +68,48 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
+// --- Anti-DNS-rebinding Host allowlist --------------------------------------
+//
+// The Sec-Fetch-Site check above is defeated by DNS rebinding: a public page
+// (evil.com) rebound to 127.0.0.1 is legitimately "same-origin" with the local
+// server from the browser's point of view, so `Sec-Fetch-Site: same-origin`
+// passes and the command-executing proxy would forward the request. The rebound
+// request, however, still carries the *public* hostname in its Host header
+// (Host: evil.com:3000) — DNS rebinding changes resolution, not the URL's host.
+// So we reject any Host that is not a loopback name, a private-range (RFC1918)
+// IP literal (mirrors next.config.mjs allowedDevOrigins / the backend LAN origin
+// regex, for legitimate same-network device access by IP), or an operator-
+// configured host. Set VC_ALLOWED_HOSTS (comma-separated host[:port]) to permit
+// a custom public hostname (e.g. a reverse-proxied deployment).
+const _ALLOWED_HOST_EXTRA = new Set(
+  (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isAllowedHost(host: string | null): boolean {
+  if (!host) return false; // every browser request carries Host; absence is suspect
+  const h = host.toLowerCase();
+  if (_ALLOWED_HOST_EXTRA.has(h)) return true;
+  // Strip the port, then IPv6 brackets, to get the bare hostname.
+  const hostname = h.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+    return true;
+  }
+  return (
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
 // Returns a 403 response if the request is cross-site, else null. Call at the
 // top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
-  if (isCrossSiteRequest(req)) {
+  // Host allowlist first: it is the anti-rebinding control and does not depend
+  // on Sec-Fetch-Site, which rebinding can make read "same-origin".
+  if (!isAllowedHost(req.headers.get("host")) || isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
       { status: 403 },

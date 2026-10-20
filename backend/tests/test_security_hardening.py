@@ -4,9 +4,13 @@
 - py/path-injection:   session ids / cwds are validated against an allowlist at
                        the sink (session control dir, transcript glob, project root).
 - py/full-ssrf:        the realtime-token mint URL is pinned to an allowed host.
+- origin-allowlist:    the broad private-LAN Origin regex is applied only in
+                       token (network) mode; token-less loopback mode trusts
+                       only the exact configured frontend origins.
 
     python -m unittest discover -s backend/tests
 """
+import importlib
 import os
 import sys
 import tempfile
@@ -96,6 +100,53 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class OriginAllowlistTokenGating(unittest.TestCase):
+    """The broad private-LAN origin regex widens the trust boundary only when a
+    token guards access. Token-less loopback mode must trust ONLY the exact
+    frontend origins, or any other localhost port / LAN device page the user has
+    open could drive the command-executing backend cross-origin."""
+
+    def _reload(self, env):
+        # env keys not present are removed so defaults apply. patch.dict restores
+        # the full environment on exit; a final reload in tearDown restores config.
+        with mock.patch.dict(os.environ, env, clear=False):
+            for k in ("VC_AUTH_TOKEN", "VC_ALLOWED_ORIGIN_REGEX"):
+                if k not in env:
+                    os.environ.pop(k, None)
+            return importlib.reload(config)
+
+    def tearDown(self):
+        os.environ.pop("VC_AUTH_TOKEN", None)
+        os.environ.pop("VC_ALLOWED_ORIGIN_REGEX", None)
+        importlib.reload(config)
+
+    def test_tokenless_mode_trusts_only_exact_frontend_origins(self):
+        cfg = self._reload({})  # no VC_AUTH_TOKEN -> token-less loopback mode
+        self.assertIsNone(cfg.ALLOWED_ORIGIN_REGEX)
+        self.assertTrue(cfg.origin_allowed("http://localhost:3000"))
+        # Other localhost ports and LAN hosts are no longer trusted.
+        self.assertFalse(cfg.origin_allowed("http://localhost:5173"))
+        self.assertFalse(cfg.origin_allowed("http://192.168.1.50"))
+
+    def test_token_mode_allows_lan_convenience_regex(self):
+        cfg = self._reload({"VC_AUTH_TOKEN": "secret"})
+        self.assertIsNotNone(cfg.ALLOWED_ORIGIN_REGEX)
+        self.assertTrue(cfg.origin_allowed("http://192.168.1.50"))
+        self.assertTrue(cfg.origin_allowed("http://localhost:5173"))
+        # A plain public site is still rejected in either mode.
+        self.assertFalse(cfg.origin_allowed("http://evil.com"))
+
+    def test_explicit_regex_override_still_honored(self):
+        cfg = self._reload({"VC_ALLOWED_ORIGIN_REGEX": r"^https://app\.example\.com$"})
+        self.assertTrue(cfg.origin_allowed("https://app.example.com"))
+        self.assertFalse(cfg.origin_allowed("http://localhost:5173"))
+
+    def test_explicit_empty_regex_disables(self):
+        cfg = self._reload({"VC_AUTH_TOKEN": "secret", "VC_ALLOWED_ORIGIN_REGEX": ""})
+        self.assertIsNone(cfg.ALLOWED_ORIGIN_REGEX)
+        self.assertFalse(cfg.origin_allowed("http://192.168.1.50"))
 
 
 if __name__ == "__main__":
