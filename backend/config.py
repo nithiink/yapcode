@@ -222,11 +222,17 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# Private-LAN origins (any port) are allowed so the phone/laptop can reach the
+# backend over the LAN in network mode — mirrors next.config.mjs's
+# allowedDevOrigins. In network mode the token is still required, so this regex
+# is a convenience for legitimate same-network devices, not the security
+# boundary. In token-less loopback mode, however, there is no token and the
+# Origin allowlist IS the boundary: a wildcard-port + whole-RFC1918 regex would
+# then trust any other localhost port / LAN device page the user has open and
+# let it drive the command-executing backend cross-origin. So the broad regex is
+# applied ONLY when a token is configured; token-less mode trusts only the exact
+# frontend origins in ALLOWED_ORIGINS. Override either way with
+# VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -236,9 +242,15 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+if _origin_regex_raw is not None:
+    # Operator-provided value wins (empty string disables the regex entirely).
+    ALLOWED_ORIGIN_REGEX: str | None = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    # Network/token mode: the token is the boundary; allow the LAN convenience regex.
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    # Token-less loopback mode: trust only the exact frontend origins.
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
