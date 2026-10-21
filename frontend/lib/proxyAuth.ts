@@ -68,9 +68,54 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- DNS-rebinding defense --------------------------------------------------
+//
+// isCrossSiteRequest() leans on Sec-Fetch-Site / Origin, both of which assume
+// the attacker's page lives at a DIFFERENT origin than ours. DNS rebinding
+// breaks that assumption: a victim visits http://attacker.com:3000, the
+// attacker then rebinds attacker.com to 127.0.0.1, and page JS issues a
+// *relative* fetch("/api/...") that the browser now treats as same-origin
+// (attacker.com:3000). Sec-Fetch-Site is same-origin and the Origin-host==Host
+// fallback also matches, so the request sails into the command-executing proxy.
+//
+// The reliable defense is a Host-header allowlist: the browser sets Host to the
+// hostname in the URL bar, which for a rebinding attack is the attacker's DNS
+// name — never a loopback/LAN literal. yapcode is only ever served at loopback
+// or a private-LAN IP (this mirrors the backend's _DEFAULT_ORIGIN_REGEX and
+// next.config.mjs's allowedDevOrigins, and phone-url.mjs hands out exactly those
+// URLs), so we require the request Host to be one of those. A custom hostname
+// can be allowed by listing it (host[:port], comma-separated) in VC_ALLOWED_HOSTS.
+// An IPv6 literal in a Host header is always bracketed ([::1] / [::1]:3000 per
+// RFC 7230), so we match the bracketed loopback form only.
+const TRUSTED_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/;
+
+export function isTrustedHost(req: NextRequest): boolean {
+  const host = (req.headers.get("host") || "").trim().toLowerCase();
+  if (!host) return false; // no Host header -> can't vouch for the target; refuse
+  const extra = (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  if (extra.includes(host)) return true;
+  // Strip the port before matching: "127.0.0.1:3000" -> "127.0.0.1",
+  // "[::1]:3000" -> "[::1]". A bare IPv6 literal keeps its brackets.
+  const hostname = host.replace(/:\d+$/, "");
+  return TRUSTED_HOST_RE.test(hostname);
+}
+
+// Returns a 403 response if the request is cross-site OR carries an untrusted
+// Host header (DNS-rebinding guard), else null. Call at the top of every /api/*
+// route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  // Host allowlist FIRST: a rebound attacker origin looks same-origin to
+  // isCrossSiteRequest(), so this is the check that actually stops rebinding.
+  if (!isTrustedHost(req)) {
+    return NextResponse.json(
+      { error: "untrusted Host header" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },

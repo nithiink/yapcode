@@ -621,6 +621,11 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     # call, but the moment it returns something interesting (not 'working' / not
     # 'idle') we want to SEE it. Same for the result side below.
     sid = req.arguments.get("session_id")
+    # req.name is free-form request-body input that flows into the plain-text
+    # application log below, which performs no neutralization — strip CR/LF so a
+    # crafted name can't forge extra log lines (CWE-117). The event_log path is
+    # already safe (json.dumps escapes control characters).
+    log_name = req.name.replace("\r", "\\r").replace("\n", "\\n")
     # poll_session and list_sessions are UI heartbeats (every ~1.5-2s per the
     # frontend's poll + session-list refresh). They drown out real communication,
     # so keep them out of the INFO log and the debug stream unless VC_DEBUG_POLLS=1.
@@ -628,7 +633,7 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
     is_quiet = req.name in ("poll_session", "list_sessions")
     if not is_quiet or DEBUG_POLLS:
         if not is_quiet:
-            log.info("tool call: %s args=%s", req.name, req.arguments)
+            log.info("tool call: %s args=%s", log_name, req.arguments)
         event_log.log_event("voice", "backend", "tool_call", req.name,
                             session=sid, detail={"name": req.name, "arguments": req.arguments})
     try:
@@ -649,7 +654,7 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
                 event_log.log_event("backend", "voice", "tool_result", f"{req.name} → ok",
                                     session=sid, detail=result)
         else:
-            log.info("tool done: %s in %.2fs", req.name, elapsed)
+            log.info("tool done: %s in %.2fs", log_name, elapsed)
             event_log.log_event("backend", "voice", "tool_result",
                                 f"{req.name} → {(result or {}).get('status', 'ok')}",
                                 session=sid, detail=result)
@@ -658,7 +663,7 @@ async def execute_tool(req: ToolCallRequest) -> dict[str, Any]:
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        log.info("tool failed: %s in %.2fs (%s)", req.name, time.monotonic() - start, exc)
+        log.info("tool failed: %s in %.2fs (%s)", log_name, time.monotonic() - start, exc)
         event_log.log_event("backend", "voice", "error", f"{req.name}: {exc}", session=sid)
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
