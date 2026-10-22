@@ -68,9 +68,42 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
+// --- DNS-rebinding defense (Host allowlist) ---------------------------------
+//
+// Sec-Fetch-Site / Origin are browser-trust signals that cannot distinguish a
+// rebound local IP from the real one: after an attacker rebinds their own domain
+// (evil.example) to 127.0.0.1, the already-loaded page's fetch to this proxy is
+// genuinely same-origin, so the browser sends `Sec-Fetch-Site: same-origin` and
+// isCrossSiteRequest() passes. The one signal the attack cannot fake is the Host
+// header — the browser still sends the attacker's own authority
+// (evil.example:PORT), never the loopback/LAN authority the real app is served
+// on. So we require Host to be a loopback name or a private-LAN IP literal — the
+// same hosts the app is legitimately reached on (localhost / 127.0.0.1 / [::1],
+// and RFC1918 ranges for network/phone mode). Mirrors the backend's
+// config._DEFAULT_ORIGIN_REGEX. If your LAN IP is outside the private ranges,
+// add exact host[:port] entries via VC_ALLOWED_HOSTS (comma-separated).
+const ALLOWED_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?$/;
+
+export function isAllowedHost(req: NextRequest): boolean {
+  const host = req.headers.get("host");
+  if (!host) return false; // HTTP/1.1 requires Host; absent -> reject
+  if (ALLOWED_HOST_RE.test(host)) return true;
+  const extra = (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+  return extra.includes(host);
+}
+
+// Returns a 403 response if the request must be refused, else null. Call at the
 // top of every /api/* route handler before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  // DNS-rebinding defense: reject any Host that is not a loopback/LAN authority,
+  // regardless of Sec-Fetch-Site (a rebound same-origin request still passes that).
+  if (!isAllowedHost(req)) {
+    return NextResponse.json({ error: "host not allowed" }, { status: 403 });
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },

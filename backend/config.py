@@ -250,6 +250,15 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad any-port / private-LAN regex is a convenience for same-network
+    # devices in NETWORK mode, where a token is independently required. In the
+    # default tokenless loopback mode the Origin allowlist is the ONLY barrier
+    # against a side-effecting cross-origin "simple" request from another
+    # loopback-trusted browser origin (a second dev server, a local tool with
+    # reflected XSS, a same-Wi-Fi device), so the regex must NOT apply there —
+    # only the exact ALLOWED_ORIGINS above do. Gate it on a token being set.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))

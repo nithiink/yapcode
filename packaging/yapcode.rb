@@ -22,8 +22,11 @@ class Yapcode < Formula
     # Python backend virtualenv (built once, here, not at runtime)
     python = Formula["python@3.12"].opt_bin/"python3.12"
     system python, "-m", "venv", libexec/"backend/.venv"
+    # Install from the hash-pinned lock (not requirements.txt): --require-hashes
+    # verifies every artifact's sha256 and refuses any transitive dep that isn't
+    # pinned, closing the unpinned-transitive supply-chain gap (CWE-494).
     system libexec/"backend/.venv/bin/pip", "install", "--no-input",
-           "-r", libexec/"backend/requirements.txt"
+           "--require-hashes", "-r", libexec/"backend/requirements.lock"
 
     # Frontend production build (so the launcher runs `next start`, no compile-on-launch)
     cd libexec/"frontend" do

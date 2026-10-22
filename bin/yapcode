@@ -314,7 +314,10 @@ bootstrap() {
     fi
     err "Setting up the Python backend (first run)…"
     "$py" -m venv "$APP_ROOT/backend/.venv"
-    "$APP_ROOT/backend/.venv/bin/pip" install -q -r "$APP_ROOT/backend/requirements.txt"
+    # Install from the hash-pinned lock (not requirements.txt): --require-hashes
+    # makes pip verify every artifact's sha256 and refuse any transitive dep that
+    # isn't pinned, closing the unpinned-transitive supply-chain gap (CWE-494).
+    "$APP_ROOT/backend/.venv/bin/pip" install -q --require-hashes -r "$APP_ROOT/backend/requirements.lock"
   fi
   if [ ! -d "$APP_ROOT/frontend/node_modules" ]; then
     err "Installing frontend dependencies (first run)…"
