@@ -4,9 +4,13 @@
 - py/path-injection:   session ids / cwds are validated against an allowlist at
                        the sink (session control dir, transcript glob, project root).
 - py/full-ssrf:        the realtime-token mint URL is pinned to an allowed host.
+- dns-rebinding:        the HTTP Host header is validated against a local/LAN
+                        allowlist so a rebound browser request can't be laundered
+                        into a trusted loopback call (tokenless mode).
 
     python -m unittest discover -s backend/tests
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -96,6 +100,53 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class HostAllowlist(unittest.TestCase):
+    def test_local_and_lan_hosts_allowed(self):
+        for h in ["localhost:3000", "127.0.0.1:8000", "localhost",
+                  "[::1]:8000", "192.168.1.5:3000", "10.0.0.2:8000",
+                  "172.16.0.9:3000"]:
+            self.assertTrue(config.host_allowed(h), h)
+
+    def test_foreign_or_missing_host_rejected(self):
+        for h in ["evil.com:3000", "evil.com", "attacker.example:8000",
+                  "169.254.169.254", "8.8.8.8:8000", "", None]:
+            self.assertFalse(config.host_allowed(h), h)
+
+
+class _FakeReq:
+    """Minimal stand-in for a Starlette Request for require_auth."""
+    def __init__(self, headers, client_host="127.0.0.1"):
+        self.headers = headers              # lowercase-keyed, dict .get is enough
+        self.query_params = {}
+        self.client = type("_Client", (), {"host": client_host})()
+
+
+class RequireAuthHostValidation(unittest.TestCase):
+    """DNS-rebinding regression: in tokenless (loopback-trust) mode, require_auth
+    must reject a request whose HTTP Host is foreign, even though it arrives from
+    a loopback peer with no Origin (exactly what a rebound browser request looks
+    like)."""
+
+    def setUp(self):
+        if config.AUTH_TOKEN:
+            self.skipTest("Host gate only applies in tokenless mode")
+
+    def test_rebound_foreign_host_rejected(self):
+        req = _FakeReq({"host": "evil.com:8000"})  # no Origin, loopback peer
+        with self.assertRaises(main.HTTPException) as ctx:
+            asyncio.run(main.require_auth(req))
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_local_host_allowed(self):
+        req = _FakeReq({"host": "127.0.0.1:8000"})
+        self.assertIsNone(asyncio.run(main.require_auth(req)))
+
+    def test_missing_host_rejected(self):
+        req = _FakeReq({})
+        with self.assertRaises(main.HTTPException):
+            asyncio.run(main.require_auth(req))
 
 
 if __name__ == "__main__":

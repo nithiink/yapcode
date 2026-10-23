@@ -253,3 +253,21 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def host_allowed(host: str | None) -> bool:
+    """Whether an HTTP Host header may be served — the anti-DNS-rebinding guard.
+
+    The Origin / Sec-Fetch-Site CSRF checks cannot stop DNS rebinding: after a
+    rebind the attacker's page is GENUINELY same-origin with the backend, so those
+    signals look legitimate (nothing is forged). The one header that still betrays
+    the attack is Host — it keeps the attacker's name (e.g. `evil.com:8000`) even
+    though the TCP connection terminates on loopback and `request.client.host`
+    therefore looks local. Rejecting a non-local/LAN Host closes that gap.
+
+    Reuses the Origin allowlist so it honors the same defaults (localhost + the
+    private-LAN ranges) and the same VC_ALLOWED_ORIGINS / VC_ALLOWED_ORIGIN_REGEX
+    overrides. An empty/missing Host is rejected (HTTP/1.1 always sends one)."""
+    if not host:
+        return False
+    return origin_allowed("http://" + host) or origin_allowed("https://" + host)
