@@ -68,9 +68,51 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- Host-header allowlist (anti-DNS-rebinding) -----------------------------
+//
+// Sec-Fetch-Site / Origin cannot stop DNS rebinding: after a rebind the
+// attacker's page is GENUINELY same-origin with our app, so the browser
+// legitimately reports Sec-Fetch-Site: same-origin (nothing is forged) and
+// isCrossSiteRequest() passes it. The one signal that still betrays the attack
+// is the Host header — it keeps the attacker's name (e.g. `evil.com:3000`) even
+// though the connection lands on localhost. We only ever serve the app at
+// localhost / a private-LAN address (mirrors next.config.mjs allowedDevOrigins),
+// so any other Host is hostile. Extend via VC_ALLOWED_ORIGINS (comma-separated,
+// shared with the backend) for networks outside the private ranges.
+const DEFAULT_HOST_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d{1,5})?$/;
+
+function extraAllowedHosts(): Set<string> {
+  const out = new Set<string>();
+  for (const entry of (process.env.VC_ALLOWED_ORIGINS || "").split(",")) {
+    const v = entry.trim();
+    if (!v) continue;
+    try {
+      out.add(new URL(v).host); // "host[:port]" from a full origin
+    } catch {
+      out.add(v); // already a bare host[:port]
+    }
+  }
+  return out;
+}
+
+export function isAllowedHost(req: NextRequest): boolean {
+  const host = req.headers.get("host");
+  if (!host) return false; // HTTP/1.1 always sends Host; absence is hostile
+  if (DEFAULT_HOST_RE.test(host)) return true;
+  return extraAllowedHosts().has(host);
+}
+
+// Returns a 403 response if the request is cross-site or targets an
+// unrecognized Host, else null. Call at the top of every /api/* route handler
+// before doing any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  if (!isAllowedHost(req)) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },

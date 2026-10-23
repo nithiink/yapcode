@@ -212,6 +212,14 @@ async def require_auth(request: Request) -> None:
     origin = request.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
+    # Anti-DNS-rebinding: when access falls back to trusting the loopback peer
+    # (tokenless mode), also require the HTTP Host to be a local/LAN host. A
+    # rebound browser request is genuinely same-origin (so Origin/Sec-Fetch-Site
+    # pass) and lands on loopback, but still carries the attacker's Host — which
+    # request.client.host can't reveal. In token mode the token is the boundary
+    # and a rebinding page can't supply it, so Host is not relied upon there.
+    if not config.AUTH_TOKEN and not config.host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="host not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
     if not ok:
@@ -225,6 +233,11 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     origin = ws.headers.get("origin")
     if origin and not config.origin_allowed(origin):
         return False, 4403  # forbidden origin
+    # Anti-DNS-rebinding, mirroring require_auth: in tokenless (loopback-trust)
+    # mode, reject a non-local/LAN Host so a rebound browser WS handshake can't be
+    # laundered into a trusted loopback connection.
+    if not config.AUTH_TOKEN and not config.host_allowed(ws.headers.get("host")):
+        return False, 4403  # forbidden host
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
     return (True, 0) if ok else (False, 4401)  # unauthorized
