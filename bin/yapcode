@@ -314,7 +314,10 @@ bootstrap() {
     fi
     err "Setting up the Python backend (first run)…"
     "$py" -m venv "$APP_ROOT/backend/.venv"
-    "$APP_ROOT/backend/.venv/bin/pip" install -q -r "$APP_ROOT/backend/requirements.txt"
+    # Install from the fully hash-pinned lock (requirements.txt pins only the
+    # direct deps and has no hashes); --require-hashes verifies every package,
+    # including the whole transitive tree, against the lock.
+    "$APP_ROOT/backend/.venv/bin/pip" install -q --require-hashes -r "$APP_ROOT/backend/requirements.lock"
   fi
   if [ ! -d "$APP_ROOT/frontend/node_modules" ]; then
     err "Installing frontend dependencies (first run)…"
