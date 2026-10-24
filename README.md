@@ -218,7 +218,7 @@ Use this if you want full control of each piece (and for contributing — see
 # Backend
 cd backend
 python3 -m venv .venv                       # MUST be Python 3.12+ (see Troubleshooting)
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --require-hashes -r requirements.lock   # hash-verified transitive deps
 cp .env.example .env                         # then edit: at minimum a voice provider key
                                              #   and ALLOWED_PROJECT_ROOTS
 
