@@ -46,7 +46,42 @@ export function forwardAuth(
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
 // ambient credentials — so they pass here and are left to the backend's own
 // token/loopback auth.
+//
+// DNS-rebinding defense: `Sec-Fetch-Site` alone is NOT enough. An attacker page
+// served from a hostname they control (e.g. `attacker.example`, low-TTL DNS
+// rebound to 127.0.0.1) and fetching its own origin is GENUINELY same-origin, so
+// the Sec-Fetch-Site check passes while the request still reaches the loopback
+// backend. We therefore also require the Host header to name a host we may
+// legitimately be reached at. Legitimate access is always via `localhost` / a
+// loopback literal (default mode) or a private-LAN IP literal (network mode) —
+// none of which an attacker can serve their page from — so a foreign rebinding
+// hostname never matches. Extend with VC_ALLOWED_HOSTS (comma-separated
+// host[:port] or hostnames) for a custom hostname / reverse proxy.
+const _HOST_ALLOW_RE =
+  /^(localhost|127\.0\.0\.1|\[::1\]|::1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/;
+
+export function hostAllowed(host: string | null): boolean {
+  // No Host header (rare non-browser client) is not a rebinding vector — a
+  // rebind requires a foreign hostname in Host — so leave it to backend auth.
+  if (!host) return true;
+  const value = host.trim();
+  const extra = (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+  if (extra.includes(value)) return true;
+  // Strip an optional :port (and handle a bracketed IPv6 literal like [::1]:3000).
+  const m = value.match(/^(\[[^\]]+\]|[^:]+)(?::\d+)?$/);
+  const hostname = m ? m[1] : value;
+  if (extra.includes(hostname)) return true;
+  return _HOST_ALLOW_RE.test(hostname);
+}
+
 export function isCrossSiteRequest(req: NextRequest): boolean {
+  // Host allowlist first — defeats DNS rebinding, which yields a genuine
+  // same-origin Sec-Fetch-Site label (so the check below would pass) while the
+  // Host header still carries the attacker-controlled hostname.
+  if (!hostAllowed(req.headers.get("host"))) return true;
   const site = req.headers.get("sec-fetch-site");
   if (site) {
     // The legitimate frontend ALWAYS calls these routes same-origin (a relative

@@ -80,6 +80,37 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlist(unittest.TestCase):
+    """py/csrf: the broad private-LAN/localhost-any-port Origin regex must not be
+    the sole CSRF guard in tokenless (loopback-trust) mode — only the exact
+    frontend origins are trusted there; the regex applies only once a token is
+    configured and required from every caller."""
+
+    def test_exact_frontend_origin_always_allowed(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertTrue(config.origin_allowed("http://localhost:3000"))
+                self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+
+    def test_broad_lan_origin_rejected_when_tokenless(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            # another localhost port / a LAN device — would have passed the regex
+            self.assertFalse(config.origin_allowed("http://localhost:5173"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:5173"))
+            self.assertFalse(config.origin_allowed("http://10.0.0.9:8080"))
+
+    def test_broad_lan_origin_allowed_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:5173"))
+            self.assertTrue(config.origin_allowed("http://localhost:5173"))
+
+    def test_foreign_origin_always_rejected(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed("https://evil.example.com"))
+                self.assertFalse(config.origin_allowed(None))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
