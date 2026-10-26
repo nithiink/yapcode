@@ -222,11 +222,22 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# Private-LAN origins (any port) let the phone/laptop reach the backend over the
+# LAN in network mode — mirrors next.config.mjs's allowedDevOrigins. This broad
+# regex is applied ONLY when a VC_AUTH_TOKEN is configured: there the token is the
+# real security boundary and the regex is just a convenience for legitimate
+# same-network devices.
+#
+# In tokenless (loopback-only) mode NO token is required, so the Origin allowlist
+# is the ONLY thing standing between a cross-origin browser page and this
+# command-executing backend — and the live-terminal WebSocket is browser-direct,
+# so the Next proxy's CSRF guard never sees it. Widening the allowlist to every
+# localhost port / LAN host there would let a page from any other local origin (or
+# a lured LAN page hitting the victim's own loopback) read session handles and
+# open the terminal WS to inject keystrokes into the live Claude TUI. So tokenless
+# mode falls back to the exact trusted frontend origins in ALLOWED_ORIGINS only.
+#
+# Override either way with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -236,9 +247,16 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+if _origin_regex_raw is not None:
+    # Explicit operator override always wins (empty string disables the regex).
+    ALLOWED_ORIGIN_REGEX: str | None = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    # Token mode: the token is the boundary, so the broad LAN convenience is safe.
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    # Tokenless loopback mode: the Origin allowlist is the ONLY browser boundary,
+    # so accept only the exact trusted frontend origins (ALLOWED_ORIGINS).
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
