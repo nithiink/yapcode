@@ -158,10 +158,16 @@ app = FastAPI(title="Yapcode", lifespan=lifespan,
 # of "*": a malicious web page in the user's browser can no longer read responses
 # from — or make non-simple cross-origin calls to — the backend it can reach at
 # localhost. See config.ALLOWED_ORIGINS / VC_ALLOWED_ORIGINS.
+#
+# The broad private-LAN / any-localhost-port regex is applied ONLY in network
+# mode (VC_AUTH_TOKEN set), where the token — not the Origin — is the real
+# boundary: see config.cors_allow_origin_regex(). In the default tokenless
+# loopback mode CORS trusts only the exact ALLOWED_ORIGINS, so another localhost
+# port or a LAN page can't read the command-executing backend's responses.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    allow_origin_regex=config.cors_allow_origin_regex(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -80,6 +80,39 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenGating(unittest.TestCase):
+    """The broad any-localhost-port / private-LAN Origin regex must only be
+    trusted in network mode (VC_AUTH_TOKEN set). In the default tokenless loopback
+    mode the Origin allowlist is the sole CSRF boundary, so only the exact
+    first-party frontend origins may pass."""
+
+    def test_exact_frontend_origin_allowed_tokenless(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_other_localhost_port_rejected_tokenless(self):
+        # A second local dev server (e.g. VS Code Live Server) must NOT be trusted
+        # when no token is configured.
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://localhost:5500"))
+
+    def test_lan_origin_rejected_tokenless(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:8080"))
+
+    def test_lan_origin_allowed_when_token_set(self):
+        # With a token required, the LAN regex is a convenience and the token is
+        # the real boundary — so a matching LAN origin passes the Origin check.
+        with mock.patch.object(config, "AUTH_TOKEN", "sekret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:8080"))
+
+    def test_cors_regex_disabled_tokenless_enabled_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertIsNone(config.cors_allow_origin_regex())
+        with mock.patch.object(config, "AUTH_TOKEN", "sekret"):
+            self.assertEqual(config.cors_allow_origin_regex(), config.ALLOWED_ORIGIN_REGEX)
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
