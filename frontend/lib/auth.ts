@@ -18,10 +18,18 @@ function captureFromUrl(): string | null {
   try {
     const hash = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
     const query = new URLSearchParams(window.location.search);
-    const token = hash.get("vc_token") || query.get("vc_token");
+    // Capture ONLY from the hash fragment, never the query string. A fragment is
+    // never transmitted to the server, so the secret stays out of the frontend/
+    // proxy access logs; a `?vc_token=…` query, by contrast, is logged in the
+    // initial request line before any client-side cleanup can strip it (CWE-598).
+    // The first-party tooling (scripts/phone-url.mjs) already emits the hash form.
+    const token = hash.get("vc_token");
     if (!token) return null;
     window.localStorage.setItem(KEY, token);
     // Remove the token from the visible URL (history, bookmarks, screen-share).
+    // query.delete stays as a harmless defensive scrub (the token is not read
+    // from the query above, so a query-only token returns early and never reaches
+    // here — the query form should not be used).
     hash.delete("vc_token");
     query.delete("vc_token");
     const h = hash.toString();

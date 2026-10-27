@@ -250,6 +250,25 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad any-localhost-port / private-LAN regex is only a SAFE trust
+    # boundary when a shared-secret token is ALSO required (network mode). In the
+    # default tokenless loopback mode the Origin allowlist is the *sole* CSRF
+    # boundary for browser-direct requests to the command-executing backend, so a
+    # page on another localhost port (e.g. a second local dev server) or a LAN IP
+    # must NOT be trusted just because its Origin matches the convenience regex —
+    # only the exact first-party frontend origins in ALLOWED_ORIGINS above are.
+    # Gate the regex on AUTH_TOKEN so it applies only when the token is the real
+    # boundary.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def cors_allow_origin_regex() -> str | None:
+    """The Origin regex handed to Starlette's CORSMiddleware. Only applied in
+    token-required (network) mode: in tokenless loopback mode CORS trusts only
+    the exact ALLOWED_ORIGINS, so another localhost port or a LAN page cannot read
+    backend responses cross-origin. Mirrors the gating in origin_allowed()."""
+    return ALLOWED_ORIGIN_REGEX if AUTH_TOKEN else None
