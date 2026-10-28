@@ -250,6 +250,22 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The broad private-LAN / any-localhost-port regex below is only a safe
+    # convenience when a token is ALSO required — there the token, not the
+    # Origin, is the security boundary (see run-network.sh, which forces a
+    # token before binding 0.0.0.0). In the tokenless loopback default
+    # (`run.sh`, no VC_AUTH_TOKEN) there is no token, and _access_ok() trusts
+    # any loopback peer — so for a browser request this regex would be the
+    # ENTIRE page-level gate. Honoring it there lets any page served from
+    # another localhost port or a private-LAN host drive the command-executing
+    # backend cross-origin (enumerate session handles, POST tool calls, or open
+    # the keystroke-injecting terminal WebSocket) = RCE. So only honor the regex
+    # when a token is configured; tokenless mode accepts the exact frontend
+    # origins (ALLOWED_ORIGINS) only. The legitimate frontend at :3000 is an
+    # exact member and is unaffected; LAN/phone use requires network mode, which
+    # sets a token.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
