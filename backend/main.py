@@ -161,7 +161,12 @@ app = FastAPI(title="Yapcode", lifespan=lifespan,
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    # Keep the preflight path in lockstep with the in-app Origin check
+    # (config.origin_allowed): the broad private-LAN/any-port regex is only
+    # honored when a token is configured (the token is the real boundary there).
+    # In the tokenless loopback default, advertise only the exact frontend
+    # origins so CORS never clears a preflight the in-app check would reject.
+    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX if config.AUTH_TOKEN else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )

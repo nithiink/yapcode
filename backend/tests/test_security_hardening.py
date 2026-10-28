@@ -80,6 +80,48 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenGating(unittest.TestCase):
+    """The broad private-LAN / any-localhost-port Origin regex must only be the
+    gate when a token is ALSO required. In the tokenless loopback default the
+    loopback peer is trusted, so a permissive Origin regex there would be the
+    sole page-level boundary and would admit cross-origin command execution from
+    any co-resident localhost/LAN page."""
+
+    def test_exact_frontend_origin_allowed_without_token(self):
+        # The legitimate dev frontend must keep working in tokenless mode.
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+            self.assertTrue(config.origin_allowed("http://127.0.0.1:3000"))
+
+    def test_broad_origin_rejected_without_token(self):
+        # Tokenless loopback mode: the broad regex must NOT satisfy the check.
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            for origin in ("http://localhost:9999", "http://192.168.1.42:3000",
+                           "http://10.0.0.5:8080", "http://[::1]:5555"):
+                self.assertFalse(config.origin_allowed(origin), origin)
+
+    def test_broad_origin_allowed_with_token(self):
+        # Network mode: the token is the real boundary, so the convenience regex
+        # still admits same-network devices (phone/laptop on the LAN).
+        with mock.patch.object(config, "AUTH_TOKEN", "secret-token"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.42:3000"))
+            self.assertTrue(config.origin_allowed("http://localhost:9999"))
+
+    def test_remote_origin_always_rejected(self):
+        # A public/remote origin is never allowed, token or not.
+        for tok in ("", "secret-token"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed("http://evil.example.com"))
+                self.assertFalse(config.origin_allowed("http://localhost.evil.com"))
+                self.assertFalse(config.origin_allowed("http://127.0.0.1.evil.com"))
+
+    def test_empty_origin_rejected(self):
+        for tok in ("", "secret-token"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed(None))
+                self.assertFalse(config.origin_allowed(""))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
