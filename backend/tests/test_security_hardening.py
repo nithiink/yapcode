@@ -98,5 +98,37 @@ class MintHostAllowlist(unittest.TestCase):
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
 
 
+class OriginRegexRunMode(unittest.TestCase):
+    """The broad private-LAN Origin regex must not be the sole cross-origin
+    boundary in the tokenless loopback default (CSRF -> RCE); it is a safe
+    convenience only when a token is the real boundary, or when explicitly set."""
+
+    DEFAULT = config._DEFAULT_ORIGIN_REGEX
+
+    def test_tokenless_default_disables_broad_regex(self):
+        # No token, no explicit override: fall back to exact ALLOWED_ORIGINS only.
+        self.assertIsNone(config._select_origin_regex(None, "", self.DEFAULT))
+
+    def test_token_mode_keeps_broad_regex(self):
+        self.assertEqual(
+            config._select_origin_regex(None, "s3cret", self.DEFAULT), self.DEFAULT)
+
+    def test_explicit_override_wins_in_tokenless_mode(self):
+        self.assertEqual(
+            config._select_origin_regex(r"^https://app\.example$", "", self.DEFAULT),
+            r"^https://app\.example$")
+
+    def test_explicit_empty_override_disables(self):
+        self.assertIsNone(config._select_origin_regex("", "s3cret", self.DEFAULT))
+
+    def test_malicious_localhost_origin_rejected_when_regex_disabled(self):
+        # Simulates the tokenless default: a different local origin must not pass.
+        with mock.patch.object(config, "_ORIGIN_RE", None):
+            self.assertFalse(config.origin_allowed("http://localhost:9999"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:8080"))
+            # The real frontend origin still works via the exact allowlist.
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+
 if __name__ == "__main__":
     unittest.main()
