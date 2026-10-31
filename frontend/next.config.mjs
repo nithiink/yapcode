@@ -16,5 +16,22 @@ const nextConfig = {
     "10.*.*.*",
     "172.16.*.*",
   ],
+  // Security headers on every route. The app's control panel has one-click,
+  // high-impact controls (approve a pending command, flip a session to "auto —
+  // runs everything without asking"), so it must not be framable: an external
+  // site could overlay a decoy and clickjack an Approve / Auto-mode click.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+    ];
+  },
 };
 export default nextConfig;

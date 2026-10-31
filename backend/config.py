@@ -236,9 +236,22 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+if _origin_regex_raw is not None:
+    # Explicit operator choice always wins (empty disables the regex entirely).
+    ALLOWED_ORIGIN_REGEX: str | None = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    # Token-gated (network) mode: the broad private-LAN/any-port regex is a
+    # convenience for legitimate same-network devices, and the token is the real
+    # boundary — so honor it.
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    # Tokenless (loopback-only) mode: loopback clients are trusted with no token,
+    # so this regex would be the ONLY browser-facing boundary. Being all-ports and
+    # all-private-LAN, it would let any sibling localhost origin or LAN page drive
+    # the command-executing backend cross-origin (CORS reflects the matched Origin).
+    # The legitimate local frontend is always one of the exact ALLOWED_ORIGINS
+    # (localhost:3000), so fall back to that exact list and disable the broad regex.
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
