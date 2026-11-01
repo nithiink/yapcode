@@ -675,6 +675,13 @@ export default function VoiceAgent() {
   const handleClaudeResult = (res: any) => {
     if (!res || typeof res !== "object") return;
     const sid = res.session_id;
+    // Claude's output and the prompt text it surfaces can quote or summarize
+    // untrusted content it read from files, the web, or documents. Wrap those
+    // portions in explicit delimiters and keep them OUT of the app's own control
+    // framing so the voice model relays them to the user but never treats them
+    // as instructions (see the UNTRUSTED CONTENT rule in instructions.ts).
+    const wrapUntrusted = (s: string) =>
+      `[untrusted-content]${s}[/untrusted-content]`;
     // Name the originating request so the model can't confuse this update with a
     // previous prompt's (the backend threads it through as res.request).
     const reqRaw = (res.request || "").trim();
@@ -695,19 +702,19 @@ export default function VoiceAgent() {
         .join("; ");
       const msg =
         res.prompt.kind === "choice"
-          ? `[Claude update] Claude is asking${forReq}: ${res.prompt.text}${opts ? ` The options are: ${opts}.` : ""} Read the options to the user and get their choice.`
-          : `[Claude update] Claude needs permission${forReq} to ${res.prompt.text}. Ask the user to approve or deny.`;
+          ? `[Claude update] Claude is asking${forReq}: ${wrapUntrusted(res.prompt.text)}${opts ? ` The options are: ${wrapUntrusted(opts)}.` : ""} Read the options to the user and get their choice.`
+          : `[Claude update] Claude needs permission${forReq} to ${wrapUntrusted(res.prompt.text)}. Ask the user to approve or deny.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "completed") {
       clearPendingFor(sid);
       const txt = (res.assistant_text || "").trim();
-      const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${txt}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
+      const msg = `[Claude update] Claude finished${forReq}. ${txt ? `It said: ${wrapUntrusted(txt)}` : "Done."} This is the latest result — summarize it briefly for the user, and do NOT say this request is still in progress.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     } else if (res.status === "error") {
       clearPendingFor(sid);
-      const msg = `[Claude update] Claude hit an error${forReq}: ${res.error || "unknown"}. Tell the user.`;
+      const msg = `[Claude update] Claude hit an error${forReq}: ${wrapUntrusted(res.error || "unknown")}. Tell the user.`;
       sessionRef.current?.injectUpdate(msg);
       logDebug("inject", msg, { session: sid }, "backend", "voice");
     }
