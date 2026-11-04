@@ -66,7 +66,15 @@ async def append_cost_event(record: dict[str, Any]) -> None:
             COST_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             # Open in append mode and take an exclusive advisory lock so concurrent
             # writers (separate processes, e.g. dev autoreload race) don't interleave.
-            with open(COST_LOG_PATH, "a", encoding="utf-8") as f:
+            # Owner-only (0600): session metadata (cwd, model, provider, costs)
+            # should not be readable by other local users on a shared host —
+            # matching the 0600 posture used for backend/.env.
+            _fd = os.open(COST_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(_fd, "a", encoding="utf-8") as f:
+                try:
+                    os.fchmod(f.fileno(), 0o600)  # tighten a pre-existing file too
+                except OSError:
+                    pass
                 try:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 except OSError:

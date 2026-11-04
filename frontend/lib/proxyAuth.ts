@@ -46,7 +46,37 @@ export function forwardAuth(
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
 // ambient credentials — so they pass here and are left to the backend's own
 // token/loopback auth.
+// Hosts yapcode is legitimately reached at: loopback (default localhost mode) or
+// a private-LAN address (phone mode, always token-gated). A public hostname is
+// never a real yapcode host.
+const LOOPBACK_OR_PRIVATE_HOST =
+  /^(localhost|127\.0\.0\.1|\[::1\]|::1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/;
+
+// DNS-rebinding defense. The Sec-Fetch-Site / Origin==Host checks below can be
+// defeated by DNS rebinding: the browser keeps sending the attacker's public
+// hostname (e.g. "attacker.com:3000") as Host while that name silently
+// re-resolves to 127.0.0.1, so the request looks same-origin and the fallback
+// Origin.host === Host comparison also passes. Pinning Host to a loopback/LAN
+// allowlist closes that hole, because the rebinding page's Host is always the
+// attacker's public name. Override with VC_ALLOWED_HOSTS (comma-separated
+// host[:port]) for custom local hostnames (e.g. an mDNS *.local name).
+function hostAllowed(req: NextRequest): boolean {
+  const host = req.headers.get("host");
+  if (!host) return false; // HTTP/1.1 requires Host; absent -> treat as hostile
+  const h = host.toLowerCase();
+  const extra = (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
+  if (extra.includes(h)) return true;
+  const hostname = h.replace(/:\d+$/, ""); // strip :port
+  return LOOPBACK_OR_PRIVATE_HOST.test(hostname);
+}
+
 export function isCrossSiteRequest(req: NextRequest): boolean {
+  // Reject outright any request not addressed to a loopback/LAN Host — defeats
+  // DNS rebinding regardless of the Sec-Fetch-Site / Origin signals below.
+  if (!hostAllowed(req)) return true;
   const site = req.headers.get("sec-fetch-site");
   if (site) {
     // The legitimate frontend ALWAYS calls these routes same-origin (a relative

@@ -121,7 +121,15 @@ async def _writer() -> None:
         try:
             DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps(rec, separators=(",", ":"), ensure_ascii=False, default=str) + "\n"
-            with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            # Owner-only (0600): the `detail` payload can carry assistant text,
+            # tool args, and command output — keep it unreadable by other local
+            # users, matching the 0600 posture used for backend/.env.
+            _fd = os.open(DEBUG_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(_fd, "a", encoding="utf-8") as f:
+                try:
+                    os.fchmod(f.fileno(), 0o600)  # tighten a pre-existing file too
+                except OSError:
+                    pass
                 try:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 except OSError:
