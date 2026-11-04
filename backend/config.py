@@ -236,9 +236,22 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+ALLOWED_ORIGIN_REGEX: str | None
+if _origin_regex_raw is not None:
+    # Explicit override; an empty string disables the regex entirely.
+    ALLOWED_ORIGIN_REGEX = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    # Network/phone mode: a token is required from every caller, so widening the
+    # Origin allowlist to private-LAN devices (any port) is a convenience for
+    # legitimate same-network devices, not the security boundary.
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    # Tokenless loopback mode: the Origin allowlist is the ONLY cross-origin
+    # boundary (loopback peers are trusted without a token), so don't widen it to
+    # sibling localhost ports or the whole private LAN — that would let any other
+    # local/LAN web origin CSRF the command-executing backend. Fall back to the
+    # exact ALLOWED_ORIGINS list (localhost:3000 / 127.0.0.1:3000 + VC_ALLOWED_ORIGINS).
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
