@@ -80,6 +80,39 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistNoTokenMode(unittest.TestCase):
+    """In no-token (loopback-only) mode the Origin check is the whole CSRF
+    boundary, so the convenience LAN/any-port regex must NOT widen the trusted
+    set beyond the exact frontend origins; it may only apply when a token gates
+    access (then the token is the real boundary)."""
+
+    def test_exact_frontend_origin_allowed_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_other_local_port_rejected_without_token(self):
+        # A second dev server / local tool on another port must not be trusted
+        # when no token is configured (this was the CSRF -> RCE hole).
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed("http://localhost:5173"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.50:8080"))
+
+    def test_lan_regex_still_applies_with_token(self):
+        # With a token set, the token is the boundary, so the convenience regex
+        # may trust same-network devices on any port.
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:8080"))
+
+    def test_foreign_origin_rejected_in_both_modes(self):
+        for tok in ("", "secret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertFalse(config.origin_allowed("https://evil.example.com"))
+
+    def test_empty_origin_rejected(self):
+        self.assertFalse(config.origin_allowed(None))
+        self.assertFalse(config.origin_allowed(""))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
