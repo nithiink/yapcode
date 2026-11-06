@@ -250,6 +250,14 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The wide private-LAN / any-port regex is only a safe convenience when the
+    # token is the real boundary. In no-token (loopback-only) mode no token is
+    # required, so this regex would BECOME the CSRF boundary and trust any
+    # localhost/LAN origin on any port (e.g. a second dev server, an XSS'd local
+    # tool) — enough to drive the command-executing endpoints cross-origin. Gate
+    # it behind AUTH_TOKEN so no-token mode trusts only the exact frontend origins
+    # above. Legitimate remote LAN devices can't authenticate without a token
+    # anyway (see main._access_ok), so this closes the hole without cost.
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
-    return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+    return bool(AUTH_TOKEN and _ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
