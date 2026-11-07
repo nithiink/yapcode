@@ -68,9 +68,74 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- Host allowlist (DNS-rebinding defense) ---------------------------------
+//
+// isCrossSiteRequest() trusts Sec-Fetch-Site and (in its fallback) Origin.host
+// == Host. Those defeat ordinary CSRF but NOT DNS rebinding: a page served from
+// a public origin (http://evil.example:3000) whose name is rebound to 127.0.0.1
+// issues a *relative* fetch the browser legitimately labels `same-origin`, so
+// both signals pass — yet the request lands on our loopback proxy and, in the
+// default tokenless mode, the loopback-trusted backend (arbitrary command
+// execution). The one request property page JS cannot forge or remove is the
+// Host header: the browser always sets it to the host the page was loaded from
+// (the attacker's domain under rebinding), never to our own. So we additionally
+// require Host to be one we actually serve on.
+//
+// Defaults mirror the backend's Origin allowlist (config.ALLOWED_ORIGIN_REGEX):
+// loopback plus RFC1918 private-LAN ranges (network mode binds the LAN). Any
+// port is accepted. Extend with VC_ALLOWED_HOSTS (comma-separated host or
+// host:port values) for custom hostnames/front-door domains.
+const PRIVATE_HOST_RE =
+  /^(?:localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/;
+
+const EXTRA_HOSTS = new Set(
+  (process.env.VC_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+// Extract the hostname from a Host header value, stripping a trailing :port and
+// IPv6 brackets ([::1]:3000 -> ::1, 127.0.0.1:3000 -> 127.0.0.1).
+function hostnameOf(host: string): string {
+  const h = host.trim().toLowerCase();
+  if (h.startsWith("[")) {
+    const end = h.indexOf("]");
+    return end >= 0 ? h.slice(1, end) : h.slice(1);
+  }
+  const colon = h.lastIndexOf(":");
+  if (colon >= 0 && /^\d+$/.test(h.slice(colon + 1))) {
+    return h.slice(0, colon);
+  }
+  return h;
+}
+
+// Whether the request's Host header is one the legitimate frontend is served on.
+// A missing Host (non-browser clients, which carry no ambient credentials and so
+// are not a CSRF/rebinding vector) is left to the backend's own token/loopback
+// auth, matching how isCrossSiteRequest() treats signal-less callers.
+export function isAllowedHost(req: NextRequest): boolean {
+  const host = req.headers.get("host");
+  if (!host) return true;
+  const full = host.trim().toLowerCase();
+  if (EXTRA_HOSTS.has(full)) return true; // exact host:port match
+  const name = hostnameOf(full);
+  if (EXTRA_HOSTS.has(name)) return true; // host-only match (any port)
+  return PRIVATE_HOST_RE.test(name);
+}
+
+// Returns a 403 response if the request is cross-site or targets an unexpected
+// Host, else null. Call at the top of every /api/* route handler before doing
+// any work or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
+  // Host allowlist first: the rebinding-resistant check. Reject before the
+  // Sec-Fetch-Site/Origin heuristics, which a rebound same-origin request passes.
+  if (!isAllowedHost(req)) {
+    return NextResponse.json(
+      { error: "host not allowed" },
+      { status: 403 },
+    );
+  }
   if (isCrossSiteRequest(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
