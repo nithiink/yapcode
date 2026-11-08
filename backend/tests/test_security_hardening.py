@@ -7,6 +7,7 @@
 
     python -m unittest discover -s backend/tests
 """
+import importlib
 import os
 import sys
 import tempfile
@@ -96,6 +97,57 @@ class MintHostAllowlist(unittest.TestCase):
         with mock.patch.object(main, "AZURE_ENDPOINT", "https://my-azure.openai.azure.com"):
             main._assert_allowed_mint_host(
                 "https://my-azure.openai.azure.com/openai/v1/realtime/client_secrets")
+
+
+class OriginAllowlistGating(unittest.TestCase):
+    """The broad localhost-any-port / RFC1918 Origin regex must apply ONLY when a
+    token is configured. In the default tokenless loopback mode the Origin
+    allowlist is the sole cross-origin gate for the command-executing backend, so
+    it must fall back to the exact frontend origins — otherwise a hostile page on
+    another localhost port or a LAN origin could drive the backend cross-origin."""
+
+    def tearDown(self):
+        # Restore config to the ambient environment for the other test classes.
+        importlib.reload(config)
+
+    def _reload(self, token=None, regex=None):
+        env = dict(os.environ)
+        env.pop("VC_AUTH_TOKEN", None)
+        env.pop("VC_ALLOWED_ORIGIN_REGEX", None)
+        if token is not None:
+            env["VC_AUTH_TOKEN"] = token
+        if regex is not None:
+            env["VC_ALLOWED_ORIGIN_REGEX"] = regex
+        # clear=True so the popped vars are genuinely absent during the reload.
+        with mock.patch.dict(os.environ, env, clear=True):
+            importlib.reload(config)
+            return config
+
+    def test_tokenless_mode_allows_only_exact_frontend_origins(self):
+        c = self._reload()  # default: no token, no explicit regex
+        self.assertIsNone(c.ALLOWED_ORIGIN_REGEX)
+        self.assertTrue(c.origin_allowed("http://localhost:3000"))
+        self.assertTrue(c.origin_allowed("http://127.0.0.1:3000"))
+        for bad in ("http://localhost:9999", "http://10.0.0.5",
+                    "http://192.168.1.10:8080", "http://172.16.0.1"):
+            self.assertFalse(c.origin_allowed(bad), bad)
+
+    def test_network_mode_allows_broad_lan_origins(self):
+        c = self._reload(token="secret")  # VC_AUTH_TOKEN set -> broad regex applies
+        self.assertTrue(c.origin_allowed("http://192.168.1.10:8080"))
+        self.assertTrue(c.origin_allowed("http://localhost:9999"))
+        self.assertTrue(c.origin_allowed("http://localhost:3000"))
+
+    def test_explicit_regex_override_honored_without_token(self):
+        c = self._reload(regex=r"^https://app\.example\.com$")
+        self.assertTrue(c.origin_allowed("https://app.example.com"))
+        self.assertFalse(c.origin_allowed("http://localhost:9999"))
+
+    def test_empty_explicit_regex_disables_regex(self):
+        c = self._reload(regex="")
+        self.assertIsNone(c.ALLOWED_ORIGIN_REGEX)
+        self.assertTrue(c.origin_allowed("http://localhost:3000"))  # exact list only
+        self.assertFalse(c.origin_allowed("http://10.0.0.5"))
 
 
 if __name__ == "__main__":

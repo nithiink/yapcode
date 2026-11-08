@@ -222,11 +222,14 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# Private-LAN origins (any port) let the phone/laptop reach the backend over the
+# LAN in network mode — mirrors next.config.mjs's allowedDevOrigins. This broad
+# regex is applied ONLY when VC_AUTH_TOKEN is set (network mode), where the token
+# — not the Origin — is the security boundary. In the default tokenless loopback
+# mode it is deliberately NOT applied (see below): with no token, the Origin
+# allowlist IS the cross-origin boundary for browser-direct calls to this
+# command-executing backend, so it must stay as tight as the frontend actually
+# uses (the exact ALLOWED_ORIGINS). Override or disable with VC_ALLOWED_ORIGIN_REGEX.
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -235,10 +238,23 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
+# Resolve the effective Origin regex:
+#   * VC_ALLOWED_ORIGIN_REGEX set explicitly -> honored (empty string disables it).
+#   * else VC_AUTH_TOKEN set (network mode)   -> the broad default regex, because
+#     the token is the real boundary there and the regex is only a convenience
+#     for legitimate same-network devices.
+#   * else (default tokenless loopback)       -> None, so ONLY the exact
+#     ALLOWED_ORIGINS (localhost:3000 / 127.0.0.1:3000) are accepted. Without a
+#     token the Origin allowlist is the sole cross-origin gate for the
+#     command-executing backend, so it must not accept every other localhost port
+#     or RFC1918 origin a hostile local/LAN-origin page could run script from.
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+if _origin_regex_raw is not None:
+    ALLOWED_ORIGIN_REGEX: str | None = _origin_regex_raw.strip() or None
+elif AUTH_TOKEN:
+    ALLOWED_ORIGIN_REGEX = _DEFAULT_ORIGIN_REGEX
+else:
+    ALLOWED_ORIGIN_REGEX = None
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
