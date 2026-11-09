@@ -161,7 +161,12 @@ app = FastAPI(title="Yapcode", lifespan=lifespan,
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
-    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX,
+    # In tokenless mode, don't reflect the broad any-port/private-LAN regex: a
+    # sibling localhost port must not be able to read backend responses
+    # cross-origin (it is already blocked from triggering side effects by
+    # require_auth). With a VC_AUTH_TOKEN configured the token is the boundary, so
+    # the convenience regex for same-network devices stays enabled.
+    allow_origin_regex=config.ALLOWED_ORIGIN_REGEX if config.AUTH_TOKEN else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -210,7 +215,12 @@ async def require_auth(request: Request) -> None:
     # a loopback-trusted browser. The same-origin Next proxy and native clients
     # send no Origin; only real cross-origin browser requests carry one.
     origin = request.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    # In tokenless mode the Origin check is the only boundary for loopback
+    # browsers, so restrict it to the exact configured frontend origin(s): the
+    # broad any-port/LAN regex would otherwise trust a sibling localhost port and
+    # let a malicious page drive this endpoint cross-origin (CSRF). With a token
+    # configured the token is the boundary, so the regex convenience stays on.
+    if origin and not config.origin_allowed(origin, exact_only=not config.AUTH_TOKEN):
         raise HTTPException(status_code=403, detail="origin not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
@@ -223,7 +233,9 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
     origin = ws.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    # Same tokenless-mode tightening as require_auth: only the exact frontend
+    # origin(s) are trusted when no token gates the connection.
+    if origin and not config.origin_allowed(origin, exact_only=not config.AUTH_TOKEN):
         return False, 4403  # forbidden origin
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)

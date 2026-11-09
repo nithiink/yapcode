@@ -242,14 +242,26 @@ ALLOWED_ORIGIN_REGEX: str | None = (
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
-def origin_allowed(origin: str | None) -> bool:
+def origin_allowed(origin: str | None, *, exact_only: bool = False) -> bool:
     """Whether a browser Origin header is permitted (used for the WebSocket
     handshake, where CORS middleware doesn't apply). An empty Origin (non-browser
-    clients) returns False here; the WS path treats a missing Origin separately."""
+    clients) returns False here; the WS path treats a missing Origin separately.
+
+    `exact_only=True` restricts the allowlist to the exact configured frontend
+    origins (ALLOWED_ORIGINS) and drops the broad any-port / private-LAN regex.
+    Callers set this in the default *tokenless* mode, where the Origin check is the
+    ONLY boundary protecting the loopback-trusted command endpoints: there the
+    regex — a convenience that assumes the token is the real boundary — would
+    otherwise trust a page served from a sibling localhost port (e.g.
+    http://localhost:9999) and let it drive POST /tools/execute cross-origin
+    (CSRF). When a VC_AUTH_TOKEN is configured the token is the boundary, so the
+    regex convenience for same-network devices stays enabled (exact_only=False)."""
     if not origin:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    if exact_only:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
