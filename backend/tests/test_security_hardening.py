@@ -80,6 +80,36 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenlessMode(unittest.TestCase):
+    """In the default tokenless mode the Origin check is the only boundary for
+    loopback browsers, so it must not trust a sibling localhost port / LAN origin
+    (which could otherwise drive the command endpoints cross-origin — CSRF)."""
+
+    def test_exact_frontend_origin_allowed_in_exact_mode(self):
+        self.assertTrue(config.origin_allowed("http://localhost:3000", exact_only=True))
+        self.assertTrue(config.origin_allowed("http://127.0.0.1:3000", exact_only=True))
+
+    def test_sibling_localhost_port_rejected_in_exact_mode(self):
+        self.assertFalse(config.origin_allowed("http://localhost:9999", exact_only=True))
+        self.assertFalse(config.origin_allowed("http://127.0.0.1:8000", exact_only=True))
+        self.assertFalse(config.origin_allowed("http://192.168.1.50:8080", exact_only=True))
+
+    def test_sibling_localhost_port_allowed_in_regex_mode(self):
+        # exact_only=False is the token-configured path: the token is the real
+        # boundary, so the broad regex stays a convenience for same-network devices.
+        self.assertTrue(config.origin_allowed("http://localhost:9999", exact_only=False))
+        self.assertTrue(config.origin_allowed("http://192.168.1.50:8080", exact_only=False))
+
+    def test_foreign_origin_always_rejected(self):
+        for exact in (True, False):
+            self.assertFalse(config.origin_allowed("https://evil.example.com", exact_only=exact))
+            self.assertFalse(config.origin_allowed("http://localhost.evil.com", exact_only=exact))
+
+    def test_empty_origin_rejected(self):
+        self.assertFalse(config.origin_allowed("", exact_only=True))
+        self.assertFalse(config.origin_allowed(None, exact_only=False))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
