@@ -8,6 +8,7 @@
     python -m unittest discover -s backend/tests
 """
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -78,6 +79,47 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             out = transcript.read_timeline("../../*")
             self.assertEqual(out, {"found": False, "events": []})
             find.assert_not_called()
+
+
+class OriginRegexByMode(unittest.TestCase):
+    """The broad private-LAN Origin regex is the SOLE cross-origin drive-by
+    defense in no-token mode, so it must only be active when a token is set
+    (network mode). Regression for the daily-review CSRF finding."""
+
+    def test_no_token_mode_drops_broad_regex(self):
+        # Loopback/no-token mode: do not trust the private-LAN/any-port regex.
+        self.assertIsNone(config._select_origin_regex(None, ""))
+
+    def test_network_mode_keeps_broad_regex(self):
+        # Token set: the regex is a convenience; the token is the real boundary.
+        self.assertEqual(
+            config._select_origin_regex(None, "sekret"), config._DEFAULT_ORIGIN_REGEX
+        )
+
+    def test_explicit_override_wins_in_either_mode(self):
+        self.assertEqual(config._select_origin_regex(r"^https://app$", ""), r"^https://app$")
+        self.assertEqual(config._select_origin_regex(r"^https://app$", "tok"), r"^https://app$")
+
+    def test_empty_override_disables_regex(self):
+        self.assertIsNone(config._select_origin_regex("", "tok"))
+        self.assertIsNone(config._select_origin_regex("   ", ""))
+
+    def test_lan_origin_blocked_without_token_but_localhost_frontend_allowed(self):
+        # Simulate no-token mode selection and verify origin_allowed behaviour.
+        regex = config._select_origin_regex(None, "")
+        origin_re = re.compile(regex) if regex else None
+
+        def allowed(origin):
+            if origin in config.ALLOWED_ORIGINS:
+                return True
+            return bool(origin_re and origin_re.fullmatch(origin))
+
+        # The attacker's LAN-hosted page must be rejected...
+        self.assertFalse(allowed("http://192.168.1.50:8080"))
+        self.assertFalse(allowed("http://10.0.0.5:9000"))
+        # ...while the legitimate localhost frontend still works.
+        self.assertTrue(allowed("http://localhost:3000"))
+        self.assertTrue(allowed("http://127.0.0.1:3000"))
 
 
 class MintHostAllowlist(unittest.TestCase):
