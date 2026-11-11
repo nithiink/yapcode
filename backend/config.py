@@ -222,11 +222,10 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
+# Private-LAN origins (any port) so the phone/laptop can reach the backend over
+# the LAN in network mode — mirrors next.config.mjs's allowedDevOrigins. In
+# network mode the token is independently required, so this broad regex is a
 # convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -235,9 +234,28 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
-_origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
+
+
+def _select_origin_regex(override: str | None, auth_token: str) -> str | None:
+    """Choose the Origin allowlist regex for origin_allowed() / CORS.
+
+    - An explicit VC_ALLOWED_ORIGIN_REGEX override always wins (set it empty to
+      disable the regex and allow only the exact ALLOWED_ORIGINS).
+    - Network mode (VC_AUTH_TOKEN set): default to the broad private-LAN regex, a
+      convenience for same-network devices; the token is the real boundary there.
+    - No-token (loopback) mode: the Origin allowlist is the SOLE cross-origin
+      drive-by defense (any loopback client is already trusted). The broad
+      private-LAN / any-localhost-port regex would let a page served from any LAN
+      or other-localhost origin pass that check against the loopback-trusted
+      backend, so DON'T apply it — fall back to the exact ALLOWED_ORIGINS only.
+    """
+    if override is not None:
+        return override.strip() or None
+    return _DEFAULT_ORIGIN_REGEX if auth_token else None
+
+
+ALLOWED_ORIGIN_REGEX: str | None = _select_origin_regex(
+    os.getenv("VC_ALLOWED_ORIGIN_REGEX"), AUTH_TOKEN
 )
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
