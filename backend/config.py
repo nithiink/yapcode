@@ -253,3 +253,23 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def strict_origin_allowed(origin: str | None) -> bool:
+    """Whether an Origin is one of the EXACT known frontend origins — the
+    ALLOWED_ORIGINS list only, with NO wildcard-port / private-LAN regex.
+
+    This is the boundary used in no-token (loopback) mode. There, access is
+    decided by the Origin allowlist plus the loopback client host and NO secret,
+    so the broad `origin_allowed()` regex (which accepts localhost/127.0.0.1 and
+    private-LAN IPs on ANY port) would trust a page served from a *different* port
+    on the same machine — a second local dev server, a doc/markdown preview
+    rendering untrusted content, a local app with reflected HTML. Such a page
+    could then drive the command-executing backend directly (POST /tools/execute,
+    or the terminal WebSocket that injects raw keystrokes into the live Claude
+    TUI). Restricting the no-token path to the exact frontend origin(s) closes
+    that cross-origin hole while leaving token-protected network mode — where the
+    token, not the Origin, is the real boundary — on the convenience regex.
+
+    Extend the trusted set for a custom frontend port via VC_ALLOWED_ORIGINS."""
+    return bool(origin) and origin in ALLOWED_ORIGINS

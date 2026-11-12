@@ -80,6 +80,32 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class NoTokenOriginBoundary(unittest.TestCase):
+    """In no-token (loopback) mode the Origin allowlist — not a secret — is the
+    only cross-origin boundary, so a page on a *different* localhost/LAN port must
+    not be trusted to drive the command-executing backend. _origin_ok() selects
+    the exact-origin check when no token is configured and the broad convenience
+    regex only when a token (the real boundary) is set."""
+
+    def test_sibling_localhost_port_blocked_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(main._origin_ok("http://localhost:9999"))
+            self.assertFalse(main._origin_ok("http://192.168.1.5:3000"))
+
+    def test_exact_frontend_origin_allowed_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(main._origin_ok("http://localhost:3000"))
+            self.assertTrue(main._origin_ok("http://127.0.0.1:3000"))
+
+    def test_broad_regex_used_when_token_set(self):
+        # With a token, the token is the boundary, so the convenience regex (any
+        # localhost/LAN port) is acceptable again; a remote internet origin stays
+        # rejected.
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(main._origin_ok("http://localhost:9999"))
+            self.assertFalse(main._origin_ok("http://evil.example.com"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
