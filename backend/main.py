@@ -183,6 +183,21 @@ def _token_from(headers, query) -> str | None:
     return query.get("token")
 
 
+def _origin_ok(origin: str) -> bool:
+    """Whether a browser Origin may drive the backend.
+
+    When VC_AUTH_TOKEN is set (network mode) the token is the real boundary, so
+    the broad convenience allowlist (localhost/private-LAN, any port) is fine.
+    When NO token is set (default loopback mode) the Origin allowlist IS the only
+    cross-origin boundary, so it must be the EXACT frontend origin(s) — otherwise
+    a page on a different localhost/LAN port could drive the command-executing
+    backend directly (CSRF via /tools/execute or the keystroke-injecting terminal
+    WebSocket). See config.strict_origin_allowed()."""
+    if config.AUTH_TOKEN:
+        return config.origin_allowed(origin)
+    return config.strict_origin_allowed(origin)
+
+
 def _access_ok(client_host: str | None, token: str | None) -> tuple[bool, str]:
     """Core access decision shared by HTTP and WebSocket paths.
 
@@ -210,7 +225,7 @@ async def require_auth(request: Request) -> None:
     # a loopback-trusted browser. The same-origin Next proxy and native clients
     # send no Origin; only real cross-origin browser requests carry one.
     origin = request.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not _origin_ok(origin):
         raise HTTPException(status_code=403, detail="origin not allowed")
     token = _token_from(request.headers, request.query_params)
     ok, reason = _access_ok(request.client.host if request.client else None, token)
@@ -223,7 +238,7 @@ def _ws_access_ok(ws: WebSocket) -> tuple[bool, int]:
     Returns (ok, close_code). Enforces the Origin allowlist for browser clients
     and the same token/loopback rule as HTTP."""
     origin = ws.headers.get("origin")
-    if origin and not config.origin_allowed(origin):
+    if origin and not _origin_ok(origin):
         return False, 4403  # forbidden origin
     token = _token_from(ws.headers, ws.query_params)
     ok, _reason = _access_ok(ws.client.host if ws.client else None, token)
