@@ -222,11 +222,11 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
-# Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
+# Private-LAN origins (any port) are allowed so the phone/laptop can reach the
+# backend over the LAN in NETWORK mode — mirrors next.config.mjs's
+# allowedDevOrigins. There the shared-secret token is the real boundary, so this
+# regex is a convenience for legitimate same-network devices, not the security
+# boundary. Override with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
     r"localhost|127\.0\.0\.1|\[::1\]|"
@@ -236,9 +236,31 @@ _DEFAULT_ORIGIN_REGEX = (
     r")(:\d{1,5})?$"
 )
 _origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+
+
+def _effective_origin_regex(auth_token: str, override: str | None) -> str | None:
+    """Resolve the Origin-allowlist regex, honoring the access-control mode.
+
+    An explicit operator override (VC_ALLOWED_ORIGIN_REGEX) is honored in any
+    mode. The default LAN-wildcard is applied ONLY when a shared-secret token is
+    configured (network mode), where the token is the actual boundary.
+
+    In the default tokenless loopback mode no LAN origin is ever legitimate: the
+    backend accepts only loopback peers (see _access_ok) and the sole real
+    browser origin is localhost:3000 (already in ALLOWED_ORIGINS). Honoring the
+    LAN wildcard there would make it the ONLY cross-origin gate — letting a
+    same-LAN drive-by page served from an RFC1918 address pass origin_allowed()
+    and the CORS middleware and drive the command-executing backend through the
+    victim's own browser (CSRF). So with no token set, fall back to the exact
+    ALLOWED_ORIGINS allowlist (no LAN wildcard)."""
+    if override is not None:
+        return override.strip() or None
+    if auth_token:
+        return _DEFAULT_ORIGIN_REGEX
+    return None
+
+
+ALLOWED_ORIGIN_REGEX: str | None = _effective_origin_regex(AUTH_TOKEN, _origin_regex_raw)
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
