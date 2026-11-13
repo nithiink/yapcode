@@ -80,6 +80,35 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenGating(unittest.TestCase):
+    """The default LAN-wildcard Origin regex must be honored only when a token is
+    configured (network mode). In the default tokenless loopback mode it would be
+    the sole cross-origin gate, enabling same-LAN drive-by CSRF into the
+    command-executing backend."""
+
+    def test_lan_wildcard_disabled_without_token(self):
+        self.assertIsNone(config._effective_origin_regex("", None))
+
+    def test_lan_wildcard_enabled_with_token(self):
+        self.assertEqual(
+            config._effective_origin_regex("secret", None), config._DEFAULT_ORIGIN_REGEX)
+
+    def test_explicit_override_honored_in_any_mode(self):
+        rx = r"^https://app\.example\.com$"
+        self.assertEqual(config._effective_origin_regex("", rx), rx)
+        self.assertEqual(config._effective_origin_regex("secret", rx), rx)
+        # An empty override disables the regex entirely.
+        self.assertIsNone(config._effective_origin_regex("secret", ""))
+
+    def test_origin_allowed_rejects_lan_origin_when_regex_disabled(self):
+        # Tokenless mode: _ORIGIN_RE is None, so only the exact ALLOWED_ORIGINS
+        # list applies — a LAN origin must be rejected, localhost accepted.
+        with mock.patch.object(config, "_ORIGIN_RE", None):
+            self.assertFalse(config.origin_allowed("http://10.0.0.5"))
+            self.assertFalse(config.origin_allowed("http://192.168.1.4:8080"))
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
