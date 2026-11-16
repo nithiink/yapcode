@@ -243,13 +243,33 @@ _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
 def origin_allowed(origin: str | None) -> bool:
-    """Whether a browser Origin header is permitted (used for the WebSocket
-    handshake, where CORS middleware doesn't apply). An empty Origin (non-browser
-    clients) returns False here; the WS path treats a missing Origin separately."""
+    """Whether a browser Origin header is permitted for an ACCESS decision
+    (require_auth + the WebSocket handshake, where CORS middleware doesn't apply).
+
+    Exact frontend origins (ALLOWED_ORIGINS) are always accepted. The broad
+    localhost/LAN regex (_DEFAULT_ORIGIN_REGEX) is honored ONLY when a shared-secret
+    token is configured (network mode) — there the token, not the Origin, is the
+    security boundary and the regex is merely a convenience for same-network devices.
+
+    In the default loopback (no-token) mode there is NO token, so this Origin check is
+    the SOLE CSRF boundary for backend-direct requests (the terminal WebSocket and the
+    /debug/stream SSE, plus any cross-origin fetch straight to :8000 — none of which
+    pass through the Next proxy's same-origin blockCrossSite guard). Honoring the broad
+    regex there would let a page on any OTHER localhost port or LAN host drive the
+    command-executing backend via CSRF — exactly the vector proxyAuth.ts refuses. So in
+    no-token mode only the exact frontend origins pass; the regex stays off.
+
+    An empty Origin (non-browser clients) returns False here; the WS path treats a
+    missing Origin separately."""
     if not origin:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The permissive localhost/LAN regex only widens the allowlist when a token is the
+    # real boundary (network mode). Without a token it must NOT expand the CSRF surface
+    # beyond the exact frontend origins above.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))

@@ -80,6 +80,35 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistAccessDecision(unittest.TestCase):
+    """origin_allowed() is the sole CSRF boundary for backend-direct requests in the
+    default no-token mode, so the broad localhost/LAN regex must NOT widen it there —
+    only the exact frontend origins may pass. When a token is configured (network
+    mode) the token is the real boundary, so the regex convenience is restored."""
+
+    def test_exact_frontend_origin_always_allowed(self):
+        self.assertIn("http://localhost:3000", config.ALLOWED_ORIGINS)
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+    def test_other_local_origin_rejected_without_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            for bad in ["http://localhost:5173", "http://127.0.0.1:8080",
+                        "http://192.168.1.50:3000", "http://10.0.0.5:9000"]:
+                self.assertFalse(config.origin_allowed(bad), bad)
+
+    def test_lan_origin_allowed_with_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "secret"):
+            self.assertTrue(config.origin_allowed("http://192.168.1.50:3000"))
+
+    def test_empty_origin_rejected(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed(""))
+            self.assertFalse(config.origin_allowed(None))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
