@@ -46,7 +46,52 @@ export function forwardAuth(
 // native apps) send neither signal and are NOT a CSRF vector — they carry no
 // ambient credentials — so they pass here and are left to the backend's own
 // token/loopback auth.
+//
+// Anti-DNS-rebinding: the signals above are NOT sufficient on their own. Under a
+// DNS-rebinding attack the attacker serves a page from `evil.com` and rebinds
+// that name to 127.0.0.1, so the page and the local target share the origin
+// `evil.com:3000`. The browser then LEGITIMATELY labels the request
+// `Sec-Fetch-Site: same-origin` and `Origin.host === Host`, so both checks below
+// pass. The only reliable tell is the `Host` header itself: our server only ever
+// answers to its own localhost / private-LAN identity, never to a public domain.
+// So we pin an allowlist of Hosts the proxy is willing to serve (mirrors the
+// backend's VC_ALLOWED_ORIGIN_REGEX host set in backend/config.py). This also
+// keeps the token-gated network/phone mode working (private-LAN Host), where the
+// token already defeats rebinding, and can be overridden via
+// VC_ALLOWED_HOST_REGEX (set empty to disable the Host check).
+const _DEFAULT_HOST_REGEX =
+  "^(" +
+  "localhost|127\\.0\\.0\\.1|\\[::1\\]|" +
+  "10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|" +
+  "192\\.168\\.\\d{1,3}\\.\\d{1,3}|" +
+  "172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}" +
+  ")(:\\d{1,5})?$";
+const _hostRegexRaw = process.env.VC_ALLOWED_HOST_REGEX;
+const _HOST_RE =
+  _hostRegexRaw === undefined
+    ? new RegExp(_DEFAULT_HOST_REGEX)
+    : _hostRegexRaw.trim()
+      ? new RegExp(_hostRegexRaw.trim())
+      : null; // explicitly disabled
+
+// Whether the request's Host header names a host this proxy is willing to serve.
+// A missing Host (HTTP/1.1 requires one) or any public domain -> not allowed,
+// which is treated as a cross-site (rebinding) request by isCrossSiteRequest.
+export function isAllowedHost(req: NextRequest): boolean {
+  if (!_HOST_RE) return true; // Host check disabled via empty VC_ALLOWED_HOST_REGEX
+  const host = req.headers.get("host");
+  if (!host) return false;
+  return _HOST_RE.test(host);
+}
+
 export function isCrossSiteRequest(req: NextRequest): boolean {
+  // Anti-DNS-rebinding Host-allowlist check — evaluated FIRST, because under
+  // rebinding the Sec-Fetch-Site / Origin signals below genuinely say
+  // "same-origin" and would otherwise let the request through. A Host that is
+  // not our own localhost/LAN identity (e.g. an attacker's rebound public
+  // domain) is treated as hostile.
+  if (!isAllowedHost(req)) return true;
+
   const site = req.headers.get("sec-fetch-site");
   if (site) {
     // The legitimate frontend ALWAYS calls these routes same-origin (a relative
