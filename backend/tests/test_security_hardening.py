@@ -80,6 +80,28 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAllowlistTokenlessMode(unittest.TestCase):
+    """In the default tokenless/loopback mode the private-LAN Origin regex must
+    NOT be consulted — otherwise any private-LAN web page could drive the
+    loopback backend cross-origin (CSRF). The regex applies only in network
+    (token) mode, where the token is the real boundary."""
+
+    PRIVATE_ORIGIN = "http://192.168.1.50:8080"
+
+    def test_private_lan_origin_rejected_when_no_token(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertFalse(config.origin_allowed(self.PRIVATE_ORIGIN))
+
+    def test_private_lan_origin_allowed_when_token_set(self):
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cret"):
+            self.assertTrue(config.origin_allowed(self.PRIVATE_ORIGIN))
+
+    def test_exact_localhost_origin_allowed_in_both_modes(self):
+        for tok in ("", "s3cret"):
+            with mock.patch.object(config, "AUTH_TOKEN", tok):
+                self.assertTrue(config.origin_allowed("http://localhost:3000"))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")

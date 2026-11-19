@@ -222,10 +222,12 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# Private-LAN origins (any port) let the phone/laptop reach the backend over the
+# LAN in network mode — mirrors next.config.mjs's allowedDevOrigins. This regex
+# is consulted ONLY when VC_AUTH_TOKEN is set (network mode), where the token —
+# not this regex — is the cross-origin security boundary; see origin_allowed().
+# In the default tokenless/loopback mode the regex is NOT applied, so a
+# private-LAN web page cannot drive the backend cross-origin (CSRF).
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -250,6 +252,14 @@ def origin_allowed(origin: str | None) -> bool:
         return False
     if origin in ALLOWED_ORIGINS:
         return True
+    # The private-LAN regex is only a safe convenience in network mode, where a
+    # token is required and is the real cross-origin boundary. In the default
+    # tokenless/loopback mode no token is required, so this regex would be the
+    # ONLY cross-origin check — and it admits every private-LAN origin, which
+    # would let a malicious same-network web page drive the loopback backend
+    # (CSRF). So fall back to the exact allowlist above whenever no token is set.
+    if not AUTH_TOKEN:
+        return False
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
