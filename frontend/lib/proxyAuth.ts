@@ -68,10 +68,55 @@ export function isCrossSiteRequest(req: NextRequest): boolean {
   return false; // no browser-origin signals -> not a cross-site browser request
 }
 
-// Returns a 403 response if the request is cross-site, else null. Call at the
-// top of every /api/* route handler before doing any work or forwarding.
+// --- DNS-rebinding defense --------------------------------------------------
+//
+// `Sec-Fetch-Site` cannot catch DNS rebinding: a page served from
+// `http://evil.com:3000`, after re-resolving evil.com to 127.0.0.1, fetches its
+// OWN origin, so the browser legitimately stamps `Sec-Fetch-Site: same-origin`
+// (it is computed from the URL origin tuple, before DNS) and isCrossSiteRequest()
+// passes. In the default zero-config mode the Next server binds 127.0.0.1, the
+// proxy forwards no token, and the backend trusts loopback — so a rebound page
+// gets real command execution. The one remaining tell is the `Host` header, which
+// still carries the attacker's public domain (`evil.com:3000`), never a loopback
+// name.
+//
+// So: when NO shared-secret token rides the request (i.e. the loopback-trusted
+// mode — any exposed/network deployment requires and presents VC_AUTH_TOKEN,
+// which is the real boundary there and which a cross-origin/rebound page cannot
+// read), require the Host to be a loopback name. This blocks the rebound Host
+// without affecting (a) legitimate loopback traffic, whose Host is always
+// localhost/127.0.0.1/::1 since the server binds 127.0.0.1, or (b) any
+// token-authenticated request, regardless of its hostname.
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function hostHostname(req: NextRequest): string | null {
+  const host = req.headers.get("host");
+  if (!host) return null;
+  // IPv6 literal, e.g. "[::1]:3000" -> "::1"
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    return end > 0 ? host.slice(1, end).toLowerCase() : null;
+  }
+  // "host:port" -> "host"
+  return host.split(":")[0].toLowerCase();
+}
+
+// True when the request is a DNS-rebinding risk: no shared-secret token is
+// presented (loopback-trusted mode) AND the Host is not a loopback name.
+export function isRebindingRisk(req: NextRequest): boolean {
+  const hasToken =
+    req.headers.get("x-vc-token") || req.headers.get("authorization");
+  if (hasToken) return false; // token mode: the backend token check is the boundary
+  const hn = hostHostname(req);
+  if (hn === null) return false; // no Host (non-browser clients) -> backend loopback auth applies
+  return !LOOPBACK_HOSTNAMES.has(hn);
+}
+
+// Returns a 403 response if the request is cross-site or a DNS-rebinding risk,
+// else null. Call at the top of every /api/* route handler before doing any work
+// or forwarding.
 export function blockCrossSite(req: NextRequest): NextResponse | null {
-  if (isCrossSiteRequest(req)) {
+  if (isCrossSiteRequest(req) || isRebindingRisk(req)) {
     return NextResponse.json(
       { error: "cross-site request blocked" },
       { status: 403 },
