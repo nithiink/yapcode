@@ -8,6 +8,7 @@
     python -m unittest discover -s backend/tests
 """
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -78,6 +79,40 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             out = transcript.read_timeline("../../*")
             self.assertEqual(out, {"found": False, "events": []})
             find.assert_not_called()
+
+
+class OriginRegexTokenGating(unittest.TestCase):
+    """The broad private-LAN Origin regex must NOT be the default in token-less
+    mode, where it would be the sole browser-facing boundary (alongside the
+    loopback-peer check) and expose the command-executing backend to a
+    confused-deputy CSRF from any localhost-port / RFC1918 page."""
+
+    def test_tokenless_mode_disables_broad_regex(self):
+        # No explicit override, no token -> fall back to exact ALLOWED_ORIGINS only.
+        self.assertIsNone(config._resolve_origin_regex(None, ""))
+
+    def test_token_mode_enables_broad_regex(self):
+        # A token gates access (network mode), so the convenience regex is safe.
+        self.assertEqual(
+            config._resolve_origin_regex(None, "a-secret-token"),
+            config._DEFAULT_ORIGIN_REGEX,
+        )
+
+    def test_explicit_override_is_honored(self):
+        self.assertEqual(
+            config._resolve_origin_regex(r"^https://app\.example$", ""),
+            r"^https://app\.example$",
+        )
+
+    def test_explicit_empty_override_disables_regex(self):
+        self.assertIsNone(config._resolve_origin_regex("", "a-secret-token"))
+
+    def test_broad_lan_origin_rejected_without_token(self):
+        # End-to-end: a private-LAN origin must not pass when the regex is absent.
+        regex = config._resolve_origin_regex(None, "")  # token-less
+        self.assertIsNone(regex)
+        compiled = re.compile(regex) if regex else None
+        self.assertFalse(bool(compiled and compiled.fullmatch("http://192.168.1.50:8080")))
 
 
 class MintHostAllowlist(unittest.TestCase):

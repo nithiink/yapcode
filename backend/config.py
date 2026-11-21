@@ -222,10 +222,13 @@ def _default_allowed_origins() -> list[str]:
 
 ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
-# Private-LAN origins (any port) are allowed by default so the phone/laptop can
-# reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# Private-LAN origins (any port) let the phone/laptop reach the backend over the
+# LAN in network mode — mirrors next.config.mjs's allowedDevOrigins. This regex
+# is broad (any localhost port, every RFC1918 address), so it is only safe when a
+# token gates access: in network mode (run-network.sh) VC_AUTH_TOKEN is always
+# set and the token is the real security boundary, making the regex a mere
+# convenience for legitimate same-network devices.
+#
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -235,10 +238,30 @@ _DEFAULT_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
     r")(:\d{1,5})?$"
 )
-_origin_regex_raw = os.getenv("VC_ALLOWED_ORIGIN_REGEX")
-ALLOWED_ORIGIN_REGEX: str | None = (
-    _DEFAULT_ORIGIN_REGEX if _origin_regex_raw is None else (_origin_regex_raw.strip() or None)
-)
+
+
+def _resolve_origin_regex(regex_raw: str | None, auth_token: str) -> str | None:
+    """Resolve the effective Origin-allowlist regex.
+
+    * An explicit VC_ALLOWED_ORIGIN_REGEX override is honored verbatim (an empty
+      value disables the regex, leaving only the exact ALLOWED_ORIGINS list).
+    * Otherwise the broad private-LAN default is enabled ONLY when a token gates
+      access (network mode) — there the token is the real boundary.
+    * In token-less (default run.sh / loopback-only) mode NO token is required,
+      so the Origin allowlist is the only browser-facing boundary besides the
+      loopback-peer check. The broad regex would then let any page served from
+      any localhost port or RFC1918 address drive the command-executing backend
+      via a CORS "simple" request (confused-deputy CSRF -> RCE). Fall back to the
+      exact ALLOWED_ORIGINS (the :3000 frontend origins); set
+      VC_ALLOWED_ORIGIN_REGEX to opt back into a broader set.
+    """
+    if regex_raw is not None:
+        return regex_raw.strip() or None
+    return _DEFAULT_ORIGIN_REGEX if auth_token else None
+
+
+ALLOWED_ORIGIN_REGEX: str | None = _resolve_origin_regex(
+    os.getenv("VC_ALLOWED_ORIGIN_REGEX"), AUTH_TOKEN)
 _ORIGIN_RE = re.compile(ALLOWED_ORIGIN_REGEX) if ALLOWED_ORIGIN_REGEX else None
 
 
