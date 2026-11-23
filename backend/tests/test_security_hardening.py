@@ -80,6 +80,40 @@ class ReadTimelineHandleGuard(unittest.TestCase):
             find.assert_not_called()
 
 
+class OriginAuthorizationBoundary(unittest.TestCase):
+    """CSRF->RCE regression: in the default token-less mode the broad LAN /
+    any-localhost-port regex must NOT by itself authorize a side-effecting
+    browser request — only the exact trusted frontend origins may. The regex is
+    honored for authorization only when a token is also required (network mode).
+    """
+
+    FRONTEND = "http://localhost:3000"          # exact, in ALLOWED_ORIGINS
+    OTHER_LOCAL_PORT = "http://localhost:8080"   # regex-only match
+    LAN_DEVICE = "http://192.168.1.50"           # regex-only match
+
+    def test_tokenless_mode_rejects_regex_only_origins(self):
+        with mock.patch.object(config, "AUTH_TOKEN", ""):
+            self.assertTrue(config.origin_allowed_for_request(self.FRONTEND))
+            self.assertFalse(config.origin_allowed_for_request(self.OTHER_LOCAL_PORT))
+            self.assertFalse(config.origin_allowed_for_request(self.LAN_DEVICE))
+            self.assertFalse(config.origin_allowed_for_request(None))
+            self.assertFalse(config.origin_allowed_for_request(""))
+
+    def test_token_mode_honors_lan_regex(self):
+        # With a token configured the token is required independently, so the
+        # convenience LAN regex may authorize the Origin.
+        with mock.patch.object(config, "AUTH_TOKEN", "s3cret"):
+            self.assertTrue(config.origin_allowed_for_request(self.FRONTEND))
+            self.assertTrue(config.origin_allowed_for_request(self.OTHER_LOCAL_PORT))
+            self.assertTrue(config.origin_allowed_for_request(self.LAN_DEVICE))
+
+    def test_raw_origin_allowed_still_matches_regex(self):
+        # The underlying origin_allowed (used for CORS response sharing) is
+        # unchanged — it still matches the broad regex regardless of token.
+        self.assertTrue(config.origin_allowed(self.OTHER_LOCAL_PORT))
+        self.assertTrue(config.origin_allowed(self.LAN_DEVICE))
+
+
 class MintHostAllowlist(unittest.TestCase):
     def test_openai_host_allowed(self):
         main._assert_allowed_mint_host("https://api.openai.com/v1/realtime/client_secrets")
