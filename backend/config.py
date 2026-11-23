@@ -224,8 +224,11 @@ ALLOWED_ORIGINS: list[str] = _default_allowed_origins()
 
 # Private-LAN origins (any port) are allowed by default so the phone/laptop can
 # reach the backend over the LAN in network mode — mirrors next.config.mjs's
-# allowedDevOrigins. The token is still required there, so this regex is a
-# convenience for legitimate same-network devices, not the security boundary.
+# allowedDevOrigins. This broad regex is only a safe *authorization* boundary
+# when a token is additionally required (network mode); in the default
+# token-less loopback mode it must NOT by itself authorize a side-effecting
+# browser request, or any page on an allowlisted LAN/other-localhost-port origin
+# could drive the backend cross-origin (see origin_allowed_for_request).
 # Override or disable with VC_ALLOWED_ORIGIN_REGEX (set it empty to disable).
 _DEFAULT_ORIGIN_REGEX = (
     r"^https?://("
@@ -253,3 +256,27 @@ def origin_allowed(origin: str | None) -> bool:
     # fullmatch (not match) so a trailing newline / extra suffix can't sneak past
     # the `$` anchor.
     return bool(_ORIGIN_RE and _ORIGIN_RE.fullmatch(origin))
+
+
+def origin_allowed_for_request(origin: str | None) -> bool:
+    """Authorization-time Origin check for side-effecting browser requests.
+
+    The broad private-LAN / any-localhost-port regex (``origin_allowed``) is only
+    a safe authorization boundary when a token is *also* required (network mode).
+    In the default token-less loopback mode there is no token, so that regex
+    would be the *sole* CSRF boundary — and it trusts origins an attacker can
+    control (any other localhost port, any RFC1918 LAN device). A malicious page
+    on such an origin could otherwise drive /tools/execute and the terminal
+    WebSocket cross-origin, i.e. CSRF -> RCE.
+
+    So: when ``AUTH_TOKEN`` is unset, authorize only the *exact* trusted frontend
+    origins (``ALLOWED_ORIGINS``); the regex is ignored for authorization. When a
+    token is configured, the regex may be honored because the token is checked
+    independently for every request. An empty Origin (same-origin Next proxy /
+    native clients) returns False here; callers skip the check when no Origin is
+    present."""
+    if not origin:
+        return False
+    if AUTH_TOKEN:
+        return origin_allowed(origin)
+    return origin in ALLOWED_ORIGINS
